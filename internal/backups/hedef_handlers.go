@@ -5,7 +5,9 @@ package backups
 // (main.go'da bağlanır); sahip_tur='kok', sahip_id=0.
 //
 //	GET    /api/v1/admin/backups/hedefler                    -> hedef listesi (SIRSIZ)
-//	POST   /api/v1/admin/backups/hedefler/drive              -> Drive hedefi ekle (client_id/secret, klasör)
+//	GET    /api/v1/admin/backups/hedefler/ortak-istemci      -> {"ortak_istemci": bool} (ortak Google istemcisi hazır mı)
+//	POST   /api/v1/admin/backups/hedefler/drive              -> Drive hedefi ekle (client_id/secret İSTEĞE BAĞLI;
+//	                                                            boşsa ortak istemci, yoksa 409; klasör)
 //	DELETE /api/v1/admin/backups/hedefler/{id}               -> sil (uzak kopya kaydı varsa 409; jeton iptal edilir)
 //	POST   /api/v1/admin/backups/hedefler/{id}/yetki-baslat  -> OAuth cihaz kodu al (kod + google.com/device)
 //	POST   /api/v1/admin/backups/hedefler/{id}/yetki-sorgu   -> kullanıcı onayladı mı? (onaylandıysa jeton şifreli saklanır)
@@ -80,7 +82,8 @@ type HedefOzet struct {
 	Ad            string `json:"ad"`
 	Tur           string `json:"tur"`
 	Aktif         bool   `json:"aktif"`
-	ClientID      string `json:"client_id,omitempty"`
+	ClientID      string `json:"client_id,omitempty"` // ortak istemcide MASKELİ (ilk 8 karakter + …)
+	Istemci       string `json:"istemci"`             // "ortak" | "kendi"
 	Klasor        string `json:"klasor,omitempty"`
 	Durum         string `json:"durum"`
 	YetkiVar      bool   `json:"yetki_var"`
@@ -210,9 +213,14 @@ func (s *hedefSatir) ozet() HedefOzet {
 	var a struct {
 		ClientID string `json:"client_id"`
 		Klasor   string `json:"klasor"`
+		Istemci  string `json:"istemci"`
 	}
 	_ = json.Unmarshal(s.ayar, &a)
-	o.ClientID, o.Klasor = a.ClientID, a.Klasor
+	o.ClientID, o.Klasor, o.Istemci = a.ClientID, a.Klasor, "kendi"
+	ortak := a.Istemci == gdrive.IstemciOrtak
+	if ortak {
+		o.Istemci, o.ClientID = "ortak", gdrive.MaskeID(a.ClientID)
+	}
 	if m, err := s.sirlariAc(); err == nil {
 		o.YetkiVar = strings.TrimSpace(m[gdrive.SirYenileme]) != ""
 	}
@@ -222,7 +230,16 @@ func (s *hedefSatir) ozet() HedefOzet {
 	case o.Durum == "":
 		o.Durum = hedefDurumBagli
 	}
-	if k := hedef.Kategori(s.hataKat); k.Gecerli() && s.hataKat != "" {
+	if ortak && o.YetkiVar {
+		// Ortak istemci kimliği değiştiyse eski jeton geçersiz: sessiz hata değil,
+		// açık "yeniden yetkilendirme gerekli". Ortak istemci hiç yoksa hata.
+		if k, err := gdrive.OrtakIstemci(); err != nil {
+			o.Durum, o.HataAciklama = hedefDurumHata, "Ortak Google istemcisi şu an kullanılamıyor"
+		} else if k.ClientID != a.ClientID {
+			o.Durum, o.HataKategori = hedefDurumYetkiGerekli, string(hedef.KategoriKimlik)
+		}
+	}
+	if k := hedef.Kategori(o.HataKategori); k.Gecerli() && o.HataKategori != "" {
 		o.HataAciklama = k.Aciklama()
 	}
 	return o
@@ -281,17 +298,31 @@ func (h *Handlers) HedefDriveEkle(w http.ResponseWriter, r *http.Request) {
 	if g.Klasor == "" {
 		g.Klasor = gdrive.VarsayilanKlasor
 	}
+	// İstemci verilmediyse ORTAK (GirginOS'a ait) istemci kullanılır; secret satıra yazılmaz.
+	ortak := g.ClientID == "" && g.ClientSecret == ""
+	ortakID := ""
 	switch {
 	case !hedefAdiGecerli(g.Ad):
 		httpx.WriteError(w, http.StatusBadRequest, "hedef adı 1-64 karakter olmalı")
 		return
+	case (g.ClientID == "") != (g.ClientSecret == ""):
+		httpx.WriteError(w, http.StatusBadRequest, "Client ID ve Client Secret birlikte girilmeli (ya da ikisini de boş bırakın)")
+		return
+	case ortak:
+		k, err := gdrive.OrtakIstemci()
+		if err != nil {
+			httpx.WriteError(w, http.StatusConflict, err.Error())
+			return
+		}
+		ortakID = k.ClientID
 	case !gdrive.ClientIDGecerli(g.ClientID):
 		httpx.WriteError(w, http.StatusBadRequest, "Client ID biçimi geçersiz (…apps.googleusercontent.com olmalı)")
 		return
 	case !gdrive.ClientSecretGecerli(g.ClientSecret):
 		httpx.WriteError(w, http.StatusBadRequest, "Client Secret biçimi geçersiz")
 		return
-	case !gdrive.KlasorAdiGecerli(g.Klasor):
+	}
+	if !gdrive.KlasorAdiGecerli(g.Klasor) {
 		httpx.WriteError(w, http.StatusBadRequest, "klasör adı geçersiz (\"/\" ve kontrol karakteri olamaz, en çok 100 karakter)")
 		return
 	}
@@ -300,7 +331,13 @@ func (h *Handlers) HedefDriveEkle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "şifreleme anahtarı hazır değil; kimlik bilgileri güvenle saklanamaz")
 		return
 	}
-	ayar, _ := json.Marshal(map[string]string{"client_id": g.ClientID, "klasor": g.Klasor})
+	ayarMap := map[string]string{"client_id": g.ClientID, "klasor": g.Klasor}
+	sirMap := map[string]string{gdrive.SirClientSecret: g.ClientSecret}
+	if ortak {
+		ayarMap["client_id"], ayarMap["istemci"] = ortakID, gdrive.IstemciOrtak
+		sirMap = map[string]string{} // ortak secret satıra YAZILMAZ
+	}
+	ayar, _ := json.Marshal(ayarMap)
 	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "hedef eklenemedi")
@@ -320,7 +357,7 @@ func (h *Handlers) HedefDriveEkle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ := res.LastInsertId()
-	if err := hedefSirlariYaz(r.Context(), tx, id, map[string]string{gdrive.SirClientSecret: g.ClientSecret}); err != nil {
+	if err := hedefSirlariYaz(r.Context(), tx, id, sirMap); err != nil {
 		log.Printf("yedek hedef: sırlar yazılamadı: %v", err)
 		httpx.WriteError(w, http.StatusServiceUnavailable, "kimlik bilgileri şifreli saklanamadı")
 		return
@@ -329,7 +366,11 @@ func (h *Handlers) HedefDriveEkle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "hedef eklenemedi")
 		return
 	}
-	hedefDenetimYaz(h.DB, r, "yedek.hedef.ekle", g.Ad, "Google Drive hedefi eklendi", true)
+	if ortak {
+		hedefDenetimYaz(h.DB, r, "yedek.hedef.ekle", g.Ad, "Google Drive hedefi eklendi (ortak istemci)", true)
+	} else {
+		hedefDenetimYaz(h.DB, r, "yedek.hedef.ekle", g.Ad, "Google Drive hedefi eklendi", true)
+	}
 	s, _ := hedefTara(h.DB.QueryRowContext(r.Context(), hedefSecim+` AND id=?`, id))
 	if s == nil {
 		httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "id": id})
@@ -347,6 +388,14 @@ func (s *hedefSatir) kimlik() (gdrive.Kimlik, map[string]string, error) {
 	var a gdrive.Ayar
 	if err := json.Unmarshal(s.ayar, &a); err != nil {
 		return gdrive.Kimlik{}, nil, errors.New("ayar okunamadı")
+	}
+	if a.Istemci == gdrive.IstemciOrtak {
+		// Kimlik çalışma anında ortak kaynaktan çözülür (secret satırda yok).
+		k, err := gdrive.OrtakIstemci()
+		if err != nil {
+			return gdrive.Kimlik{}, nil, err
+		}
+		return k, m, nil
 	}
 	return gdrive.Kimlik{ClientID: a.ClientID, ClientSecret: m[gdrive.SirClientSecret]}, m, nil
 }
@@ -384,6 +433,31 @@ func (h *Handlers) HedefSil(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func ortakSatir(s *hedefSatir) bool {
+	var a gdrive.Ayar
+	return json.Unmarshal(s.ayar, &a) == nil && a.Istemci == gdrive.IstemciOrtak
+}
+
+func ortakHatasi(err error) bool {
+	return errors.Is(err, gdrive.ErrOrtakYok) || errors.Is(err, gdrive.ErrOrtakGuvensiz) || errors.Is(err, gdrive.ErrOrtakBozuk)
+}
+
+// kimlikHatasiYaz — kimlik çözülemedi: ortak istemci sorunuysa net (sabit) mesaj,
+// değilse eski genel mesaj. Mesajlar sır içermez.
+func kimlikHatasiYaz(w http.ResponseWriter, err error) {
+	if ortakHatasi(err) {
+		httpx.WriteError(w, http.StatusConflict, err.Error())
+		return
+	}
+	httpx.WriteError(w, http.StatusConflict, "hedefin kimlik bilgileri okunamadı; hedefi silip yeniden ekleyin")
+}
+
+// HedefOrtakIstemci — GET /admin/backups/hedefler/ortak-istemci: ortak Google
+// istemcisi hazır mı? YALNIZ bool (kimlik/secret dönmez).
+func (h *Handlers) HedefOrtakIstemci(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ortak_istemci": gdrive.OrtakHazir()})
+}
+
 // hedefHataYaniti — kullanıcıya yalnız kategori + sabit Türkçe açıklama; ham metin günlükte.
 func hedefHataYaniti(w http.ResponseWriter, islem string, id int64, err error) {
 	var he *hedef.Hata
@@ -404,7 +478,11 @@ func (h *Handlers) HedefYetkiBaslat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k, _, err := s.kimlik()
-	if err != nil || !gdrive.ClientSecretGecerli(k.ClientSecret) {
+	if err != nil {
+		kimlikHatasiYaz(w, err)
+		return
+	}
+	if !gdrive.ClientSecretGecerli(k.ClientSecret) {
 		httpx.WriteError(w, http.StatusConflict, "hedefin kimlik bilgileri okunamadı; hedefi silip yeniden ekleyin")
 		return
 	}
@@ -457,7 +535,7 @@ func (h *Handlers) HedefYetkiSorgu(w http.ResponseWriter, r *http.Request) {
 
 	k, m, err := s.kimlik()
 	if err != nil {
-		httpx.WriteError(w, http.StatusConflict, "hedefin kimlik bilgileri okunamadı; hedefi silip yeniden ekleyin")
+		kimlikHatasiYaz(w, err)
 		return
 	}
 	ctx, iptal := context.WithTimeout(r.Context(), 60*time.Second)
@@ -483,6 +561,16 @@ func (h *Handlers) HedefYetkiSorgu(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusServiceUnavailable, "jeton şifreli saklanamadı")
 			return
 		}
+		if ortakSatir(s) {
+			// Jeton bu ortak istemci kimliğiyle alındı: kimliği satıra sabitle
+			// (sonradan ortak kimlik değişirse "yeniden yetkilendirme gerekli").
+			var am map[string]any
+			if json.Unmarshal(s.ayar, &am) == nil {
+				am["client_id"] = k.ClientID
+				nb, _ := json.Marshal(am)
+				_, _ = h.DB.ExecContext(r.Context(), `UPDATE backup_hedefler SET ayar=? WHERE id=?`, string(nb), s.id)
+			}
+		}
 		_, _ = h.DB.ExecContext(r.Context(), `UPDATE backup_hedefler SET son_durum=?, hata_kategori='' WHERE id=?`, hedefDurumBagli, s.id)
 		cihazBekleyenSil(s.id)
 		hedefDenetimYaz(h.DB, r, "yedek.hedef.yetkilendi", s.ad, "Google Drive yetkilendirildi", true)
@@ -498,12 +586,18 @@ func (h *Handlers) HedefBaglantiKes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k, m, err := s.kimlik()
+	ortakYok := false
+	if err != nil && ortakHatasi(err) {
+		// Ortak istemci şu an çözülemiyor: Google'da iptal denenemez ama sunucudaki jeton yine silinir.
+		ortakYok = true
+		m, err = s.sirlariAc()
+	}
 	if err != nil {
 		httpx.WriteError(w, http.StatusConflict, "hedefin kimlik bilgileri okunamadı; hedefi silip yeniden ekleyin")
 		return
 	}
-	iptalBasarili := true
-	if jeton := strings.TrimSpace(m[gdrive.SirYenileme]); jeton != "" {
+	iptalBasarili := !ortakYok
+	if jeton := strings.TrimSpace(m[gdrive.SirYenileme]); jeton != "" && !ortakYok {
 		ctx, iptal := context.WithTimeout(r.Context(), 30*time.Second)
 		if err := driveJetonIptal(ctx, k, hedef.KurSecenek{}, jeton); err != nil {
 			iptalBasarili = false

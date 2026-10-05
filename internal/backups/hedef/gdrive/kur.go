@@ -28,6 +28,10 @@ type Ayar struct {
 	ClientID string `json:"client_id"`
 	// Klasor — Drive kökünde açılacak yedek klasörünün adı.
 	Klasor string `json:"klasor,omitempty"`
+	// Istemci — "" (kendi istemci: client_secret sırlarda) ya da IstemciOrtak
+	// (ortak istemci: secret ASLA satıra yazılmaz, çalışma anında çözülür;
+	// ClientID = yetkilendirmenin yapıldığı ortak istemci kimliği).
+	Istemci string `json:"istemci,omitempty"`
 }
 
 // Sır anahtarları (backup_hedefler.sirlar çözülmüş haritası).
@@ -86,6 +90,9 @@ func AyarCoz(ham json.RawMessage) (Ayar, error) {
 	if !ClientIDGecerli(a.ClientID) {
 		return Ayar{}, hedef.YeniHata(hedef.KategoriKimlik, "kur", errors.New("drive: client_id geçersiz"))
 	}
+	if a.Istemci != "" && a.Istemci != IstemciOrtak {
+		return Ayar{}, hedef.YeniHata(hedef.KategoriBilinmeyen, "kur", errors.New("drive: istemci türü geçersiz"))
+	}
 	if a.Klasor == "" {
 		a.Klasor = VarsayilanKlasor
 	}
@@ -102,6 +109,18 @@ func Yeni(ayar json.RawMessage, sirlar map[string]string, sec hedef.KurSecenek, 
 		return nil, err
 	}
 	k := Kimlik{ClientID: a.ClientID, ClientSecret: sirlar[SirClientSecret]}
+	if a.Istemci == IstemciOrtak {
+		ok, err := OrtakIstemci()
+		if err != nil {
+			return nil, hedef.YeniHata(hedef.KategoriKimlik, "kur", err)
+		}
+		if ok.ClientID != a.ClientID {
+			// Ortak istemci kimliği değişti: eski yenileme jetonu yeni istemciyle
+			// çalışmaz → sessiz hata yerine açık "yeniden yetkilendir" (kimlik).
+			return nil, hedef.YeniHata(hedef.KategoriKimlik, "kur", errors.New("drive: ortak istemci değişti, yeniden yetkilendirme gerekli"), ok.ClientSecret)
+		}
+		k = ok
+	}
 	if !ClientSecretGecerli(k.ClientSecret) {
 		return nil, hedef.YeniHata(hedef.KategoriKimlik, "kur", errors.New("drive: client_secret eksik ya da geçersiz"))
 	}

@@ -8,8 +8,9 @@ import { I, Ikon } from '@/components/Ikon'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import ConfirmDialog from '@/components/ConfirmDialog'
 
-// Google Drive uzak yedek hedefi (YALNIZ kök): kendi Google Cloud OAuth istemcinizle
-// (cihaz kodu akışı, yalnız drive.file izni) bağlanır. Sırlar (client secret, yenileme
+// Google Drive uzak yedek hedefi (YALNIZ kök): varsayılan olarak GirginOS'un ORTAK OAuth
+// istemcisiyle tek düğmeyle ("Google ile bağlan") ya da "Gelişmiş"ten kendi Google Cloud
+// istemcinizle (cihaz kodu akışı, yalnız drive.file izni) bağlanır. Sırlar (client secret, yenileme
 // jetonu) sunucuda şifreli durur ve bu ekrana ASLA geri dönmez.
 
 const DRIVE_EN: Record<string, string> = {
@@ -29,6 +30,12 @@ const DRIVE_EN: Record<string, string> = {
   'Kimlik bilgileri → OAuth istemci kimliği oluştur → uygulama türü “TV’ler ve Sınırlı Girişli Cihazlar”.':
     'Credentials → Create OAuth client ID → application type “TVs and Limited Input devices”.',
   'Client ID ve Client Secret değerlerini aşağıya girin, sonra “Yetkilendir”e basın.': 'Enter the Client ID and Client Secret below, then press “Authorize”.',
+  'Google hesabınızla bağlanın; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.':
+    'Connect with your Google account; it can only access files the app created (drive.file). Backups are encrypted before upload.',
+  'Google ile bağlan': 'Connect with Google',
+  'Bağlanıyor…': 'Connecting…',
+  'Gelişmiş: kendi Google istemcimi kullan': 'Advanced: use my own Google client',
+  'Kendi Google istemcimi kullan (Client ID / Secret)': 'Use my own Google client (Client ID / Secret)',
   'Hedefler alınamadı': 'Could not load targets',
   'Hedef Adı': 'Target name',
   'Client ID': 'Client ID',
@@ -105,6 +112,7 @@ type Hedef = {
   yetki_bekliyor: boolean
   hata_kategori?: string
   hata_aciklama?: string
+  istemci?: string
   son_deneme?: string
   son_basari?: string
 }
@@ -134,6 +142,9 @@ export default function YedekGoogleDrive() {
   const [uyari, setUyari] = useState<string | null>(null)
   const [ekleniyor, setEkleniyor] = useState(false)
   const [form, setForm] = useState({ ad: '', client_id: '', client_secret: '', klasor: '' })
+  const [ortak, setOrtak] = useState(false) // ortak (GirginOS) Google istemcisi hazır mı
+  const [kendiIstemci, setKendiIstemci] = useState(false) // Gelişmiş: kendi istemcimi kullan
+  const kendi = !ortak || kendiIstemci
   const [yetki, setYetki] = useState<Yetki | null>(null)
   const [yetkiMesaj, setYetkiMesaj] = useState<string | null>(null)
   const [mesgul, setMesgul] = useState<string | null>(null) // "<islem>:<id>"
@@ -143,6 +154,10 @@ export default function YedekGoogleDrive() {
     try {
       const { data } = await api.get<Hedef[]>('/admin/backups/hedefler')
       setListe(data.filter(h => h.tur === 'drive'))
+      try {
+        const { data: o } = await api.get<{ ortak_istemci: boolean }>('/admin/backups/hedefler/ortak-istemci')
+        setOrtak(!!o.ortak_istemci)
+      } catch { setOrtak(false) }
     } catch (e) {
       setHata(apiHata(e, cevir('Hedefler alınamadı')))
     }
@@ -186,9 +201,26 @@ export default function YedekGoogleDrive() {
 
   function temizle() { setHata(null); setBasari(null); setUyari(null) }
 
+  // Ortak istemci: ad otomatik ("Google Drive", doluysa "Google Drive 2"...); eklenir eklenmez
+  // cihaz kodu akışı başlar. Kendi istemci: Client ID/Secret ile eklenir, sonra "Yetkilendir".
+  function otomatikAd(): string {
+    const var_ = new Set((liste ?? []).map(h => h.ad))
+    if (!var_.has('Google Drive')) return 'Google Drive'
+    for (let n = 2; n < 100; n++) if (!var_.has(`Google Drive ${n}`)) return `Google Drive ${n}`
+    return 'Google Drive'
+  }
+
   async function ekle() {
     temizle(); setEkleniyor(true)
     try {
+      if (!kendi) {
+        const { data } = await api.post<Hedef>('/admin/backups/hedefler/drive',
+          { ad: form.ad.trim() || otomatikAd(), klasor: form.klasor.trim() })
+        setForm({ ad: '', client_id: '', client_secret: '', klasor: '' })
+        await yukle()
+        if (data?.id) await yetkilendir({ id: data.id })
+        return
+      }
       await api.post('/admin/backups/hedefler/drive', form)
       setForm({ ad: '', client_id: '', client_secret: '', klasor: '' })
       setBasari(cevir('Hedef eklendi. Şimdi “Yetkilendir”e basın.'))
@@ -200,7 +232,7 @@ export default function YedekGoogleDrive() {
     }
   }
 
-  async function yetkilendir(h: Hedef) {
+  async function yetkilendir(h: Pick<Hedef, 'id'>) {
     temizle(); setYetkiMesaj(null); setMesgul('yetki:' + h.id)
     try {
       const { data } = await api.post(`/admin/backups/hedefler/${h.id}/yetki-baslat`)
@@ -268,20 +300,22 @@ export default function YedekGoogleDrive() {
 
       <div className="p-4 space-y-4">
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          {cevir('Kendi Google Cloud OAuth istemcinizle bağlanır; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.')}
+          {kendi
+            ? cevir('Kendi Google Cloud OAuth istemcinizle bağlanır; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.')
+            : cevir('Google hesabınızla bağlanın; yalnızca uygulamanın oluşturduğu dosyalara erişir (drive.file). Yedekler yüklenmeden önce şifrelenir.')}
           {' '}{cevir('Bu sürümde Drive hedefi tanımlanır, yetkilendirilir ve sınanır; yedeklerin otomatik gönderimi uzak kopya kuyruğu etkinleştirilince başlar.')}
         </p>
 
-        <UyariKutusu ton="uyari" baslik={cevir('Yenileme jetonu 7 günde dolar')} kucuk>
+        {kendi && <UyariKutusu ton="uyari" baslik={cevir('Yenileme jetonu 7 günde dolar')} kucuk>
           {cevir('Google OAuth uygulamanız “Test” durumundaysa yenileme jetonu 7 gün sonra geçersiz olur ve hedefi yeniden yetkilendirmeniz gerekir. Kalıcı kullanım için OAuth onay ekranını “Üretim”e (In production) alın.')}
-        </UyariKutusu>
+        </UyariKutusu>}
 
         {hata && <UyariKutusu ton="tehlike">{hata}</UyariKutusu>}
         {uyari && <UyariKutusu ton="uyari">{uyari}</UyariKutusu>}
         {basari && <UyariKutusu ton="basari">{basari}</UyariKutusu>}
         {yetkiMesaj && <UyariKutusu ton="uyari">{yetkiMesaj}</UyariKutusu>}
 
-        <details className="text-xs text-slate-600 dark:text-slate-300">
+        {kendi && <details className="text-xs text-slate-600 dark:text-slate-300">
           <summary className="cursor-pointer font-medium">{cevir('Kurulum adımları')}</summary>
           <ol className="mt-2 ml-5 list-decimal space-y-1">
             <li>{cevir('Google Cloud Console’da bir proje oluşturun (ya da var olanı seçin).')}</li>
@@ -290,7 +324,7 @@ export default function YedekGoogleDrive() {
             <li>{cevir('Kimlik bilgileri → OAuth istemci kimliği oluştur → uygulama türü “TV’ler ve Sınırlı Girişli Cihazlar”.')}</li>
             <li>{cevir('Client ID ve Client Secret değerlerini aşağıya girin, sonra “Yetkilendir”e basın.')}</li>
           </ol>
-        </details>
+        </details>}
 
         {/* Yetkilendirme paneli: kod + adres; onayı otomatik algılar */}
         {yetki && (
@@ -325,7 +359,7 @@ export default function YedekGoogleDrive() {
                 <DurumRozeti h={h} />
                 <span className="text-xs text-slate-500 dark:text-slate-400">
                   {cevir('Klasör')}: <strong>{h.klasor}</strong>
-                  {h.client_id ? <> · <span className="font-mono">{h.client_id.slice(0, 14)}…</span></> : null}
+                  {h.istemci === 'ortak' ? null : h.client_id ? <> · <span className="font-mono">{h.client_id.slice(0, 14)}…</span></> : null}
                 </span>
               </div>
               {(h.son_deneme || h.son_basari) && (
@@ -361,36 +395,73 @@ export default function YedekGoogleDrive() {
           ))}
         </div>
 
-        {/* Ekleme formu */}
-        <div className="grid sm:grid-cols-2 gap-3">
+        {/* Ekleme: ortak istemci varsa tek düğme; alanlar "Gelişmiş"te */}
+        {!kendi && (
           <div>
-            <label className={etiket} htmlFor="gd-ad">{cevir('Hedef Adı')}</label>
-            <input id="gd-ad" className={kutu} value={form.ad} maxLength={64}
-              onChange={e => setForm(f => ({ ...f, ad: e.target.value }))} />
+            <Button color="primary" ikon={I.bulut} onClick={ekle} yukleniyor={ekleniyor}>
+              {ekleniyor ? cevir('Bağlanıyor…') : cevir('Google ile bağlan')}
+            </Button>
           </div>
+        )}
+        {kendi && (
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className={etiket} htmlFor="gd-ad">{cevir('Hedef Adı')}</label>
+              <input id="gd-ad" className={kutu} value={form.ad} maxLength={64}
+                onChange={e => setForm(f => ({ ...f, ad: e.target.value }))} />
+            </div>
+            <div>
+              <label className={etiket} htmlFor="gd-klasor">{cevir('Drive klasörü')}</label>
+              <input id="gd-klasor" className={kutu} value={form.klasor} placeholder="GirginOSPanel Yedek" maxLength={100}
+                onChange={e => setForm(f => ({ ...f, klasor: e.target.value }))} />
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{cevir('Drive kökünde açılacak klasörün adı')}</p>
+            </div>
+            <div>
+              <label className={etiket} htmlFor="gd-cid">{cevir('Client ID')}</label>
+              <input id="gd-cid" className={kutu} value={form.client_id} autoComplete="off" placeholder="…apps.googleusercontent.com"
+                onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))} />
+            </div>
+            <div>
+              <label className={etiket} htmlFor="gd-sec">{cevir('Client Secret')}</label>
+              <input id="gd-sec" type="password" className={kutu} value={form.client_secret} autoComplete="new-password"
+                onChange={e => setForm(f => ({ ...f, client_secret: e.target.value }))} />
+            </div>
+          </div>
+        )}
+        {kendi && (
           <div>
-            <label className={etiket} htmlFor="gd-klasor">{cevir('Drive klasörü')}</label>
-            <input id="gd-klasor" className={kutu} value={form.klasor} placeholder="GirginOSPanel Yedek" maxLength={100}
-              onChange={e => setForm(f => ({ ...f, klasor: e.target.value }))} />
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{cevir('Drive kökünde açılacak klasörün adı')}</p>
+            <Button color="primary" ikon={I.arti} onClick={ekle} yukleniyor={ekleniyor}
+              disabled={!form.ad.trim() || !form.client_id.trim() || !form.client_secret.trim()}>
+              {ekleniyor ? cevir('Ekleniyor…') : cevir('Hedef Ekle')}
+            </Button>
           </div>
-          <div>
-            <label className={etiket} htmlFor="gd-cid">{cevir('Client ID')}</label>
-            <input id="gd-cid" className={kutu} value={form.client_id} autoComplete="off" placeholder="…apps.googleusercontent.com"
-              onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))} />
-          </div>
-          <div>
-            <label className={etiket} htmlFor="gd-sec">{cevir('Client Secret')}</label>
-            <input id="gd-sec" type="password" className={kutu} value={form.client_secret} autoComplete="new-password"
-              onChange={e => setForm(f => ({ ...f, client_secret: e.target.value }))} />
-          </div>
-        </div>
-        <div>
-          <Button color="primary" ikon={I.arti} onClick={ekle} yukleniyor={ekleniyor}
-            disabled={!form.ad.trim() || !form.client_id.trim() || !form.client_secret.trim()}>
-            {ekleniyor ? cevir('Ekleniyor…') : cevir('Hedef Ekle')}
-          </Button>
-        </div>
+        )}
+
+        {ortak && (
+          <details className="text-xs text-slate-600 dark:text-slate-300" open={kendiIstemci}>
+            <summary className="cursor-pointer font-medium">{cevir('Gelişmiş: kendi Google istemcimi kullan')}</summary>
+            <div className="mt-2 space-y-3">
+              {!kendiIstemci && (
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={etiket} htmlFor="gd-ad2">{cevir('Hedef Adı')}</label>
+                    <input id="gd-ad2" className={kutu} value={form.ad} maxLength={64} placeholder="Google Drive"
+                      onChange={e => setForm(f => ({ ...f, ad: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={etiket} htmlFor="gd-klasor2">{cevir('Drive klasörü')}</label>
+                    <input id="gd-klasor2" className={kutu} value={form.klasor} placeholder="GirginOSPanel Yedek" maxLength={100}
+                      onChange={e => setForm(f => ({ ...f, klasor: e.target.value }))} />
+                  </div>
+                </div>
+              )}
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={kendiIstemci} onChange={e => setKendiIstemci(e.target.checked)} />
+                {cevir('Kendi Google istemcimi kullan (Client ID / Secret)')}
+              </label>
+            </div>
+          </details>
+        )}
       </div>
 
       <ConfirmDialog acik={kesOnay !== null} baslik={cevir('Bağlantıyı kes?')}

@@ -138,6 +138,7 @@ func yeniHedefOrtam(t *testing.T) *hedefOrtam {
 	h := &Handlers{DB: db}
 	r := chi.NewRouter()
 	r.Get("/hedefler", h.HedefListe)
+	r.Get("/hedefler/ortak-istemci", h.HedefOrtakIstemci)
 	r.Post("/hedefler/drive", h.HedefDriveEkle)
 	r.Delete("/hedefler/{id}", h.HedefSil)
 	r.Post("/hedefler/{id}/yetki-baslat", h.HedefYetkiBaslat)

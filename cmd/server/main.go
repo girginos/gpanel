@@ -1020,6 +1020,7 @@ func main() {
 				// Uzak yedek hedefleri (Google Drive). Sırlar şifreli; API anahtarına KAPALI
 				// (apianahtar.Rotalar'da yok → varsayılan reddet).
 				r.With(middleware.AdminOnly).Get("/admin/backups/hedefler", backupsH.HedefListe)
+				r.With(middleware.AdminOnly).Get("/admin/backups/hedefler/ortak-istemci", backupsH.HedefOrtakIstemci)
 				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/drive", backupsH.HedefDriveEkle)
 				r.With(middleware.AdminOnly).Delete("/admin/backups/hedefler/{id}", backupsH.HedefSil)
 				r.With(middleware.AdminOnly).Post("/admin/backups/hedefler/{id}/yetki-baslat", backupsH.HedefYetkiBaslat)

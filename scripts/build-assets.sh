@@ -30,8 +30,16 @@ echo "== girginospanel-server derleniyor (GOAMD64=$GOAMD64, CGO_ENABLED=$CGO_ENA
 # Verilmezse surum.go varsayilani (0.3.0-f3) kalir (dev / dev-kanali).
 # 🔴 ONCE bu adim ldflags'siz derleyip girginospanel-paketle'nin satir-105
 # ldflags binary'sini EZIYORDU -> yayinlanan binary surumu daima f3 dusuyordu.
-if [ -n "${GOSP_SURUM:-}" ]; then
-  go build -trimpath -ldflags "-X girginospanel/internal/surum.Panel=$GOSP_SURUM" -o assets/girginospanel-server ./cmd/server
+# Ortak Google Drive OAuth istemcisi (isteğe bağlı): GOSP_GDRIVE_CLIENT_ID + GOSP_GDRIVE_CLIENT_SECRET
+# verilirse panel ikilisine GÖMÜLÜR ("Google ile bağlan" tek düğme). Yoksa boş geçilir (derleme
+# kırılmaz; panel /etc/girginospanel/gdrive-istemci.json'a bakar, o da yoksa kullanıcı kendi istemcisini girer).
+SRV_LDF=""
+[ -n "${GOSP_SURUM:-}" ] && SRV_LDF="-X girginospanel/internal/surum.Panel=$GOSP_SURUM"
+if [ -n "${GOSP_GDRIVE_CLIENT_ID:-}" ] && [ -n "${GOSP_GDRIVE_CLIENT_SECRET:-}" ]; then
+  SRV_LDF="$SRV_LDF -X girginospanel/internal/backups/hedef/gdrive.GomuluClientID=$GOSP_GDRIVE_CLIENT_ID -X girginospanel/internal/backups/hedef/gdrive.GomuluClientSecret=$GOSP_GDRIVE_CLIENT_SECRET"
+fi
+if [ -n "$SRV_LDF" ]; then
+  go build -trimpath -ldflags "$SRV_LDF" -o assets/girginospanel-server ./cmd/server
 else
   go build -o assets/girginospanel-server ./cmd/server
 fi
