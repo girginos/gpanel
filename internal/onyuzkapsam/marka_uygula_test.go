@@ -64,8 +64,8 @@ func TestOzelAdres_YoklamaTemizligi(t *testing.T) {
 	src := oku(t, ozelAdresTSX)
 	for _, b := range []string{
 		"const YOKLAMA_MS = 2000",
-		"if (!isleniyor) return",   // işlem bitince yoklama durur
-		"if (!document.hidden)",    // sekme gizliyken dur
+		"if (!isleniyor) return", // işlem bitince yoklama durur
+		"setInterval(() => { if (!document.hidden) void yukle(true) }, YOKLAMA_MS)", // sekme gizliyken dur
 		"window.clearInterval(id)", // temizlik
 		"removeEventListener('visibilitychange'",
 		"if (sorguda.current) return", // istek çakışması yok
