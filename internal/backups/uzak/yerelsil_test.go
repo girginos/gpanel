@@ -672,3 +672,22 @@ func TestYerelSil_ListeSonrasiDurumDegisirseSilmeDurur(t *testing.T) {
 		t.Fatalf("silme durmalıydı: %s", donus)
 	}
 }
+
+// Yarış: ön denetimden SONRA (dosya taşınırken) geri yükleme başlarsa dosya geri konur, silinmez.
+func TestYerelSil_TasimaSonrasiKullanimdaysaGeriKonur(t *testing.T) {
+	o := yerelOrtam(t, nil)
+	yid, _ := o.gonder(1, "c_ornek", "20260825-233538")
+	yol := o.yedekYol("c_ornek", o.dosyaAdi(yid))
+	cagri := 0
+	o.isci.Mesgul = func(int64) bool { cagri++; return cagri >= 2 } // 1. çağrı ön denetim, 2. taşıma sonrası
+	s, err := o.temizle()
+	if err != nil || s.Silinen != 0 || s.Atlanan != 1 {
+		t.Fatalf("silinmemeli: %+v %v", s, err)
+	}
+	if !varMi(yol) || o.yerelYokMu(yid) {
+		t.Fatal("dosya geri konmalıydı")
+	}
+	if g, _ := filepath.Glob(yol + silinecekEki + "*"); len(g) != 0 {
+		t.Fatalf("geçici ad kalmamalı: %v", g)
+	}
+}
