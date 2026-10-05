@@ -54,6 +54,10 @@ type Yedek struct {
 	BoyutB    int64  `json:"boyut_b"`
 	Notlar    string `json:"notlar"`
 	Olusturma string `json:"olusturma"`
+	// YerelVar — dosya bu sunucuda duruyor (indir/geri yükle yerel çalışır).
+	// DriveVar — doğrulanmış Google Drive kopyası var. Mevcut="drive": yalnız Drive'da.
+	YerelVar bool `json:"yerel_var"`
+	DriveVar bool `json:"drive_var"`
 }
 
 type Handlers struct {
@@ -73,8 +77,9 @@ func (h *Handlers) lookupDomain(r *http.Request) (id int64, alanAdi, sk string, 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT id, domain_id, tip, dosya, boyut_b, notlar, DATE_FORMAT(created_at,'%Y-%m-%d %H:%i'), job_id
-		 FROM backups WHERE domain_id=? ORDER BY id DESC`, id)
+		`SELECT b.id, b.domain_id, b.tip, b.dosya, b.boyut_b, b.notlar, DATE_FORMAT(b.created_at,'%Y-%m-%d %H:%i'), b.job_id,
+		        EXISTS(SELECT 1 FROM backup_uzak_kopyalar k WHERE k.backup_id=b.id AND k.kaynak='hedef' AND k.durum='tamam')
+		 FROM backups b WHERE b.domain_id=? ORDER BY b.id DESC`, id)
 	if err != nil {
 		// 🔴 ham err.Error() musteri yanitina degil loga — DB ic detaylari sizmasin.
 		log.Printf("backups: liste okunamadı: %v", err)
@@ -99,13 +104,20 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var y Yedek
 		var jobID sql.NullInt64
-		if err := rows.Scan(&y.ID, &y.DomainID, &y.Tip, &y.Dosya, &y.BoyutB, &y.Notlar, &y.Olusturma, &jobID); err != nil {
+		var driveVar int
+		if err := rows.Scan(&y.ID, &y.DomainID, &y.Tip, &y.Dosya, &y.BoyutB, &y.Notlar, &y.Olusturma, &jobID, &driveVar); err != nil {
 			continue
 		}
+		y.DriveVar = driveVar == 1
 		y.Kaynak = yedekKaynagi(y.Tip, jobID)
 		switch {
 		case sk != "" && dosyaVar(filepath.Join(BackupRoot, sk, y.Dosya)):
 			y.Mevcut = "yerel"
+			y.YerelVar = true
+		case y.DriveVar:
+			// Yerel dosya yok, doğrulanmış Drive kopyası var ("Drive'a gönderilince sil" ya da
+			// başka bir nedenle): yedek KAYBOLMADI, yalnız Drive'da.
+			y.Mevcut = "drive"
 		case strings.Contains(y.Notlar, "[uzaga tasindi]"):
 			// 🔴 "uzak" DEĞİL "uzak_iddia".
 			//
@@ -484,7 +496,17 @@ func (h *Handlers) Download(w http.ResponseWriter, r *http.Request) {
 	abs := filepath.Join(BackupRoot, sk, dosya)
 	f, err := os.Open(abs)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		// Ham os hatası (yerel yol) istemciye GİTMEZ. Dosya yoksa durumu sade söyle.
+		if os.IsNotExist(err) {
+			if is, ok := driveYalnizIs(h.DB, dosya); ok {
+				httpx.WriteError(w, http.StatusConflict, driveYalnizMesaji(r, &driveYalnizHata{is: is}))
+				return
+			}
+			httpx.WriteError(w, http.StatusNotFound, "yedek dosyası diskte bulunamadı")
+			return
+		}
+		log.Printf("yedek indir: dosya açılamadı (domain=%d): %v", id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "yedek dosyası okunamadı")
 		return
 	}
 	defer f.Close()

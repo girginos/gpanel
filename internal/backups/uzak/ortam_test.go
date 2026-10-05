@@ -28,6 +28,7 @@ import (
 const (
 	gocYolu113 = "../../../migrations/0113_yedek_uzak_hedefler.sql"
 	gocYolu140 = "../../../migrations/0140_yedek_uzak_kopya.sql"
+	gocYolu141 = "../../../migrations/0141_yedek_yerel_sil.sql"
 )
 
 func gocUygula(t *testing.T, db *sql.DB, yol string) {
@@ -104,6 +105,7 @@ func gecicidb(t *testing.T) *sql.DB {
 			KEY ix_backup_domain (domain_id),
 			CONSTRAINT fk_backup_domain FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE
 		) ENGINE=InnoDB`,
+		`CREATE TABLE backup_jobs (id BIGINT AUTO_INCREMENT PRIMARY KEY, islem VARCHAR(16) NOT NULL DEFAULT 'yedek', durum VARCHAR(16) NOT NULL DEFAULT 'calisiyor') ENGINE=InnoDB`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)
@@ -111,6 +113,7 @@ func gecicidb(t *testing.T) *sql.DB {
 	}
 	gocUygula(t, db, gocYolu113)
 	gocUygula(t, db, gocYolu140)
+	gocUygula(t, db, gocYolu141)
 	return db
 }
 
@@ -264,6 +267,9 @@ func (o *ortam) yedek(domainID int64, sk, damga string, icerik []byte, tip strin
 	if err := os.WriteFile(filepath.Join(dir, dosya), icerik, 0o600); err != nil {
 		o.t.Fatal(err)
 	}
+	// yerel silme "en az 10 dk eski" ister: yedek 1 saat önce alınmış gibi
+	eski := time.Now().Add(-time.Hour)
+	_ = os.Chtimes(filepath.Join(dir, dosya), eski, eski)
 	h := sha256.Sum256(icerik)
 	res, err := o.db.Exec(`INSERT INTO backups (domain_id, tip, dosya, boyut_b, job_id, sha256) VALUES (?,?,?,?,?,?)`,
 		domainID, tip, dosya, len(icerik), job, hex.EncodeToString(h[:]))

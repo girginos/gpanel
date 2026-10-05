@@ -37,22 +37,26 @@ type Ayar struct {
 	SaklamaN   int    `json:"saklama_n"`
 	SaklamaGun int    `json:"saklama_gun"`
 	BantKBps   int    `json:"bant_kbps"`
+	// YerelSil — Drive kopyası doğrulanınca yerel yedek dosyasını sil (VARSAYILAN KAPALI).
+	// YerelTut — her alan adı için yerelde kalacak en yeni kök yedek sayısı (0-10).
+	YerelSil bool `json:"yerel_sil"`
+	YerelTut int  `json:"yerel_tut"`
 }
 
 // VarsayilanAyar — satır yoksa güvenli varsayılan (KAPALI).
 func VarsayilanAyar() Ayar {
-	return Ayar{Klasor: "girginospanel-yedek", SaklamaN: 7}
+	return Ayar{Klasor: "girginospanel-yedek", SaklamaN: 7, YerelTut: 1}
 }
 
 // AyarOku — ayar satırı; tablo/satır yoksa varsayılan (hata değil: göç henüz koşmamış
 // kurulumda yedek akışı etkilenmemeli).
 func AyarOku(ctx context.Context, db *sql.DB) (Ayar, error) {
 	a := VarsayilanAyar()
-	var aktif int
+	var aktif, yerelSil int
 	var hid sql.NullInt64
 	err := db.QueryRowContext(ctx,
-		`SELECT aktif, hedef_id, klasor, saklama_n, saklama_gun, bant_kbps FROM backup_uzak_kopya_ayar WHERE id=1`).
-		Scan(&aktif, &hid, &a.Klasor, &a.SaklamaN, &a.SaklamaGun, &a.BantKBps)
+		`SELECT aktif, hedef_id, klasor, saklama_n, saklama_gun, bant_kbps, yerel_sil, yerel_tut FROM backup_uzak_kopya_ayar WHERE id=1`).
+		Scan(&aktif, &hid, &a.Klasor, &a.SaklamaN, &a.SaklamaGun, &a.BantKBps, &yerelSil, &a.YerelTut)
 	if errors.Is(err, sql.ErrNoRows) {
 		return VarsayilanAyar(), nil
 	}
@@ -61,6 +65,7 @@ func AyarOku(ctx context.Context, db *sql.DB) (Ayar, error) {
 	}
 	a.Aktif = aktif == 1 && hid.Valid
 	a.HedefID = hid.Int64
+	a.YerelSil = yerelSil == 1
 	return a, nil
 }
 
@@ -84,6 +89,9 @@ func AyarDenetle(a *Ayar) error {
 	}
 	if a.BantKBps < 0 || a.BantKBps > 10_000_000 {
 		return fmt.Errorf("%w: bant sınırı 0-10000000 KiB/sn olmalı", ErrAyarGecersiz)
+	}
+	if a.YerelTut < 0 || a.YerelTut > YerelTutEnFazla {
+		return fmt.Errorf("%w: sunucuda kalacak yedek sayısı 0-%d olmalı", ErrAyarGecersiz, YerelTutEnFazla)
 	}
 	return nil
 }
@@ -118,12 +126,16 @@ func ayarKaydet(ctx context.Context, db *sql.DB, a Ayar) error {
 	if a.Aktif {
 		ak = 1
 	}
+	ys := 0
+	if a.YerelSil {
+		ys = 1
+	}
 	if _, err := db.ExecContext(ctx, `INSERT IGNORE INTO backup_uzak_kopya_ayar (id) VALUES (1)`); err != nil {
 		return err
 	}
 	_, err := db.ExecContext(ctx,
-		`UPDATE backup_uzak_kopya_ayar SET aktif=?, hedef_id=?, klasor=?, saklama_n=?, saklama_gun=?, bant_kbps=? WHERE id=1`,
-		ak, hid, a.Klasor, a.SaklamaN, a.SaklamaGun, a.BantKBps)
+		`UPDATE backup_uzak_kopya_ayar SET aktif=?, hedef_id=?, klasor=?, saklama_n=?, saklama_gun=?, bant_kbps=?, yerel_sil=?, yerel_tut=? WHERE id=1`,
+		ak, hid, a.Klasor, a.SaklamaN, a.SaklamaGun, a.BantKBps, ys, a.YerelTut)
 	return err
 }
 

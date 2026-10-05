@@ -279,7 +279,8 @@ func pruneOld(db *sql.DB, domainID int64, sk string, retention int) error {
 // yalniz restore aninda kesfetmek = veri kaybi. Proaktif tarama + bildirim sarttir.
 func verifyYedekBozulma(db *sql.DB) (int, int) {
 	rows, err := db.Query(`
-		SELECT b.id, b.domain_id, d.sistem_kullanici, b.dosya, b.sha256
+		SELECT b.id, b.domain_id, d.sistem_kullanici, b.dosya, b.sha256,
+		       EXISTS(SELECT 1 FROM backup_uzak_kopyalar k WHERE k.backup_id=b.id AND k.kaynak='hedef' AND k.durum='tamam')
 		FROM backups b
 		JOIN domains d ON d.id = b.domain_id
 		JOIN (SELECT domain_id, MAX(id) AS mid FROM backups WHERE sha256 <> '' GROUP BY domain_id) x
@@ -291,11 +292,14 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 	type kayit struct {
 		id, domainID   int64
 		sk, dosya, sha string
+		driveVar       bool
 	}
 	var liste []kayit
 	for rows.Next() {
 		var k kayit
-		if rows.Scan(&k.id, &k.domainID, &k.sk, &k.dosya, &k.sha) == nil {
+		var dv int
+		if rows.Scan(&k.id, &k.domainID, &k.sk, &k.dosya, &k.sha, &dv) == nil {
+			k.driveVar = dv == 1
 			liste = append(liste, k)
 		}
 	}
@@ -315,7 +319,9 @@ func verifyYedekBozulma(db *sql.DB) (int, int) {
 			// tek tek "bozuk" damgalayip KRITIK bildirim gonderiyordu (uretimde 27
 			// saglam yedek icin tetiklenecekti). Sonuc: alarm korlugu — gercek bir
 			// bit-rot ayni metinle gelir ve gozden kacar.
-			if os.IsNotExist(err) && uzakKopyaVar(db, k.dosya) {
+			// Drive'a gönderilince yerel kopya silinmiş olabilir: doğrulanmış Drive kopyası
+			// varsa bu BOZUK değil, "yalnız uzakta"dır (yanlış kritik alarm üretme).
+			if os.IsNotExist(err) && (k.driveVar || uzakKopyaVar(db, k.dosya)) {
 				uzakta++
 				if _, err := db.Exec(`UPDATE backups SET dogrulama='uzakta' WHERE id=? AND dogrulama<>'bozuk'`, k.id); err != nil {
 					log.Printf("backups.verifyYedekBozulma: dogrulama=uzakta yazilamadi: %v", err)

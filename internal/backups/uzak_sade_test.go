@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -70,7 +71,7 @@ func TestSade_KurtarmaAnahtariIndir(t *testing.T) {
 	o := yeniUzakOrtam(t)
 	var logTampon bytes.Buffer
 	log.SetOutput(&logTampon)
-	t.Cleanup(func() { log.SetOutput(nil) })
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
 	if kod, _ := o.cagri("POST", "/uzak-kopya/kurtarma-anahtari", ""); kod != http.StatusConflict {
 		t.Fatalf("anahtar yokken 409: %d", kod)

@@ -28,6 +28,40 @@ var yedekHazirla = YerelDosyaHazirla
 // gibi söylenebilen tek hazırlık hatası (sunucuya dair ayrıntı taşımaz).
 var errYedekDiskteYok = errors.New("yedek dosyası diskte bulunamadı")
 
+// errYedekYalnizDrive — yerel dosya yok (Drive'a gönderilince silindi) ve başka kopya yok: yedek
+// yalnız Google Drive'da. Otomatik uzaktan geri yükleme KAPSAM DIŞI; açık yönlendirme verilir.
+var errYedekYalnizDrive = errors.New("yedek yalnız Google Drive'da")
+
+type driveYalnizHata struct{ is int64 }
+
+func (e *driveYalnizHata) Error() string {
+	no := "<iş-no>"
+	if e.is > 0 {
+		no = strconv.FormatInt(e.is, 10)
+	}
+	return "Bu yedek yalnız Google Drive'da. Çözmek için `girginospanel-server yedek-coz --indir " + no +
+		" --anahtar <anahtar-dosyası>` komutunu kullanın."
+}
+
+func (e *driveYalnizHata) Is(t error) bool { return t == errYedekYalnizDrive }
+
+// driveYalnizIs — yerel dosya yok ama doğrulanmış (tamam) Drive kopyası var → iş no.
+func driveYalnizIs(db *sql.DB, dosya string) (int64, bool) {
+	var is int64
+	err := db.QueryRow(`SELECT k.id FROM backups b
+		JOIN backup_uzak_kopyalar k ON k.backup_id=b.id AND k.kaynak='hedef' AND k.durum='tamam'
+		WHERE b.dosya=? ORDER BY k.id DESC LIMIT 1`, dosya).Scan(&is)
+	return is, err == nil
+}
+
+// driveYalnizMesaji — Download/hazırlık için istemci metni (rol ayrımı hazirlikHatasi ile aynı).
+func driveYalnizMesaji(r *http.Request, err error) string {
+	if middleware.RolFrom(r) == "admin" {
+		return err.Error()
+	}
+	return "Bu yedek yalnız Google Drive'da; geri yüklemek için yöneticinize başvurun."
+}
+
 // hazirlikHatasi — YerelDosyaHazirla hatasını istemciye dönecek metne çevirir.
 //
 // 🔴 KAPSAM (YK-02): hata, YÖNETİCİNİN sistem geneli uzak yedek hedefinden
@@ -38,6 +72,9 @@ var errYedekDiskteYok = errors.New("yedek dosyası diskte bulunamadı")
 // Delete'teki ilkeyle aynı: ayrıntı günlüğe ve YALNIZ yöneticiye.
 func hazirlikHatasi(r *http.Request, domainID int64, err error) string {
 	log.Printf("yedek: dosya hazırlanamadı (domain=%d): %v", domainID, err)
+	if errors.Is(err, errYedekYalnizDrive) {
+		return driveYalnizMesaji(r, err)
+	}
 	if middleware.RolFrom(r) == "admin" || errors.Is(err, errYedekDiskteYok) {
 		return err.Error()
 	}

@@ -21,7 +21,13 @@ import (
 
 func g140_uygula(t *testing.T, db *sql.DB) {
 	t.Helper()
-	body, err := os.ReadFile("../../migrations/0140_yedek_uzak_kopya.sql")
+	g14x_uygula(t, db, "../../migrations/0140_yedek_uzak_kopya.sql")
+	g14x_uygula(t, db, "../../migrations/0141_yedek_yerel_sil.sql")
+}
+
+func g14x_uygula(t *testing.T, db *sql.DB, yol string) {
+	t.Helper()
+	body, err := os.ReadFile(yol)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +62,7 @@ func yeniUzakOrtam(t *testing.T) *uzakOrtam {
 	g113_uygula(t, db)
 	for _, q := range []string{
 		`ALTER TABLE domains ADD COLUMN alan_adi VARCHAR(255) NOT NULL DEFAULT '', ADD COLUMN sistem_kullanici VARCHAR(64) NOT NULL DEFAULT ''`,
-		`ALTER TABLE backups ADD COLUMN tip VARCHAR(16) NOT NULL DEFAULT 'tam', ADD COLUMN boyut_b BIGINT NOT NULL DEFAULT 0, ADD COLUMN job_id BIGINT NULL, ADD COLUMN sha256 CHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE backups ADD COLUMN tip VARCHAR(16) NOT NULL DEFAULT 'tam', ADD COLUMN boyut_b BIGINT NOT NULL DEFAULT 0, ADD COLUMN job_id BIGINT NULL, ADD COLUMN sha256 CHAR(64) NOT NULL DEFAULT '', ADD COLUMN notlar VARCHAR(255) NOT NULL DEFAULT '', ADD COLUMN created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP, ADD COLUMN dogrulama VARCHAR(16) NOT NULL DEFAULT ''`,
 	} {
 		g113_exec(t, db, q)
 	}
@@ -91,6 +97,8 @@ func yeniUzakOrtam(t *testing.T) *uzakOrtam {
 	r.Post("/uzak-kopya/mevcutlari-gonder", h.UzakKopyaMevcutlariGonder)
 	r.Get("/uzak-kopya/yedek-durumlari", h.UzakKopyaYedekDurumlari)
 	r.Get("/uzak-kopya/ilerleme", h.UzakKopyaIlerleme)
+	r.Get("/uzak-kopya/yerel-temizle", h.UzakKopyaYerelOnizle)
+	r.Post("/uzak-kopya/yerel-temizle", h.UzakKopyaYerelTemizle)
 	o.r = r
 	// bağlı (yetkili) bir Drive hedefi
 	g113_exec(t, db, `INSERT INTO backup_hedefler (ad, tur, ayar, sirlar) VALUES ('Drive 1', 'drive', '{"klasor":"Y"}', '')`)

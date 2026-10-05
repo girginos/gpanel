@@ -20,6 +20,8 @@ package backups
 //	POST /api/v1/admin/backups/uzak-kopya/mevcutlari-gonder    -> {n} son n kök yedeği (domain başına) sıraya al
 //	GET  /api/v1/admin/backups/uzak-kopya/yedek-durumlari?ids= -> yedek satırı rozetleri
 //	GET  /api/v1/admin/backups/uzak-kopya/ilerleme              -> canlı ilerleme + kuyruk ETA (bellek + tek özet sorgusu)
+//	GET  /api/v1/admin/backups/uzak-kopya/yerel-temizle         -> önizleme (silinecek/korunacak; ağsız, değiştirmez)
+//	POST /api/v1/admin/backups/uzak-kopya/yerel-temizle         -> doğrulanmış Drive kopyası olanların yerel dosyasını sil + özet
 //
 // Sade akış: ayar kaydında hedef seçilip açılınca etkin anahtar yoksa SUNUCU klasik anahtar
 // üretir (kullanıcı anahtar üretmez/onaylamaz). Kurtarma anahtarı kullanıcı isterse indirilir.
@@ -28,6 +30,7 @@ package backups
 // metni) döner, Cache-Control: no-store ile; hiçbir günlük/denetim/başka yanıtta yer almaz.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -142,6 +145,7 @@ func (h *Handlers) UzakKopyaDurum(w http.ResponseWriter, r *http.Request) {
 		"bekleyen_anahtar": bekleyen,
 		"ozet":             ozet,
 		"age_surum":        uzak.AgeSurum(),
+		"yerel":            h.yerelDurum(ctx),
 	})
 }
 
@@ -169,12 +173,26 @@ func (h *Handlers) UzakKopyaIlerleme(w http.ResponseWriter, r *http.Request) {
 
 // UzakKopyaAyarYaz — PUT /admin/backups/uzak-kopya/ayar
 func (h *Handlers) UzakKopyaAyarYaz(w http.ResponseWriter, r *http.Request) {
-	var a uzak.Ayar
-	if err := uzakJSON(r, &a); err != nil {
+	// yerel_sil / yerel_tut gönderilmezse MEVCUT değer korunur (eski istemci yerel_tut'u
+	// sessizce 0'a düşürüp "hepsi silinsin" yapamaz).
+	var in struct {
+		uzak.Ayar
+		YerelSil *bool `json:"yerel_sil"`
+		YerelTut *int  `json:"yerel_tut"`
+	}
+	if err := uzakJSON(r, &in); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek")
 		return
 	}
 	onceki, _ := uzak.AyarOku(r.Context(), h.DB)
+	a := in.Ayar
+	a.YerelSil, a.YerelTut = onceki.YerelSil, onceki.YerelTut
+	if in.YerelSil != nil {
+		a.YerelSil = *in.YerelSil
+	}
+	if in.YerelTut != nil {
+		a.YerelTut = *in.YerelTut
+	}
 	uretildi, err := uzak.AyarYazAnahtarli(r.Context(), h.DB, a)
 	if err != nil {
 		uzakHataYaz(w, err)
@@ -190,6 +208,14 @@ func (h *Handlers) UzakKopyaAyarYaz(w http.ResponseWriter, r *http.Request) {
 		uzakDenetimYaz(h.DB, r, "yedek.uzak.kapat", "uzak kopya", "Uzak kopya kapatıldı", true)
 	default:
 		uzakDenetimYaz(h.DB, r, "yedek.uzak.ayar", "uzak kopya", "Saklama / hedef / bant ayarı güncellendi", true)
+	}
+	if a.YerelSil != onceki.YerelSil || (a.YerelSil && a.YerelTut != onceki.YerelTut) {
+		if a.YerelSil {
+			uzakDenetimYaz(h.DB, r, "yedek.uzak.yerel_sil", "uzak kopya",
+				"Drive'a gönderilince sunucudaki kopya silinsin: açıldı (alan adı başına "+strconv.Itoa(a.YerelTut)+" yedek sunucuda kalır)", true)
+		} else {
+			uzakDenetimYaz(h.DB, r, "yedek.uzak.yerel_sil", "uzak kopya", "Drive'a gönderilince sunucudaki kopya silinsin: kapatıldı", true)
+		}
 	}
 	if i := uzakIsci.Load(); i != nil && a.Aktif {
 		i.Tetikle()
@@ -473,4 +499,53 @@ func (h *Handlers) UzakKopyaYedekDurumlari(w http.ResponseWriter, r *http.Reques
 		out[strconv.FormatInt(id, 10)] = v
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"aktif": ayar.Aktif, "durumlar": out})
+}
+
+// yerelDurum — "yalnız Drive'da" özeti + süreç sayaçları (durum kartı; sırsız).
+func (h *Handlers) yerelDurum(ctx context.Context) map[string]any {
+	adet, boyut, err := uzak.YerelYokOzeti(ctx, h.DB)
+	if err != nil {
+		adet, boyut = 0, 0
+	}
+	out := map[string]any{"yalniz_drive_adet": adet, "yalniz_drive_b": boyut}
+	if i := uzakIsci.Load(); i != nil {
+		out["sayac"] = i.YerelSayac()
+	}
+	return out
+}
+
+// uzakIsciYerel — yerel temizlik uçları için işçi (panel açılışında kurulur; yoksa geçici kurulur).
+func (h *Handlers) uzakIsciYerel() *uzak.Isci {
+	if i := uzakIsci.Load(); i != nil {
+		return i
+	}
+	return UzakIsciKur(h.DB)
+}
+
+// UzakKopyaYerelOnizle — GET /admin/backups/uzak-kopya/yerel-temizle: ağa çıkmaz, hiçbir şey değiştirmez.
+func (h *Handlers) UzakKopyaYerelOnizle(w http.ResponseWriter, r *http.Request) {
+	on, err := h.uzakIsciYerel().YerelOnizle(r.Context())
+	if err != nil {
+		uzakHataYaz(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, on)
+}
+
+// UzakKopyaYerelTemizle — POST /admin/backups/uzak-kopya/yerel-temizle: doğrulanmış Drive kopyası olan
+// yedeklerin yerel dosyalarını siler (yerel_tut kuralı; Drive'da olmayana ASLA dokunmaz).
+func (h *Handlers) UzakKopyaYerelTemizle(w http.ResponseWriter, r *http.Request) {
+	kctx, iptal := httpx.KopukBaglam(r, 30*time.Minute)
+	defer iptal()
+	s, err := h.uzakIsciYerel().YerelTemizle(kctx)
+	if err != nil {
+		uzakDenetimYaz(h.DB, r, "yedek.uzak.yerel_temizle", "uzak kopya", "Mevcut yedeklerin sunucudaki kopyası temizlenemedi", false)
+		uzakHataYaz(w, err)
+		return
+	}
+	uzakDenetimYaz(h.DB, r, "yedek.uzak.yerel_temizle", "uzak kopya",
+		strconv.Itoa(s.Silinen)+" yedeğin sunucudaki kopyası silindi ("+insanBoyut(s.SilinenB)+"), "+strconv.Itoa(s.Atlanan)+" atlandı", true)
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, s)
 }
