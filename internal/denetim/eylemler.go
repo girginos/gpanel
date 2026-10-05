@@ -108,9 +108,14 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"plan.varsayilan_olustur": {TR: "Varsayılan bayi planı oluşturuldu", EN: "Default reseller plan created"},
 
 	// Yedek
-	"yedek.geriyukle":           {TR: "Yedek geri yüklendi", EN: "Backup restored"},
-	"yedek.sil.lftp-yok":        {TR: "Yedek silindi, uzak kopya kaldı", EN: "Backup deleted, remote copy kept", gereksizNot: []string{"uzak kopya kaldı"}},
-	"yedek.sil.uzak-yoksayildi": {TR: "Yedek silindi, uzak kopya bırakıldı", EN: "Backup deleted, remote copy kept"},
+	"yedek.geriyukle":              {TR: "Yedek geri yüklendi", EN: "Backup restored"},
+	"yedek.sil.lftp-yok":           {TR: "Yedek silindi, uzak kopya kaldı", EN: "Backup deleted, remote copy kept", gereksizNot: []string{"uzak kopya kaldı"}},
+	"yedek.sil.uzak-yoksayildi":    {TR: "Yedek silindi, uzak kopya bırakıldı", EN: "Backup deleted, remote copy kept"},
+	"yedek.hedef.ekle":             {TR: "Yedek hedefi eklendi", EN: "Backup target added"},
+	"yedek.hedef.sil":              {TR: "Yedek hedefi silindi", EN: "Backup target deleted"},
+	"yedek.hedef.yetkilendi":       {TR: "Google Drive yetkilendirildi", EN: "Google Drive authorized"},
+	"yedek.hedef.baglanti_kesildi": {TR: "Google Drive bağlantısı kesildi", EN: "Google Drive disconnected"},
+	"yedek.hedef.test":             {TR: "Yedek hedefi bağlantısı sınandı", EN: "Backup target connection tested"},
 
 	// Taşıma
 	"tasima_baslat":     {TR: "Taşıma başlatıldı", EN: "Migration started"},
