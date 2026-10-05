@@ -233,9 +233,9 @@ export default function DomainCronPage() {
                     </div>
                     {g.yorum && <div className="text-xs font-normal text-slate-500 dark:text-slate-500 mt-0.5">{g.yorum}</div>}
                   </td>
-                  <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
+                  <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-2`}>
                     <Button onClick={() => calistir(g)} yukleniyor={calisan === g.idx} color="success" variant="flat" boyut="sm" ikon={I.oynat} title={cevir("Görevi şimdi elle çalıştır")}>{calisan === g.idx ? cevir("Çalışıyor…") : cevir("Çalıştır")}</Button>
-                    <Button onClick={() => setModalGorev(g)} color="primary" variant="flat" boyut="sm" ikon={I.kalem}>{cevir("Düzenle")}</Button>
+                    <Button onClick={() => setModalGorev(g)} variant="outlined" boyut="sm" ikon={I.kalem}>{cevir("Düzenle")}</Button>
                     <Button onClick={() => sil(g)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>
                   </td>
                 </tr>

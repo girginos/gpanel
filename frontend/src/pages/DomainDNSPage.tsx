@@ -113,6 +113,7 @@ const DNS_EN: Record<string, string> = {
   "Bu DS kaydını alan adınızın operatöründe (registrar) DNSSEC/DS alanına girin. Yayılması TTL süresi kadar sürebilir.": "Enter this DS record in the DNSSEC/DS field at your domain registrar. Propagation may take as long as the TTL.",
   "DNS Ayarları": "DNS Settings",
   "DNS Kaydını Düzenle": "Edit DNS Record",
+  "{0} {1} kaydını düzenle": "Edit {0} {1} record",
   "DNS kaydını sil": "Delete DNS record",
   "DNS kayıtlarını BIND zone dosyası olarak indir": "Download DNS records as a BIND zone file",
   "DNSSEC durumu alınamadı": "Failed to get DNSSEC status",
@@ -579,8 +580,8 @@ export default function DomainDNSPage() {
                         <Badge variant="soft">{cevir("Pasif")}</Badge>
                       )}
                     </td>
-                    <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-1`}>
-                      <Button variant="flat" boyut="sm" ikon={I.kalem} onClick={() => setDuzenle(k)}>{cevir("Düzenle")}</Button>
+                    <td className={`${T.hucreAksiyon} lg:text-right lg:space-x-2`}>
+                      <Button variant="outlined" boyut="sm" ikon={I.kalem} onClick={() => setDuzenle(k)} aria-label={cevirT(cevir("{0} {1} kaydını düzenle"), k.ad, k.tip)}>{cevir("Düzenle")}</Button>
                       <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => setSilinecek(k)}>{cevir("Sil")}</Button>
                     </td>
                   </tr>
