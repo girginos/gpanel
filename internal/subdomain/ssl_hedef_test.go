@@ -217,8 +217,8 @@ func TestDNSKontrol_EszamanlilikSiniri(t *testing.T) {
 		go func(i int) { defer wg.Done(); dnsKontrol([]string{fmt.Sprintf("d%d.test", i)}, []string{"203.0.113.7"}) }(i)
 	}
 	wg.Wait()
-	if azami.Load() > int32(cap(dnsEsz)) {
-		t.Fatalf("eşzamanlı dış çözüm sınırı aşıldı: %d > %d", azami.Load(), cap(dnsEsz))
+	if azami.Load() > 4 {
+		t.Fatalf("eşzamanlı dış çözüm sınırı aşıldı: %d > 4", azami.Load())
 	}
 	close(dur)
 }
