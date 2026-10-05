@@ -215,7 +215,7 @@ func renderSubVhost(o subVhostOpts) string {
     listen 80;
     listen [::]:80;
     server_name ` + o.TamAd + `;
-    location ~ "^/\.well-known/acme-challenge/[A-Za-z0-9_-]{16,128}$" { root ` + acmeKok() + `; auth_basic off; allow all; try_files $uri =404; }
+    ` + acmeLocation() + `
 ` + o.Kisit + `    location / { return 301 https://$host$request_uri; }
 }
 server {
@@ -243,7 +243,7 @@ server {
     # bu dizine dosya koyabilen herkes (kiraci, ele gecirilmis site, dosya
     # yukleme acigi) IP kisitlamasini statik icerik icin tamamen atlatir --
     # olculdu: kisitli sitede / -> 403 iken .../acme-challenge/db.sql -> 200.
-    location ~ "^/\.well-known/acme-challenge/[A-Za-z0-9_-]{16,128}$" { auth_basic off; allow all; root ` + acmeKok() + `; try_files $uri =404; }
+    ` + acmeLocation() + `
 
 ` + serverGovde(o) + `}
 `
