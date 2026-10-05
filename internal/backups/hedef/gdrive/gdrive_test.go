@@ -525,10 +525,15 @@ func TestYabanciAdresSunucuyaUlasmaz(t *testing.T) {
 func TestHTTPSZorunlu(t *testing.T) {
 	f := yeniSahteDrive()
 	defer f.kapat()
-	hc := yeniHTTP(hedef.KurSecenek{}, func(string) bool { return true }, false) // http yasak
+	// Kapı loopback'e AÇIK: yalnız "https zorunlu" denetimi düz http'yi engelleyebilir.
+	kapi := agkapi.Yeni(agkapi.Secenek{IzinliAglar: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}})
+	hc := yeniHTTP(hedef.KurSecenek{Kapi: kapi}, func(string) bool { return true }, false) // http yasak
 	req, _ := http.NewRequest("GET", f.srv.URL+"/drive/v3/about", nil)
 	if _, err := hc.Do(req); err == nil || !errors.Is(err, agkapi.ErrReddedildi) {
 		t.Fatalf("düz http reddedilmeli: %v", err)
+	}
+	if f.say("GET", "/drive/v3/about") != 0 {
+		t.Errorf("düz http isteği sunucuya ulaştı")
 	}
 }
 
