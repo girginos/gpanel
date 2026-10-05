@@ -39,8 +39,8 @@ func ekOrtam(t *testing.T) (*sql.DB, string) {
 	for _, sk := range []string{"on", "onbir", "oniki"} {
 		ekMkdir(t, filepath.Join(ev, sk, "public_html"))
 	}
-	ekMkdir(t, filepath.Join(ev, "on", "ek-alanlar", "ek1.test", "public_html"))
-	ekMkdir(t, filepath.Join(ev, "onbir", "ek-alanlar", "ek2.test", "public_html"))
+	ekMkdir(t, filepath.Join(ev, "on", "domains", "ek1.test", "public_html"))
+	ekMkdir(t, filepath.Join(ev, "onbir", "domains", "ek2.test", "public_html"))
 	return db, ev
 }
 
@@ -88,24 +88,24 @@ func TestEk_KesifEkAlanDahilSessizGecme(t *testing.T) {
 	}
 	h, _ := tarananHedefler(t.Context(), db, []int64{-1})
 	if len(h) != 1 || h[0].AlanAdi != "ek1.test" || h[0].DomainID != 10 || h[0].SK != "on" ||
-		!strings.HasSuffix(h[0].Docroot, "/on/ek-alanlar/ek1.test/public_html") {
+		!strings.HasSuffix(h[0].Docroot, "/on/domains/ek1.test/public_html") {
 		t.Fatalf("hedef alanları: %+v", h)
 	}
 }
 
 // Kiracı kontrollü dizinde sembolik bağ: docroot hesap dışına, ana public_html'e ya da
-// başka ek alana işaret ederse; ek-alanlar dizini bağ ise; dizin silinmişse ATLANIR
+// başka ek alana işaret ederse; domains dizini bağ ise; dizin silinmişse ATLANIR
 // (hata değil).
 func TestEk_SembolikBagKacisiAtlanir(t *testing.T) {
 	db, ev := ekOrtam(t)
 	dis := t.TempDir()
 	ekMkdir(t, filepath.Join(dis, "public_html"))
 
-	docroot := filepath.Join(ev, "on", "ek-alanlar", "ek1.test", "public_html")
+	docroot := filepath.Join(ev, "on", "domains", "ek1.test", "public_html")
 	for ad, hedefYol := range map[string]string{
 		"hesap dışı":      filepath.Join(dis, "public_html"),
 		"ana public_html": filepath.Join(ev, "on", "public_html"),
-		"başka ek alan":   filepath.Join(ev, "onbir", "ek-alanlar", "ek2.test", "public_html"),
+		"başka ek alan":   filepath.Join(ev, "onbir", "domains", "ek2.test", "public_html"),
 	} {
 		if err := os.RemoveAll(docroot); err != nil {
 			t.Fatal(err)
@@ -117,9 +117,9 @@ func TestEk_SembolikBagKacisiAtlanir(t *testing.T) {
 			t.Fatalf("%s: docroot bağı atlanmalı: %v", ad, got)
 		}
 	}
-	// ek-alanlar dizininin KENDİSİ bağ (ek2'nin hesabı): dışarıdaki dizine yönlendirilmiş.
+	// domains dizininin KENDİSİ bağ (ek2'nin hesabı): dışarıdaki dizine yönlendirilmiş.
 	ekMkdir(t, filepath.Join(dis, "ek2.test", "public_html"))
-	taban := filepath.Join(ev, "onbir", "ek-alanlar")
+	taban := filepath.Join(ev, "onbir", "domains")
 	if err := os.RemoveAll(taban); err != nil {
 		t.Fatal(err)
 	}
@@ -127,14 +127,14 @@ func TestEk_SembolikBagKacisiAtlanir(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := ekAnahtarlar(t, db, nil); !reflect.DeepEqual(got, []int64{10, 11, 12}) {
-		t.Fatalf("ek-alanlar bağı atlanmalı: %v", got)
+		t.Fatalf("domains bağı atlanmalı: %v", got)
 	}
-	// ek-alanlar dizini tamamen silinmiş (kiracı): hata değil, boş.
-	if err := os.RemoveAll(filepath.Join(ev, "on", "ek-alanlar")); err != nil {
+	// domains dizini tamamen silinmiş (kiracı): hata değil, boş.
+	if err := os.RemoveAll(filepath.Join(ev, "on", "domains")); err != nil {
 		t.Fatal(err)
 	}
 	if got := ekAnahtarlar(t, db, nil); !reflect.DeepEqual(got, []int64{10, 11, 12}) {
-		t.Fatalf("silinmiş ek-alanlar: %v", got)
+		t.Fatalf("silinmiş domains: %v", got)
 	}
 }
 
@@ -160,9 +160,9 @@ func TestEk_AskidaHesapAnaDomainleAyniKural(t *testing.T) {
 func TestEk_TarayicilarEkDocroottaBulurCiftSaymaz(t *testing.T) {
 	db, ev := ekOrtam(t)
 	ekYaz(t, filepath.Join(ev, "on", "public_html", "package.json"), `{"dependencies":{"anapkg":"1.2.3"}}`)
-	ekYaz(t, filepath.Join(ev, "on", "ek-alanlar", "ek1.test", "public_html", "package.json"), `{"dependencies":{"ekpkg":"2.0.0"}}`)
+	ekYaz(t, filepath.Join(ev, "on", "domains", "ek1.test", "public_html", "package.json"), `{"dependencies":{"ekpkg":"2.0.0"}}`)
 	ekYaz(t, filepath.Join(ev, "on", "composer.lock"), `{"packages":[{"name":"ana/p","version":"1.0.0"}]}`)
-	ekYaz(t, filepath.Join(ev, "on", "ek-alanlar", "ek1.test", "composer.lock"), `{"packages":[{"name":"ek/p","version":"3.0.0"}]}`)
+	ekYaz(t, filepath.Join(ev, "on", "domains", "ek1.test", "composer.lock"), `{"packages":[{"name":"ek/p","version":"3.0.0"}]}`)
 
 	node, err := NodejsKurulumlariBul(t.Context(), db, nil)
 	if err != nil {
@@ -179,7 +179,7 @@ func TestEk_TarayicilarEkDocroottaBulurCiftSaymaz(t *testing.T) {
 			}
 		case 1:
 			if k.DomainID != 10 || k.AlanAdi != "ek1.test" || len(k.Paketler) != 1 || k.Paketler[0].Ad != "ekpkg" ||
-				!strings.HasSuffix(k.Yol, "/on/ek-alanlar/ek1.test/public_html") {
+				!strings.HasSuffix(k.Yol, "/on/domains/ek1.test/public_html") {
 				t.Fatalf("ek node kurulumu: %+v", k)
 			}
 		default:
@@ -198,12 +198,12 @@ func TestEk_TarayicilarEkDocroottaBulurCiftSaymaz(t *testing.T) {
 		if k.EkAlanID == 0 && (k.Paketler[0].Ad != "ana/p" || !strings.HasSuffix(k.Yol, "/on")) {
 			t.Fatalf("ana php: %+v", k)
 		}
-		if k.EkAlanID == 1 && (k.Paketler[0].Ad != "ek/p" || !strings.HasSuffix(k.Yol, "/on/ek-alanlar/ek1.test")) {
+		if k.EkAlanID == 1 && (k.Paketler[0].Ad != "ek/p" || !strings.HasSuffix(k.Yol, "/on/domains/ek1.test")) {
 			t.Fatalf("ek php: %+v", k)
 		}
 	}
 	// Ek alanın kendi composer.lock'ı yoksa ana hesabınkini DEVRALMAZ.
-	if err := os.Remove(filepath.Join(ev, "on", "ek-alanlar", "ek1.test", "composer.lock")); err != nil {
+	if err := os.Remove(filepath.Join(ev, "on", "domains", "ek1.test", "composer.lock")); err != nil {
 		t.Fatal(err)
 	}
 	php, _ = PhpKurulumlariBul(t.Context(), db, nil)
@@ -217,7 +217,7 @@ func TestEk_DosyaSembolikBagiOkunmaz(t *testing.T) {
 	db, ev := ekOrtam(t)
 	dis := t.TempDir()
 	ekYaz(t, filepath.Join(dis, "sir.json"), `{"dependencies":{"sizinti":"9.9.9"}}`)
-	dr := filepath.Join(ev, "on", "ek-alanlar", "ek1.test", "public_html")
+	dr := filepath.Join(ev, "on", "domains", "ek1.test", "public_html")
 	if err := os.Symlink(filepath.Join(dis, "sir.json"), filepath.Join(dr, "package.json")); err != nil {
 		t.Fatal(err)
 	}
@@ -239,8 +239,8 @@ func ekBulguTohumla(t *testing.T, db *sql.DB) {
 	t.Helper()
 	z := []WPVulnZafiyet{{CVE: "CVE-2026-100", Title: "t", Severity: "high", MaxVersion: "9.9", Source: "t"}}
 	ana := &WPKurulum{DomainID: 10, Yol: "/x/on/public_html"}
-	ek := &WPKurulum{DomainID: 10, EkAlanID: 1, Yol: "/x/on/ek-alanlar/ek1.test/public_html"}
-	ek2 := &WPKurulum{DomainID: 11, EkAlanID: 2, Yol: "/x/onbir/ek-alanlar/ek2.test/public_html"}
+	ek := &WPKurulum{DomainID: 10, EkAlanID: 1, Yol: "/x/on/domains/ek1.test/public_html"}
+	ek2 := &WPKurulum{DomainID: 11, EkAlanID: 2, Yol: "/x/onbir/domains/ek2.test/public_html"}
 	for _, k := range []*WPKurulum{ana, ek, ek2} {
 		if n := paketKarsilastirveKaydet(t.Context(), db, k, "plugin", WPPaket{Slug: "p", Surum: "1.0"}, z); n != 1 {
 			t.Fatalf("bulgu yazılamadı: %d", n)

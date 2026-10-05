@@ -267,7 +267,7 @@ func TestMusteri_SizintiYok(t *testing.T) {
 	kuy.kokEkle([]int64{11, 12, -2})
 
 	yasak := []string{
-		"onbir.test", "oniki.test", "ek2.test", ev, "/ek-alanlar", "install_path", "next_estimate",
+		"onbir.test", "oniki.test", "ek2.test", ev, "public_html", "install_path", "next_estimate",
 		"last_error", "gizli-url", "wpvulnerability.net", "osv.dev", "\"source\"", "scanned_apps",
 		"total_findings", "app_sayaclari", "reseller", "sistem_kullanici", "/home/",
 	}

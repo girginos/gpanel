@@ -120,10 +120,19 @@ const (
 	ekAlanEskiKlasor = "ek-alanlar"
 )
 
-func ekDocrootTaban(sk string) string { return evKoku + "/" + sk + "/" + ekAlanKlasoru }
+func ekDocrootTaban(sk string) string { return EkAlanTaban(evKoku, sk) }
+
+// EkAlanTaban — ek alan klasörlerinin tabanı: <evKok>/<sk>/domains. Diğer paketler (websec)
+// klasör adını KENDİLERİ yazmaz, buradan alır (evKok parametre: orada testler yönlendirir).
+func EkAlanTaban(evKok, sk string) string { return evKok + "/" + sk + "/" + ekAlanKlasoru }
+
+// EkDocrootYolu — <evKok>/<sk>/domains/<alan>/public_html (ekDocroot'un dışa açık hali).
+func EkDocrootYolu(evKok, sk, ad string) string {
+	return EkAlanTaban(evKok, sk) + "/" + ad + "/public_html"
+}
 
 // ekDocroot — hesap dizini altında: <ev>/<sk>/domains/<alan>/public_html.
-func ekDocroot(sk, ad string) string { return ekDocrootTaban(sk) + "/" + ad + "/public_html" }
+func ekDocroot(sk, ad string) string { return EkDocrootYolu(evKoku, sk, ad) }
 
 // ekConfPath — nginx vhost dosyası: ek_<sk>_<alan>.conf. Alan adı '_' içermez
 // (reEkAd) → ek_c_shop_x.com.conf ile ek_c_shop_store_x.com.conf ayrıştırılabilir.

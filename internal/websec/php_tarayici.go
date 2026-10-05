@@ -51,7 +51,7 @@ func guvenliKullanici(sk string) bool {
 //  2. /home/<sk>/composer.lock             (Laravel gibi framework kalıbı)
 //
 // Ek alan adı için: docroot/composer.lock, sonra alan dizini (docroot'un bir üstü,
-// /home/<sk>/ek-alanlar/<alan>/composer.lock). Ek alan ASLA /home/<sk>/composer.lock'a
+// ek alan klasörü/<alan>/composer.lock). Ek alan ASLA /home/<sk>/composer.lock'a
 // bakmaz: o ana alan adınındır (çift sayım).
 func phpBul(_ context.Context, h hedef) *phpKurulum {
 	// Güvenlik (defense-in-depth): sk = sistem_kullanici (DB) yol içine gömülüyor
@@ -64,7 +64,7 @@ func phpBul(_ context.Context, h hedef) *phpKurulum {
 	var adaylar []aday
 	if h.EkAlanID > 0 {
 		adaylar = append(adaylar, aday{h.okumaKok(), h.Docroot})
-		// Alan dizini: gerçek docroot'un üstü, ama yalnız hâlâ ek-alanlar/<alan> ise
+		// Alan dizini: gerçek docroot'un üstü, ama yalnız hâlâ ek alan klasörü/<alan> ise
 		// (docroot başka yere bağlıysa ekDocrootDogrula zaten reddetmiştir).
 		adaylar = append(adaylar, aday{filepath.Dir(h.okumaKok()), filepath.Dir(h.Docroot)})
 	} else {

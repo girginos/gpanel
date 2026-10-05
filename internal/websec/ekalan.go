@@ -9,10 +9,10 @@ package websec
 // boyutu) ek alana DEĞİŞMEDEN uygulanır; ana domain "Tara"sı yalnız ana docroot'u,
 // ek alan "Tara"sı yalnız o ek alanı tarar. 0 geçersizdir.
 //
-// 🔴 DOCROOT: ek alan docroot'u /home/<sk>/ek-alanlar/<alan>/public_html (subdomain
-// paketi ekDocroot ile aynı). Kiracı yazabilen bir dizindir: panel (root) bu dizinde
+// 🔴 DOCROOT: ek alan docroot'u subdomain.EkDocrootYolu ile üretilir (klasör adı TEK
+// yerde: subdomain paketi; websec'te sabit yol YOK). Kiracı yazabilen bir dizindir: panel (root) bu dizinde
 // dosya okurken sembolik bağ takip ETMEZ (os.Root: kök içinde kalma garantisi),
-// docroot'un gerçek yolu hesabın ek-alanlar/<alan>/ altında kalmak zorundadır (ana
+// docroot'un gerçek yolu hesabın ek alan klasörü/<alan>/ altında kalmak zorundadır (ana
 // public_html'e ya da başka ek alana işaret eden bağ atlanır → çift sayım yok).
 
 import (
@@ -26,6 +26,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"girginospanel/internal/subdomain"
 )
 
 // evKoku — hesap ev dizinleri kökü (değişken: testler geçici dizine yönlendirir).
@@ -116,7 +118,7 @@ func ekAdGuvenliMi(ad string) bool {
 }
 
 func ekDocrootYolu(sk, ad string) string {
-	return filepath.Join(evKoku, sk, "ek-alanlar", ad, "public_html")
+	return filepath.Clean(subdomain.EkDocrootYolu(evKoku, sk, ad))
 }
 
 // ekDocrootDogrula — ek alan docroot'unu doğrular. Dönüş: gerçek yol. Docroot yoksa
@@ -131,17 +133,17 @@ func ekDocrootDogrula(sk, ad string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	taban := filepath.Join(ev, "ek-alanlar")
+	taban := filepath.Clean(subdomain.EkAlanTaban(evKoku, sk))
 	if fi, e := os.Lstat(taban); e != nil {
 		return "", e
 	} else if fi.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("ek-alanlar dizini sembolik bağlantı")
+		return "", errors.New("ek alan dizini sembolik bağlantı")
 	}
 	gercek, err := filepath.EvalSymlinks(ekDocrootYolu(sk, ad))
 	if err != nil {
 		return "", err
 	}
-	beklenen := filepath.Join(gercekEv, "ek-alanlar", ad) + string(filepath.Separator)
+	beklenen := filepath.Join(gercekEv, filepath.Base(taban), ad) + string(filepath.Separator)
 	if !strings.HasPrefix(gercek+string(filepath.Separator), beklenen) {
 		return "", errors.New("docroot hesabın ek alan dizini dışına işaret ediyor")
 	}
@@ -251,7 +253,7 @@ func tarananHedefler(ctx context.Context, db *sql.DB, anahtarlar []int64) ([]hed
 			switch {
 			case e == nil:
 			case errors.Is(e, os.ErrNotExist):
-				continue // docroot (ya da ek-alanlar dizini) yok: hata değil, boş
+				continue // docroot (ya da ek alan dizini) yok: hata değil, boş
 			default:
 				log.Printf("websec: ek alan %q atlandı: %v", h.AlanAdi, e)
 				continue
