@@ -190,6 +190,7 @@ export const MUSTERI_ANA_EN: Record<string, string> = {
   'Vazgeç': 'Cancel',
   'Ek alan adı bilgisi alınamadı.': 'Could not load addon domain information.',
   'Ziyaret et': 'Visit',
+  'WordPress kur': 'Install WordPress',
   'Hesabın PHP ayarları': 'Account PHP settings',
   'Ek alan adı hesabın PHP ayarlarını kullanır; sürüm hesabın PHP ayarlarından değişir.': 'The addon domain uses the account’s PHP settings; change the version in the account’s PHP settings.',
   'Let’s Encrypt kurulsun mu?': 'Install Let’s Encrypt?',

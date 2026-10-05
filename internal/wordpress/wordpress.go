@@ -29,6 +29,7 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kiraci"
 	"girginospanel/internal/kota"
+	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -51,6 +52,11 @@ type Kurulum struct {
 	Surum          string `json:"surum"`
 	AdminKullanici string `json:"admin_kullanici,omitempty"`
 	ParolaVar      bool   `json:"parola_var"` // kurulumda uretilen parola saklandi mi (iste-goster)
+	// Hesap geneli listede (GET .../wordpress/hesap) hangi alan adına ait olduğu.
+	AlanAdi   string `json:"alan_adi,omitempty"`
+	Tur       string `json:"tur,omitempty"` // ana | ek | alt
+	EkAlanID  int64  `json:"ek_alan_id,omitempty"`
+	AltAlanID int64  `json:"alt_alan_id,omitempty"`
 }
 
 // kopukSure — istemciden kopuk (httpx.KopukBaglam) yan etki zincirlerinin üst süresi.
@@ -125,7 +131,8 @@ func (h *Handlers) scheme(ssl bool) string {
 	return "http://"
 }
 
-// GET /domains/{id}/wordpress — kurulu WP'leri keşfet (public_html + 1 alt dizin)
+// GET /domains/{id}/wordpress — kurulu WP'leri keşfet (docroot + 1 alt dizin).
+// Hedef URL'den çözülür: ana alan (public_html), ek alan ({eid}) ya da alt alan ({sid}).
 //
 // Hız: sürüm dosyadan (wp-cli yok); siteurl wp-cli ister → önbellekte yoksa alan adından
 // türetilen adres hemen döner ve gerçek değer arka planda önbelleğe alınır (sonraki
@@ -136,19 +143,48 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
 	}
-	root, wpHost, _ := h.wpKapsam(r, sk)
+	kp, ok := h.kapsam(r, sk)
+	if !ok {
+		httpx.WriteError(w, http.StatusNotFound, errHedefYok.Error())
+		return
+	}
+	host, hssl := alanAdi, ssl
+	if kp.Tur != TurAna {
+		host, hssl = kp.Host, kp.SSL
+	}
+	out := h.kokKurulumlari(r.Context(), id, sk, kp.Root, host, hssl, h.adminKayitlari(r.Context(), id))
+	for i := range out {
+		out[i].AlanAdi, out[i].Tur, out[i].EkAlanID, out[i].AltAlanID = host, kp.Tur, kp.EkID, kp.Alt
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// GET /domains/{id}/wordpress/hesap — hesabın TÜM alan adlarındaki (ana + ek + alt) kurulu
+// WordPress'ler tek listede; her kayıt ait olduğu alan adını + türünü taşır.
+func (h *Handlers) HesapListe(w http.ResponseWriter, r *http.Request) {
+	id, sk, alanAdi, ssl, demo, ok := h.domain(r)
+	if !ok {
+		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		return
+	}
+	akullar := h.adminKayitlari(r.Context(), id)
 	out := []Kurulum{}
-	adaylar := []string{root}
-	if entries, err := os.ReadDir(root); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				adaylar = append(adaylar, filepath.Join(root, e.Name()))
-			}
+	for _, hd := range h.hedefler(r.Context(), id, sk, alanAdi, ssl, demo) {
+		if hd.DocrootDurum == DocYok {
+			continue
+		}
+		for _, k := range h.kokKurulumlari(r.Context(), id, sk, hd.root, hd.AlanAdi, hd.SSL, akullar) {
+			k.AlanAdi, k.Tur, k.EkAlanID, k.AltAlanID = hd.AlanAdi, hd.Tur, hd.EkAlanID, hd.AltAlanID
+			out = append(out, k)
 		}
 	}
-	// Panel-DB'deki admin kullanıcı kaydı: tek sorgu (kurulum başına sorgu yok).
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// adminKayitlari: panel-DB'deki admin kullanıcı kaydı (hedef dizin → kullanıcı): tek sorgu.
+func (h *Handlers) adminKayitlari(ctx context.Context, id int64) map[string]string {
 	akullar := map[string]string{}
-	if rows, err := h.DB.QueryContext(r.Context(),
+	if rows, err := h.DB.QueryContext(ctx,
 		`SELECT hedef, admin_kullanici FROM cp_wp_kurulum WHERE domain_id=?`, id); err == nil {
 		for rows.Next() {
 			var hd, ak string
@@ -158,9 +194,27 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 	}
-	host := alanAdi
-	if wpHost != "" {
-		host = wpHost
+	return akullar
+}
+
+// altDizinAzami: docroot altında taranan alt dizin sayısı üst sınırı.
+const altDizinAzami = 500
+
+// kokKurulumlari: root ve doğrudan alt dizinlerindeki WordPress kurulumlarını keşfeder.
+// host/ssl: bu docroot'un alan adı ve SSL durumu (türetilmiş URL için).
+func (h *Handlers) kokKurulumlari(ctx context.Context, id int64, sk, root, host string, ssl bool, akullar map[string]string) []Kurulum {
+	out := []Kurulum{}
+	adaylar := []string{root}
+	if entries, err := os.ReadDir(root); err == nil {
+		n := 0
+		for _, e := range entries {
+			if e.IsDir() {
+				if n++; n > altDizinAzami {
+					break
+				}
+				adaylar = append(adaylar, filepath.Join(root, e.Name()))
+			}
+		}
 	}
 	for _, dir := range adaylar {
 		if _, err := os.Stat(filepath.Join(dir, "wp-config.php")); err != nil {
@@ -179,7 +233,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, k)
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	return out
 }
 
 // siteURLAl: önbellekteki gerçek siteurl; yoksa taban+alt-dizin (türetilmiş) ve arka
@@ -344,6 +398,15 @@ func wpStdout(ctx context.Context, sk string, args ...string) ([]byte, error) {
 // (müşterinin çift-tık / hızlı-tekrar yarışı). Değer önemsiz; anahtar = mutlak hedef dizin.
 var wpKurulumKilit sync.Map
 
+// Kur'un dış etkili adımları (testler sahteyle değiştirir; üretimde değerler SABİTTİR).
+var (
+	wpKomutFn     = wpKomut
+	dbOlusturFn   = hesaplar.MySQLCreateDB
+	dbDusurFn     = hesaplar.MySQLDropDB
+	kotaFn        = kota.CheckDBEklenebilir
+	sistemKomutFn = func(ad string, arg ...string) { _ = exec.Command(ad, arg...).Run() }
+)
+
 // kurulumZatenVar: hedef dizinde zaten bir kurulum/içerik var mı? Varsa (mesaj, true)
 // döner ve kurulum DURDURULUR (mevcut içerik asla ezilmez). Boş ya da yalnız
 // placeholder/sistem dosyası içeren dizin "temiz" sayılır. wp-config.php = kesin
@@ -357,12 +420,8 @@ func kurulumZatenVar(hedef string) (string, bool) {
 		return "", false // dizin yok = temiz
 	}
 	for _, e := range entries {
-		switch strings.ToLower(e.Name()) {
-		// zararsız placeholder / sistem dosyaları — "boş" say
-		case "index.html", "index.htm", "favicon.ico", "robots.txt",
-			"error_log", ".user.ini", ".well-known", "cgi-bin",
-			".ftpquota", ".htaccess", ".git", ".gitkeep":
-			continue
+		if zararsizDosya(e.Name()) {
+			continue // zararsız placeholder / sistem dosyası — "boş" say
 		}
 		return "hedef dizin boş değil — mevcut içerik/kurulum korunuyor (üzerine yazılmaz). Boş bir alt dizin seçin", true
 	}
@@ -414,7 +473,24 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz alt dizin (küçük harf/rakam/-)")
 		return
 	}
-	root, wpHost, wpAlt := h.wpKapsam(r, sk)
+	kp, kok := h.kapsam(r, sk)
+	if !kok {
+		httpx.WriteError(w, http.StatusNotFound, errHedefYok.Error())
+		return
+	}
+	root := kp.Root
+	// 🔴 Kök yetkili adımlardan (MkdirAll/chown) ÖNCE: docroot sembolik bağla hesap dışına
+	// çıkamaz (kiracı domains/<alan> ya da subdomains dizinini yönlendirmiş olabilir).
+	if gerr := docrootGuvenli(sk, root); gerr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "hedef dizin güvenli değil")
+		return
+	}
+	// Ek alan adı docroot'u ek alan oluşturulurken açılır; yoksa (kiracı sildi / bozuk) kurulum
+	// yapılmaz — ek alan adı sayfasından kontrol edilmeli (sessizce yeni dizin açılmaz).
+	if kp.Tur == TurEk && docrootDurum(sk, root) == DocYok {
+		httpx.WriteError(w, http.StatusConflict, "ek alan adı dizini bulunamadı veya güvenli değil — ek alan adı sayfasından kontrol edin")
+		return
+	}
 	hedef := root
 	if req.AltDizin != "" {
 		hedef = filepath.Join(root, req.AltDizin)
@@ -434,12 +510,16 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusConflict, msg)
 		return
 	}
+	if gerr := docrootGuvenli(sk, hedef); gerr != nil { // alt dizin de hesap içinde kalmalı
+		httpx.WriteError(w, http.StatusBadRequest, "hedef dizin güvenli değil")
+		return
+	}
 	// 🔴 PLAN LIMITI: Kur her cagrisinda YENI bir wp_<slug> veritabani acar,
 	// ama kota kapisi (kota.CheckDBEklenebilir) bu pakette HIC cagrilmiyordu →
 	// "domain olustur + WP kur" akisi plan max_db limitini (or. 1) sessizce 2'ye
 	// cikariyordu. Kapi, DB acilmadan (ve dizin hazirlanmadan) ONCE calisir;
 	// MEVCUT kurulumlar etkilenmez — yalniz yeni DB acan bu yol kontrol edilir.
-	if kerr := kota.CheckDBEklenebilir(r.Context(), h.DB, id); kerr != nil {
+	if kerr := kotaFn(r.Context(), h.DB, id); kerr != nil {
 		httpx.WriteError(w, http.StatusForbidden,
 			"WordPress kurulumu yeni bir veritabanı gerektiriyor; "+kerr.Error())
 		return
@@ -449,6 +529,10 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	// parolasına hiçbir yoldan ulaşılamaz. Kopuk bağlam.
 	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
 	defer iptal()
+	siteHost, siteSSL := alanAdi, ssl
+	if kp.Tur != TurAna {
+		siteHost, siteSSL = kp.Host, kp.SSL
+	}
 	if err := os.MkdirAll(hedef, 0o755); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "hedef dizin oluşturulamadı")
 		return
@@ -460,8 +544,12 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "hedef dizin doğrulanamadı")
 		return
 	}
-	_ = exec.Command("chown", "-Rh", sk+":"+sk, hedef).Run()
-	_ = exec.Command("restorecon", "-R", hedef).Run()
+	sistemKomutFn("chown", "-Rh", sk+":"+sk, hedef)
+	sistemKomutFn("restorecon", "-R", hedef)
+
+	// Panelin yeni ek alan/hesap için yazdığı karşılama index.html'i (kullanıcı dosyası DEĞİL)
+	// kaldırılır; WordPress index.php'si öne geçer. Tanınmayan index.html'e dokunulmaz.
+	karsilamaTemizle(sk, hedef, siteHost)
 
 	// DB oluştur
 	slug := randSlug()
@@ -473,7 +561,7 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "güvenli rastgele üretim başarısız")
 		return
 	}
-	if err := hesaplar.MySQLCreateDB(h.DB, id, dbName, dbUser, dbPass); err != nil {
+	if err := dbOlusturFn(h.DB, id, dbName, dbUser, dbPass); err != nil {
 		// 🔴 ham err.Error() musteri yanitina degil loga (mysql cikti detaylari).
 		log.Printf("wp kurulum: veritabanı oluşturulamadı (db=%s): %v", dbName, err)
 		httpx.WriteError(w, http.StatusInternalServerError, "veritabanı oluşturulamadı")
@@ -484,7 +572,7 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		// eski hali her basarisiz kurulumda yetim wp_<slug> DB + wpu_<slug> kullanici
 		// + db_accounts satiri biriktiriyordu. MySQLDropDB root-socket ile duser,
 		// metadata satirini da siler.
-		if derr := hesaplar.MySQLDropDB(h.DB, dbName, dbUser); derr != nil {
+		if derr := dbDusurFn(h.DB, dbName, dbUser); derr != nil {
 			log.Printf("wp kurulum: başarısız-kurulum temizliği düşmedi (db=%s): %v", dbName, derr)
 		}
 		if req.AltDizin != "" { // sadece kendi oluşturduğumuz alt dizini temizle
@@ -501,20 +589,14 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, asama+" başarısız: "+msg)
 	}
 
-	if out, err := wpKomut(sk, "core", "download", "--path="+hedef, "--locale=tr_TR"); err != nil {
+	if out, err := wpKomutFn(sk, "core", "download", "--path="+hedef, "--locale=tr_TR"); err != nil {
 		basarisiz("WordPress indirme", out)
 		return
 	}
-	if out, err := wpKomut(sk, "config", "create", "--dbname="+dbName, "--dbuser="+dbUser,
+	if out, err := wpKomutFn(sk, "config", "create", "--dbname="+dbName, "--dbuser="+dbUser,
 		"--dbpass="+dbPass, "--dbhost=localhost", "--locale=tr_TR", "--path="+hedef, "--skip-check"); err != nil {
 		basarisiz("wp-config oluşturma", out)
 		return
-	}
-	siteHost := alanAdi
-	siteSSL := ssl
-	if wpAlt {
-		siteHost = wpHost
-		siteSSL = false
 	}
 	url := h.scheme(siteSSL) + siteHost
 	if req.AltDizin != "" {
@@ -525,17 +607,17 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		basarisiz("yönetici parolası üretimi", nil)
 		return
 	}
-	if out, err := wpKomut(sk, "core", "install", "--url="+url, "--title="+req.SiteBasligi,
+	if out, err := wpKomutFn(sk, "core", "install", "--url="+url, "--title="+req.SiteBasligi,
 		"--admin_user="+req.AdminKullanici, "--admin_password="+adminParola,
 		"--admin_email="+req.AdminEmail, "--skip-email", "--path="+hedef); err != nil {
 		basarisiz("WordPress kurulum", out)
 		return
 	}
-	_ = exec.Command("chown", "-Rh", sk+":"+sk, hedef).Run() // -h: symlink'e inme (TOCTOU)
-	_ = exec.Command("restorecon", "-R", hedef).Run()
+	sistemKomutFn("chown", "-Rh", sk+":"+sk, hedef) // -h: symlink'e inme (TOCTOU)
+	sistemKomutFn("restorecon", "-R", hedef)
 
 	surum := ""
-	if b, err := wpKomut(sk, "core", "version", "--path="+hedef); err == nil {
+	if b, err := wpKomutFn(sk, "core", "version", "--path="+hedef); err == nil {
 		surum = strings.TrimSpace(string(b))
 	}
 	// 🔴 CWE-200: uretilen admin parolasi YANITTA DONMEZ; sifreli saklanir,
@@ -546,6 +628,9 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		id, hedef, req.AdminKullanici, gizli.SaklaBagli(adminParola, sk)); e != nil {
 		log.Printf("wp kurulum parolasi saklanamadi (domain=%d hedef=%s): %v", id, hedef, e)
 	}
+	// Denetim: sade etiket + hedef alan adı; parola/DB bilgisi YOK.
+	uid, kul := middleware.Aktor(r)
+	httpx.DenetimDomain(h.DB, r, uid, kul, "wordpress.kur", strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://"), "hesap="+sk+" tur="+kp.Tur, id, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "site_url": url, "admin_url": url + "/wp-admin",
 		"admin_kullanici": req.AdminKullanici, "admin_parola": adminParola,
@@ -571,8 +656,12 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	wpRoot, _, _ := h.wpKapsam(r, sk)
-	dir, err := cozDizin(wpRoot, greq.Dizin)
+	kp, kok := h.kapsam(r, sk)
+	if !kok {
+		httpx.WriteError(w, http.StatusNotFound, errHedefYok.Error())
+		return
+	}
+	dir, err := cozDizin(kp.Root, greq.Dizin)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -669,7 +758,7 @@ func (h *Handlers) wpDBDusur(ctx context.Context, dbName string, domainID int64)
 }
 
 func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
-	domID, sk, _, _, demo, ok := h.domain(r)
+	domID, sk, anaAd, _, demo, ok := h.domain(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -690,7 +779,12 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	wpRoot, _, _ := h.wpKapsam(r, sk)
+	kp, kok := h.kapsam(r, sk)
+	if !kok {
+		httpx.WriteError(w, http.StatusNotFound, errHedefYok.Error())
+		return
+	}
+	wpRoot := kp.Root
 	dir, err := cozDizin(wpRoot, sreq.Dizin)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
@@ -754,6 +848,12 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	}
 	// Dosyalar silindi; DB kismi basarisizsa bunu SAKLAMA — kullanici
 	// veritabaninin durdugunu bilmeli ki elle temizleyebilsin.
+	silAd := anaAd
+	if kp.Tur != TurAna {
+		silAd = kp.Host
+	}
+	suid, skul := middleware.Aktor(r)
+	httpx.DenetimDomain(h.DB, r, suid, skul, "wordpress.sil", silAd, "hesap="+sk+" tur="+kp.Tur, domID, true)
 	yanit := map[string]any{"ok": true}
 	if dbSonuc != "" {
 		yanit["db_uyari"] = dbSonuc

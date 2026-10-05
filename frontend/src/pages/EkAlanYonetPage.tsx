@@ -272,6 +272,7 @@ export default function EkAlanYonetPage() {
             <Ikon d={I.harici} className="size-3.5 shrink-0" />
             <span className="sr-only">({cevir('yeni sekmede açılır')})</span>
           </a>
+          <BaglantiDugme to={`${kok}/wordpress?hedef=ek:${eid}`}>{cevir('WordPress kur')}</BaglantiDugme>
           <Dugme color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => { setSilYazi(''); setSilAcik(true) }}>
             {cevir('Sil')}
           </Dugme>

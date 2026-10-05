@@ -56,6 +56,8 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"ek_alan.sil":                      {TR: "Ek alan adı silindi", EN: "Addon domain deleted"},
 	"ek_alan.ssl_kur":                  {TR: "Ek alan adına SSL kuruldu", EN: "SSL installed on addon domain"},
 	"ek_alan.ssl_kaldir":               {TR: "Ek alan adı SSL'i kaldırıldı", EN: "Addon domain SSL removed"},
+	"wordpress.kur":                    {TR: "WordPress kuruldu", EN: "WordPress installed"},
+	"wordpress.sil":                    {TR: "WordPress kaldırıldı", EN: "WordPress removed"},
 	"tasima_bayi_ayar":                 {TR: "Bayi taşıma izni değiştirildi", EN: "Reseller migration access changed"},
 	"tasima_kaynak_ayar":               {TR: "Taşıma kaynağı ayarı değiştirildi", EN: "Migration source setting changed"},
 	"hosting.limit":                    {TR: "Hostinge özel limitler değiştirildi", EN: "Hosting custom limits changed"},
