@@ -745,6 +745,11 @@ func pmNginxUyumla(acme80, etkin []string, olc bool) (bool, bool, map[string]boo
 	return true, false, pmSunumOlc(olc && oncesi, port, etkin, sunmayan)
 }
 
+// pmSunumDeneme — reload asenkron ve ~40 vhost'lu sunucuda yeni worker'lar saniyeler sonra devreye girer;
+// eskiden 6 × 0,7 sn'de pes edilirdi ve sertifika ALINMIŞ olduğu hâlde "sunucu onu henüz sunmuyor" hatası
+// çıkıp 10 dk beklenirdi (gpanel.girginos.cloud, 2026-10-05). ≈ 21 sn'ye kadar beklenir.
+const pmSunumDeneme = 30
+
 // pmSunumOlc — her etkin ad kendi sertifikasını sunuyor mu (reload asenkron: dene).
 func pmSunumOlc(olc bool, port int, etkin []string, sunmayan map[string]bool) map[string]bool {
 	if !olc {
@@ -753,7 +758,7 @@ func pmSunumOlc(olc bool, port int, etkin []string, sunmayan map[string]bool) ma
 	for _, ad := range etkin {
 		bekle := pmYaprakDER(pmCrt(ad))
 		var son []byte
-		for i := 0; i < 6; i++ {
+		for i := 0; i < pmSunumDeneme; i++ {
 			if y, err := pmTLSOlc(port, ad); err == nil {
 				son = y
 				if bytes.Equal(y, bekle) {
