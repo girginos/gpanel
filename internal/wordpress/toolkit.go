@@ -50,6 +50,7 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, durumOlustur(r.Context(), sk, dir))
+	wpIsit(sk, dir) // sekmeler açılmadan listeleri arka planda ısıt (tek slot, tekilleştirilmiş)
 }
 
 // durumOlustur: Durum yanıtının gövdesi (HTTP/DB'den bağımsız → test edilebilir).
@@ -70,20 +71,7 @@ func durumOlustur(ctx context.Context, sk, dir string) map[string]any {
 		}
 	}
 	g := cekKontrol.sorgu(ctx, surum)
-	dbMB, yukleniyor := "", false
-	key := onbAnahtar(sk, dir, "dbmb")
-	if d, ok := agirOnb.Bak(key); ok {
-		dbMB, _ = d.(string)
-	} else {
-		yukleniyor = true
-		agirOnb.Arka(key, 40*time.Second, func(c context.Context) (any, error) {
-			b, e := wpOku(c, sk, "db", "size", "--size_format=mb", "--path="+dir)
-			if e != nil {
-				return nil, e
-			}
-			return dbBoyutuTemiz(string(b)), nil
-		})
-	}
+	dbMB, yukleniyor := dbBoyutuAl(ctx, sk, dir, dbIlkBekle)
 	return map[string]any{
 		"surum": surum, "guncelleme_var": g.Var, "hedef_surum": g.Hedef,
 		"php": phpSurumu(ctx), "db_mb": dbMB, "bakim": bakimAktif(dir),
@@ -115,9 +103,7 @@ func (h *Handlers) Eklentiler(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, listeJSON(r.Context(), sk, dir, "plugin", 40*time.Second,
-		"plugin", "list", "--path="+dir, "--format=json",
-		"--fields=name,status,version,update,update_version"))
+	httpx.WriteJSON(w, http.StatusOK, listeTur(r.Context(), sk, dir, "plugin"))
 }
 
 // GET /domains/{id}/wordpress/temalar?dizin=
@@ -132,9 +118,7 @@ func (h *Handlers) Temalar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, listeJSON(r.Context(), sk, dir, "theme", 40*time.Second,
-		"theme", "list", "--path="+dir, "--format=json",
-		"--fields=name,status,version,update,update_version"))
+	httpx.WriteJSON(w, http.StatusOK, listeTur(r.Context(), sk, dir, "theme"))
 }
 
 // GET /domains/{id}/wordpress/kullanicilar?dizin=
@@ -149,9 +133,7 @@ func (h *Handlers) Kullanicilar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, listeJSON(r.Context(), sk, dir, "user", 30*time.Second,
-		"user", "list", "--path="+dir, "--format=json",
-		"--fields=ID,user_login,user_email,display_name,roles"))
+	httpx.WriteJSON(w, http.StatusOK, listeTur(r.Context(), sk, dir, "user"))
 }
 
 // mutasyonHazir: mutasyon işlemlerinde ortak domain+demo+dizin çözümü. ok=false ise yanıt yazılmıştır.
@@ -204,7 +186,7 @@ func (h *Handlers) TemaIslem(w http.ResponseWriter, r *http.Request) {
 
 // paketIslem: plugin/theme için ortak güncelle/etkinleştir/devre-dışı yürütücü.
 func (h *Handlers) paketIslem(w http.ResponseWriter, sk, dir, tur, islem, ad string) {
-	defer wpOnbellekSil(sk, dir) // mutasyon sonrası liste/durum önbelleği bayat kalmasın
+	defer wpMutasyonSonu(sk, dir) // mutasyon sonrası liste/durum önbelleği bayat kalmasın
 	var args []string
 	switch islem {
 	case "tumunu-guncelle":
@@ -255,7 +237,7 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer wpOnbellekSil(sk, dir)
+	defer wpMutasyonSonu(sk, dir)
 	if req.UserID <= 0 {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz kullanıcı")
 		return
@@ -296,7 +278,7 @@ func (h *Handlers) Onar(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer wpOnbellekSil(sk, dir)
+	defer wpMutasyonSonu(sk, dir)
 	onceOut, onceErr := wpKomut(sk, "core", "verify-checksums", "--path="+dir)
 	once := "temiz"
 	if onceErr != nil {
@@ -340,7 +322,7 @@ func (h *Handlers) AracIslem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer wpOnbellekSil(sk, dir)
+	defer wpMutasyonSonu(sk, dir)
 	var out []byte
 	var err error
 	switch req.Islem {

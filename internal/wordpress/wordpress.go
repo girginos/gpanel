@@ -577,7 +577,7 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	defer wpOnbellekSil(sk, dir)
+	defer wpMutasyonSonu(sk, dir)
 	out1, e1 := wpKomut(sk, "core", "update", "--path="+dir)
 	out2, _ := wpKomut(sk, "core", "update-db", "--path="+dir)
 	if e1 != nil {
