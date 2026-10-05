@@ -115,9 +115,44 @@ type envanterSatir struct {
 	PaketSayisi int    `json:"paket_sayisi"`
 	BulguSayisi int    `json:"bulgu_sayisi"`
 	SonTarama   string `json:"son_tarama"`
+	// DomainSonTarama — domainin kendi son tarama zamanı (cp_websec_domain_tarama);
+	// uygulaması olmayan domain için de dolu. Arayüz "tarama bitti" bunu izler.
+	DomainSonTarama string `json:"domain_son_tarama"`
+	// SonSonuc — domainin son tarama sonucu (taranmışsa): bulunan uygulama + bulgu sayısı.
+	SonSonuc *sonSonuc `json:"son_sonuc,omitempty"`
 	// Durum: taraniyor | sirada | acik | temiz | desteklenmiyor | beklemede.
 	// Her domain'e bir durum verir; frontend rozet + yönlendirme buradan.
 	Durum string `json:"durum"`
+}
+
+type sonSonuc struct {
+	UygulamaSayisi int `json:"uygulama_sayisi"`
+	BulguSayisi    int `json:"bulgu_sayisi"`
+}
+
+// sonSonuclariYaz — taranmış domainlerin her satırına domain düzeyi son sonuç
+// (uygulama sayısı + toplam bulgu) yazar; uygulaması olmayan domain 0/0 alır:
+// arayüz "taranacak uygulama bulunamadı" bunu gösterir. Taranmamış (DomainSonTarama
+// boş) domain SonSonuc taşımaz.
+func sonSonuclariYaz(items []envanterSatir) {
+	topl := map[int64]*sonSonuc{}
+	for _, it := range items {
+		if it.DomainSonTarama == "" {
+			continue
+		}
+		t := topl[it.DomainID]
+		if t == nil {
+			t = &sonSonuc{}
+			topl[it.DomainID] = t
+		}
+		if it.AppType != "" {
+			t.UygulamaSayisi++
+			t.BulguSayisi += it.BulguSayisi
+		}
+	}
+	for i := range items {
+		items[i].SonSonuc = topl[items[i].DomainID]
+	}
 }
 
 type envanterYanit struct {
@@ -163,7 +198,8 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(a.app_type,''), COALESCE(a.install_path,''),
 		       COALESCE(a.app_version,''), COALESCE(a.paket_sayisi,0),
 		       COALESCE(a.bulgu_sayisi,0),
-		       COALESCE(DATE_FORMAT(a.son_tarama,'%Y-%m-%d %H:%i:%s'),''),
+		       COALESCE(DATE_FORMAT(a.son_tarama,'%Y-%m-%d %H:%i:%s'), DATE_FORMAT(t.son_tarama,'%Y-%m-%d %H:%i:%s'), ''),
+		       COALESCE(DATE_FORMAT(t.son_tarama,'%Y-%m-%d %H:%i:%s'),''),
 		       (t.domain_id IS NOT NULL)
 		  FROM domains d
 		  LEFT JOIN cp_websec_apps a ON a.domain_id = d.id
@@ -180,7 +216,7 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 		var s envanterSatir
 		var taranmis bool
 		if err := rows.Scan(&s.DomainID, &s.AlanAdi, &s.AppType, &s.InstallPath,
-			&s.AppVersion, &s.PaketSayisi, &s.BulguSayisi, &s.SonTarama, &taranmis); err != nil {
+			&s.AppVersion, &s.PaketSayisi, &s.BulguSayisi, &s.SonTarama, &s.DomainSonTarama, &taranmis); err != nil {
 			k.hata(w, err)
 			return
 		}
@@ -206,6 +242,7 @@ func (h *Handler) Apps(w http.ResponseWriter, r *http.Request) {
 		k.hata(w, err)
 		return
 	}
+	sonSonuclariYaz(y.Items)
 	y.Toplam = len(y.Items)
 	y.Desteklenmeyen = desteklenmeyen
 	jsonYaz(w, 200, y)

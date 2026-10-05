@@ -243,7 +243,7 @@ func TestBayiDomainSogumasi429(t *testing.T) {
 	if kod, g := tara(); kod != 202 || g != `{"sirada":1}` {
 		t.Fatalf("ilk istek: %d %s", kod, g)
 	}
-	if kod, g := tara(); kod != 202 || g != `{"sirada":1}` {
+	if kod, g := tara(); kod != 202 || g != `{"sirada":1,"zaten":true}` {
 		t.Fatalf("sıradayken tekrar: %d %s", kod, g)
 	}
 	k.sonrakiIs() // işçi aldı
@@ -449,7 +449,7 @@ func TestSiradaDurumu(t *testing.T) {
 	kimlikKur(t, bayiJeton)
 	k.bayiEkle(7, []int64{10}, false)
 	sd, db := sahtedb.Yeni()
-	sd.Satirlar("COALESCE(a.app_type,'')", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", int64(0)})
+	sd.Satirlar("COALESCE(a.app_type,'')", []any{int64(10), "on.test", "", "", "", int64(0), int64(0), "", "", int64(0)})
 	sd.Satirlar("LEFT JOIN cp_websec_domain_tarama t ON t.domain_id = d.id", []any{int64(10), ""})
 	h := &Handler{DB: db}
 	rr := istek(t, h.Apps, "GET", "/websec/apps", "")

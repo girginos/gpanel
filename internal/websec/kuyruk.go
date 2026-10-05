@@ -124,8 +124,15 @@ func (k *kuyruk) kokEkle(ids []int64) {
 // (yeni eklenen + zaten sıradaki). bekle > 0 → hiçbiri sıraya giremedi: 429.
 // Soğumadaki ya da kuyruk payını aşan domain atlanır; diğerleri sıraya girer.
 func (k *kuyruk) bayiEkle(rid int64, ids []int64, tumu bool) (int, time.Duration) {
+	sirada, _, bekle := k.bayiEkleSay(rid, ids, tumu)
+	return sirada, bekle
+}
+
+// bayiEkleSay — bayiEkle + bu çağrıyla GERÇEKTEN yeni sıraya eklenen domain sayısı
+// (yeni=0, sirada>0 → hepsi zaten sıradaydı: çağıran denetime ikinci satır yazmaz).
+func (k *kuyruk) bayiEkleSay(rid int64, ids []int64, tumu bool) (sirada, yeni int, bekle time.Duration) {
 	if rid <= 0 {
-		return 0, 0
+		return 0, 0, 0
 	}
 	simdi := saat()
 	k.mu.Lock()
@@ -133,7 +140,7 @@ func (k *kuyruk) bayiEkle(rid int64, ids []int64, tumu bool) (int, time.Duration
 	k.budaKilitli(simdi)
 	if t, ok := k.sonTumu[rid]; tumu && ok {
 		if kalan := bayiTumuAralik - simdi.Sub(t); kalan > 0 {
-			return 0, kalan
+			return 0, 0, kalan
 		}
 	}
 	bayiBekleyen := 0
@@ -142,7 +149,7 @@ func (k *kuyruk) bayiEkle(rid int64, ids []int64, tumu bool) (int, time.Duration
 			bayiBekleyen++
 		}
 	}
-	sirada, eklenen := 0, 0
+	eklenen := 0
 	var soguma time.Duration
 	doldu := false
 	for _, id := range ids {
@@ -176,11 +183,11 @@ func (k *kuyruk) bayiEkle(rid int64, ids []int64, tumu bool) (int, time.Duration
 	}
 	switch {
 	case sirada > 0:
-		return sirada, 0
+		return sirada, eklenen, 0
 	case doldu:
-		return 0, kuyrukDoluBekleme
+		return 0, 0, kuyrukDoluBekleme
 	default:
-		return 0, soguma
+		return 0, 0, soguma
 	}
 }
 
