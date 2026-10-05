@@ -111,9 +111,18 @@ func ekAlanAdiDogrula(girdi string) (string, error) {
 
 // ── güvenli yol üreticileri ──
 
-func ekDocrootTaban(sk string) string { return evKoku + "/" + sk + "/ek-alanlar" }
+// ekAlanKlasoru — ek alan adı docroot'larının hesap içindeki taban klasörü (DirectAdmin
+// düzeni: alt alanlar /home/<sk>/subdomains, ek alanlar /home/<sk>/domains). TEK tanım:
+// tüm yollar buradan üretilir. ekAlanEskiKlasor yalnız taşıma onarımında (ekalan_tasima.go)
+// kullanılır.
+const (
+	ekAlanKlasoru    = "domains"
+	ekAlanEskiKlasor = "ek-alanlar"
+)
 
-// ekDocroot — hesap dizini altında: <ev>/<sk>/ek-alanlar/<alan>/public_html.
+func ekDocrootTaban(sk string) string { return evKoku + "/" + sk + "/" + ekAlanKlasoru }
+
+// ekDocroot — hesap dizini altında: <ev>/<sk>/domains/<alan>/public_html.
 func ekDocroot(sk, ad string) string { return ekDocrootTaban(sk) + "/" + ad + "/public_html" }
 
 // ekConfPath — nginx vhost dosyası: ek_<sk>_<alan>.conf. Alan adı '_' içermez
@@ -122,7 +131,7 @@ func ekConfPath(sk, ad string) string { return nginxConfD + "/ek_" + sk + "_" + 
 
 // ekYolGuvenli — yolun (docroot ya da alan dizini) gerçekten hesap dizini altında
 // kaldığını doğrular: sembolik bağlantı çözülmüş hâli de ev dizininin altında olmalı.
-// Var olmayan yol için EN YAKIN var olan üst dizin çözülür. Kiracı kendi ek-alanlar
+// Var olmayan yol için EN YAKIN var olan üst dizin çözülür. Kiracı kendi domains
 // dizinini sembolik bağlantıyla değiştirip kök işlemlerini (chown/RemoveAll) dışarı
 // yönlendiremez.
 func ekYolGuvenli(sk, yol string) error {
