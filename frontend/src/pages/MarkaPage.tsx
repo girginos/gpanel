@@ -19,21 +19,31 @@ import { useMarkaCeviri } from '@/components/marka/ceviri'
 
 type Sekme = 'marka' | 'adres' | 'bayiler'
 
+// Müşteri giriş bağlantısı: özel adres AKTİFse https://<özel-adres>/cp/giris (özel host markayı
+// ?m= olmadan çözer), değilse kısa kodlu bağlantı + özel adres ipucu.
+function musteriBaglantisi(veri: Pick<YonetGorunum, 'musteri_adresi' | 'anahtar' | 'ozel_adres'>, origin: string): { url: string; ozel: boolean } {
+  if (veri.ozel_adres) return { url: `https://${veri.ozel_adres}/cp/giris`, ozel: true }
+  const kok = (veri.musteri_adresi || origin).replace(/\/+$/, '')
+  return { url: `${kok}/cp/giris?m=${veri.anahtar}`, ozel: false }
+}
+
 function MusteriBaglantisi({ veri }: { veri: YonetGorunum }) {
   const cevir = useMarkaCeviri()
   const toast = useToast()
-  const kok = (veri.musteri_adresi || window.location.origin).replace(/\/+$/, '')
-  const baglanti = `${kok}/cp/giris?m=${veri.anahtar}`
+  const { url: baglanti, ozel } = musteriBaglantisi(veri, window.location.origin)
   return (
     <Card skin="bordered" className="p-4">
-      <h3 className="text-sm font-semibold text-gray-800 dark:text-dark-50">{cevir('Müşteri giriş bağlantısı')}</h3>
-      <p className="mt-1 text-xs text-gray-500 dark:text-dark-300">{cevir('Bu bağlantıyla gelen müşteri giriş sayfasında sizin markanızı görür. Bağlantıdaki kısa ad tahmin edilemez; paylaşmak güvenlidir.')}</p>
+      <h3 className="text-sm font-semibold text-gray-800 dark:text-dark-50">{cevir(ozel ? 'Müşteri giriş bağlantısı (özel adres)' : 'Müşteri giriş bağlantısı')}</h3>
+      <p className="mt-1 text-xs text-gray-500 dark:text-dark-300">{cevir(ozel
+        ? 'Bu bağlantıyla gelen müşteri giriş sayfasında sizin markanızı görür. Bağlantı sizin özel adresinizdedir.'
+        : 'Bu bağlantıyla gelen müşteri giriş sayfasında sizin markanızı görür. Bağlantıdaki kısa ad tahmin edilemez; paylaşmak güvenlidir.')}</p>
       <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
         <code className="min-w-0 flex-1 break-all rounded bg-gray-100 px-2 py-1.5 font-mono text-xs text-gray-800 dark:bg-dark-600 dark:text-dark-100">{baglanti}</code>
         <Button boyut="sm" variant="outlined" ikon={I.kopya} onClick={() => {
           navigator.clipboard?.writeText(baglanti).then(() => toast.basari(cevir('Kopyalandı')), () => { /* pano kapalı */ })
         }}>{cevir('Kopyala')}</Button>
       </div>
+      {!ozel && <p className="mt-2 text-xs text-gray-500 dark:text-dark-300">{cevir('Kendi alan adınızı Özel adres sekmesinden bağlayabilirsiniz.')}</p>}
     </Card>
   )
 }
@@ -63,7 +73,8 @@ export default function MarkaPage() {
   }
 
   const sekmeler: Array<{ k: Sekme; ad: string }> = [{ k: 'marka', ad: bayi ? 'Markam' : 'Marka' }]
-  if (bayi && veri?.alanadi_izni) sekmeler.push({ k: 'adres', ad: 'Özel adres' })
+  // Sekme HER ZAMAN görünür: izin yoksa içinde bilgi mesajı çıkar (backend 403 davranışı aynen).
+  if (bayi) sekmeler.push({ k: 'adres', ad: 'Özel adres' })
   if (kok) sekmeler.push({ k: 'bayiler', ad: 'Bayi markaları' })
 
   return (
@@ -95,7 +106,7 @@ export default function MarkaPage() {
       )}
 
       {sekme === 'bayiler' && kok ? <BayiMarkalari />
-        : sekme === 'adres' && bayi ? <OzelAdres />
+        : sekme === 'adres' && bayi ? <OzelAdres onDegisti={yukle} />
           : kapali ? <UyariKutusu ton="bilgi">{cevir('Marka ayarları bu hesap için kapalı.')}</UyariKutusu>
             : hata ? <UyariKutusu ton="tehlike">{hata}</UyariKutusu>
               : !veri ? <p className="text-sm text-gray-500 dark:text-dark-300">{cevir('Yükleniyor…')}</p>
