@@ -32,7 +32,7 @@ import (
 var EvKoku = kiraci.EvKoku
 
 // OSKullanici: sk → komutun koşacağı ve kimliği çözülen işletim sistemi kullanıcısı.
-// Üretimde birebir; testler ayrıcalıksız "nobody" ile değiştirir (sitekopya deseni).
+// Üretimde birebir; testler ayrıcalıksız "nobody" ile değiştirir.
 var OSKullanici = func(sk string) string { return sk }
 
 // EvDizini: <EvKoku>/<sk>; sk geçersizse hata.
