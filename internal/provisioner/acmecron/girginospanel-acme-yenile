@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# girginospanel-acme-yenile — acme.sh sertifika yenilemesinin TEK giriş noktası.
+#
+#   girginospanel-acme-yenile          # her config-home için `acme.sh --cron` (cron bunu çağırır)
+#   girginospanel-acme-yenile durum    # salt-okuma: kayıt başına YENILEME/BITIS özeti (girginospanel-dogrula kullanır)
+#
+# Neden var: panelin sertifika kayıtları BİRDEN ÇOK acme.sh config-home'unda durur
+# (/var/lib/girginospanel/acme = alan/alt alan/ek alan/posta; /opt/girginospanel/acme = panel
+# adı + marka). `acme.sh --cron` tek --config-home alır; eskiden yalnız birine bağlıydı, diğeri
+# sessizce yenilenmiyordu. Burada HER BİRİ için ayrı çağrı yapılır; biri patlarsa diğerleri engellenmez.
+# Çıktı `logger -t girginospanel-acme` ile günlüğe gider:  journalctl -t girginospanel-acme
+#
+# Bu dosyanın TEK kaynağı: internal/provisioner/acmecron/ (panel açılışında /usr/local/bin'e yazılır).
+set -u
+ACME="${GOSP_ACME_BIN:-/root/.acme.sh/acme.sh}"
+ACME_HOME="${GOSP_ACME_HOME:-/root/.acme.sh}"
+HOMES="${GOSP_ACME_CONFIG_HOMES:-/var/lib/girginospanel/acme /opt/girginospanel/acme}"
+KILIT="${GOSP_ACME_KILIT:-/var/lock/girginospanel-acme.lock}"
+GRACE="${GOSP_ACME_GRACE:-43200}"      # yenileme zamanı geçeli bu kadar sn olmadan "gecikmiş" sayılmaz (cron 6 saatte bir)
+YAKIN_GUN="${GOSP_ACME_YAKIN_GUN:-14}" # bitişe bu kadar gün kala "yaklaşan"
+
+log() { logger -t girginospanel-acme -- "$*" 2>/dev/null || true; echo "$*"; }
+
+kayitlar() { # $1=config-home → *.conf kayıt dosyaları (csr.conf ve hesap dosyası hariç)
+  local f
+  for f in "$1"/*/*.conf; do
+    [ -f "$f" ] || continue
+    case "$f" in *.csr.conf) continue ;; esac
+    printf '%s\n' "$f"
+  done
+}
+
+alan_oku() { # $1=conf $2=anahtar → değer
+  sed -n "s/^$2='\\{0,1\\}\\([^']*\\)'\\{0,1\\}\$/\\1/p" "$1" | head -1
+}
+
+durum() {
+  local simdi d f ad ren tam sertf bitis bitsn kalan st
+  simdi=$(date +%s)
+  for d in $HOMES; do
+    [ -d "$d" ] || continue
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      ad=$(alan_oku "$f" Le_Domain); ren=$(alan_oku "$f" Le_NextRenewTime)
+      # Hiç sertifika alınamamış kayıt (başarısız ilk deneme): yenileme zamanı yok → atla.
+      [ -n "$ad" ] && [ -n "$ren" ] || continue
+      tam=$(alan_oku "$f" Le_RealFullChainPath)
+      sertf=""
+      if [ -n "$tam" ] && [ -r "$tam" ]; then sertf=$tam
+      elif [ -r "$(dirname "$f")/fullchain.cer" ]; then sertf=$(dirname "$f")/fullchain.cer; fi
+      kalan="?"; bitis="?"
+      if [ -n "$sertf" ]; then
+        bitis=$(openssl x509 -noout -enddate -in "$sertf" 2>/dev/null | sed 's/^notAfter=//')
+        bitsn=$(date -d "$bitis" +%s 2>/dev/null || true)
+        [ -n "$bitsn" ] && kalan=$(( (bitsn - simdi) / 86400 )) || bitis="?"
+      fi
+      st=TAMAM
+      if [ "$ren" -lt $((simdi - GRACE)) ] 2>/dev/null; then st=GECMIS
+      elif [ "$kalan" != "?" ] && [ "$kalan" -le "$YAKIN_GUN" ]; then st=YAKLASAN; fi
+      printf '%s|%s|%s|%s|%s\n' "$st" "$ad" "$d" "$kalan" "$bitis"
+    done < <(kayitlar "$d")
+  done
+}
+
+yenile() {
+  local d out rc satir hata=0 n=0
+  [ -x "$ACME" ] || { log "HATA acme.sh yok: $ACME"; return 1; }
+  exec 9>"$KILIT" 2>/dev/null && { flock -n 9 || { log "başka bir yenileme çalışıyor, atlandı"; return 0; }; }
+  for d in $HOMES; do
+    [ -d "$d" ] || continue
+    [ -n "$(kayitlar "$d" | head -1)" ] || continue   # kayıt yoksa çalıştırma
+    n=$((n+1))
+    out=$("$ACME" --cron --home "$ACME_HOME" --config-home "$d" 2>&1); rc=$?
+    while IFS= read -r satir; do [ -n "$satir" ] && log "[$d] $satir"; done <<<"$out"
+    if [ $rc -ne 0 ]; then log "HATA [$d] acme.sh çıkış kodu $rc"; hata=$((hata+1)); fi
+  done
+  log "yenileme turu bitti: $n config-home, $hata hatalı"
+  [ $hata -eq 0 ]
+}
+
+case "${1:-yenile}" in
+  durum)  durum ;;
+  yenile) yenile ;;
+  *) echo "kullanım: $0 [yenile|durum]" >&2; exit 2 ;;
+esac
