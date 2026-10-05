@@ -214,7 +214,10 @@ func TestDNSKontrol_EszamanlilikSiniri(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
-		go func(i int) { defer wg.Done(); dnsKontrol([]string{fmt.Sprintf("d%d.test", i)}, []string{"203.0.113.7"}) }(i)
+		go func(i int) {
+			defer wg.Done()
+			dnsKontrol([]string{fmt.Sprintf("d%d.test", i)}, []string{"203.0.113.7"})
+		}(i)
 	}
 	wg.Wait()
 	if azami.Load() > 4 {
