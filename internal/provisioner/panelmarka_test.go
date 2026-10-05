@@ -129,6 +129,9 @@ func pmTestKur(t *testing.T) *pmSahte {
 	_ = os.MkdirAll(kendi, 0o700)
 	_ = os.WriteFile(filepath.Join(kendi, "panel.kok.test.conf"), []byte("Le_Domain='panel.kok.test'\nLe_RealFullChainPath='"+pmPanelCrt+"'\n"), 0o600)
 
+	eskiYol := pmAcmeYoluBekle
+	t.Cleanup(func() { pmAcmeYoluBekle = eskiYol })
+	pmAcmeYoluBekle = func(string) error { return nil } // gerçek nginx yok; ölçüm ayrı testte
 	pmAcmeVar = func() bool { return true }
 	pmBuSunucuya = func(ad string, _ []string) bool { return s.dns[ad] }
 	pmNginxGrup = func(yol string) { s.grup = append(s.grup, yol) }

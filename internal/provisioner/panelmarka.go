@@ -463,6 +463,10 @@ func pmSertifikaAl(ctx context.Context, ad string) (time.Time, string, string) {
 	if err := pmDizinHazirla(); err != nil {
 		return time.Time{}, pmMsjSert, "dizin: " + err.Error()
 	}
+	// 🔴 vhost reload'u asenkron: yolu LE'ye gitmeden önce ölç (bkz. panelmarka_acme_hazir.go).
+	if err := pmAcmeYoluBekle(ad); err != nil {
+		return time.Time{}, pmMsjNginx, "challenge yolu yerel nginx'te canlı değil: " + err.Error()
+	}
 	c, iptal := context.WithTimeout(ctx, 4*time.Minute)
 	defer iptal()
 	sunucu := "letsencrypt"
