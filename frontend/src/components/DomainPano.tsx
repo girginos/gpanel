@@ -13,7 +13,6 @@ const ICONS = {
   db:        'M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3-3.582 3-8 3-8-1.343-8-3zm0 0v10c0 1.657 3.582 3 8 3s8-1.343 8-3V7M4 12c0 1.657 3.582 3 8 3s8-1.343 8-3',
   ftp:       'M3 16V8a2 2 0 012-2h6l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2zM9 12l3-3 3 3M12 9v6',
   yedek:     'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 12l-4 4-4-4M12 16V4',
-  kopya:     'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z',
   php:       'M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z',
   log:       'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
   cron:      'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
@@ -41,7 +40,6 @@ const CMP_EN: Record<string, string> = {
   "Dosyalar": "Files",
   "Performans": "Performance",
   "Yedekler": "Backups",
-  "Website Clone": "Website Clone",
   "Cronlar": "Cron Jobs",
   "SSL Sertifikaları": "SSL Certificates",
   "Erişim Kısıtlama": "Access Control",
@@ -74,7 +72,6 @@ export default function DomainPano({ domain }: { domain: Domain }) {
         <ToolCard etiket={cevir("Veritabanları")}    ikon={ICONS.db}       renk="violet"  onClick={git('veritabanlari')} />
         <ToolCard etiket="FTP"                       ikon={ICONS.ftp}      renk="sky"     onClick={git('ftp')} />
         <ToolCard etiket={cevir("Yedekler")}         ikon={ICONS.yedek}    renk="rose"    onClick={git('yedekler')} />
-        <ToolCard etiket={cevir("Website Clone")}    ikon={ICONS.kopya}    renk="sky"     onClick={git('kopyala')} />
       </Grup>
 
       <Grup baslik={cevir("Geliştirme Araçları")}>

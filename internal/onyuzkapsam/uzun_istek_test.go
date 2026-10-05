@@ -80,7 +80,6 @@ var uzunCagrilar = map[string][]string{
 	"pages/DomainLaravelPage.tsx":        {"/laravel/kur`", "/laravel/deploy`", "/laravel/queue`", "/laravel/otomatik-hazirla`", "(url, body"},
 	"pages/DomainComposerPage.tsx":       {"`${base}/composer`"},
 	"pages/RedisPage.tsx":                {"/redis`"},
-	"pages/DomainKopyaPage.tsx":          {"/kopya`"},
 	"pages/DomainBackupsPage.tsx":        {"/geriyukle`", "/backups/${silinecek.id}`"},
 	"pages/DomainGitPage.tsx":            {"/git`", "/git/klonla`", "/git/pull`", "/github/use`"},
 	"components/UygulamaKatalogu.tsx":    {"/uygulamalar`", "/uygulamalar/${kayitID}`"},

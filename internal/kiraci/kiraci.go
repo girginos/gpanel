@@ -18,7 +18,7 @@
 // edemez → <EvKoku>/<sk> güvenilir bir çapadır.
 //
 // Panelin TEK runuser sarmalayıcısı Komut'tur (evalti ve taşıma bunu kullanır).
-// Öncüller: sitekopya.kiraciKomut, archivex.runuserKomut ve git.kiraciCalistir
+// Öncüller: archivex.runuserKomut ve git.kiraciCalistir
 // (ayrı işte bu pakete geçirilir). Paket yapraktır: panelin başka paketini içe
 // aktarmaz.
 package kiraci

@@ -49,7 +49,6 @@ const DomainComposerPage = lazy(() => import('@/pages/DomainComposerPage'))
 const DomainSifreKorumaPage = lazy(() => import('@/pages/DomainSifreKorumaPage'))
 const DomainAntivirusPage = lazy(() => import('@/pages/DomainAntivirusPage'))
 const AntivirusPanel = lazy(() => import('@/pages/AntivirusPanel'))
-const DomainKopyaPage = lazy(() => import('@/pages/DomainKopyaPage'))
 const DomainCronPage = lazy(() => import('@/pages/DomainCronPage'))
 const DomainLogsPage = lazy(() => import('@/pages/DomainLogsPage'))
 const DomainDNSPage = lazy(() => import('@/pages/DomainDNSPage'))
@@ -234,7 +233,6 @@ export default function App() {
         <Route path="abonelikler/:id/composer"      element={<DomainComposerPage />} />
         <Route path="abonelikler/:id/sifre-koruma"  element={<DomainSifreKorumaPage />} />
         <Route path="abonelikler/:id/imunify"       element={<DomainAntivirusPage />} />
-        <Route path="abonelikler/:id/kopyala"       element={<DomainKopyaPage />} />
         <Route path="abonelikler/:id/wordpress"     element={<DomainWordPressPage />} />
         <Route path="abonelikler/:id/subdomainler"  element={<DomainSubdomainlerPage />} />
         <Route path="abonelikler/:id/subdomainler/:sid" element={<DomainSubdomainYonetPage />} />

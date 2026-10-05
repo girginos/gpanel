@@ -38,7 +38,6 @@ var kopukKapsam = map[string][]string{
 	"laravel/gorevkuyruk.go":  {"Schedule", "Queue"},
 	"laravel/kur.go":          {"Kur"},
 	"laravel/deploy.go":       {"Deploy"},
-	"sitekopya/sitekopya.go":  {"Olustur"},
 	"uygulama/handler.go":     {"Kur", "Sil"},
 	"backups/backups.go":      {"Delete"},
 	"backups/restore.go":      {"Restore"},

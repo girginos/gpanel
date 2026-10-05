@@ -57,7 +57,6 @@ export const MUSTERI_ARACLAR: MusteriArac[] = [
   { kod: 'dosyalar', ad: 'Dosya Yöneticisi', aciklama: 'Dosyaları yükle, düzenle, sıkıştır', ikon: 'klasor', kapsam: 'hesap', kategori: 'dosyalar', yol: 'dosyalar', anahtar: ['dosya', 'file', 'upload', 'yükle', 'public_html', 'zip'] },
   { kod: 'ftp', ad: 'FTP Hesapları', aciklama: 'FTP erişimi ve parolası', ikon: 'yukle', kapsam: 'hesap', kategori: 'dosyalar', yol: 'ftp', anahtar: ['ftp', 'sftp', 'parola', 'şifre', 'password'] },
   { kod: 'yedekler', ad: 'Yedekler', aciklama: 'Yedek al, geri yükle, indir', ikon: 'bulut', kapsam: 'hesap', kategori: 'dosyalar', yol: 'yedekler', anahtar: ['yedek', 'backup', 'geri yükle', 'restore'] },
-  { kod: 'kopyala', ad: 'Web Sitesini Kopyala', aciklama: 'public_html içeriğinin kopyasını oluştur', ikon: 'kopya', kapsam: 'hesap', kategori: 'dosyalar', yol: 'kopyala', anahtar: ['kopya', 'klon', 'clone', 'copy', 'staging'] },
   { kod: 'baglanti', ad: 'Bağlantı Bilgileri', aciklama: 'FTP ve veritabanı bağlantı ayrıntıları', ikon: 'link', kapsam: 'hesap', kategori: 'dosyalar', yol: 'baglanti', anahtar: ['bağlantı', 'connection', 'host', 'sunucu', 'kullanıcı adı'] },
   // Veritabanları
   { kod: 'veritabanlari', ad: 'Veritabanları', aciklama: 'MySQL veritabanları, kullanıcılar, phpMyAdmin', ikon: 'db', kapsam: 'hesap', kategori: 'veritabanlari', yol: 'veritabanlari', anahtar: ['mysql', 'mariadb', 'db', 'database', 'sql', 'phpmyadmin'] },
@@ -110,7 +109,6 @@ export const ARAC_EN: Record<string, string> = {
   'FTP erişimi ve parolası': 'FTP access and password',
   'Yedekler': 'Backups',
   'Yedek al, geri yükle, indir': 'Back up, restore, download',
-  'Web Sitesini Kopyala': 'Copy Website',
   'public_html içeriğinin kopyasını oluştur': 'Create a copy of your public_html contents',
   'Bağlantı Bilgileri': 'Connection Details',
   'FTP ve veritabanı bağlantı ayrıntıları': 'FTP and database connection details',

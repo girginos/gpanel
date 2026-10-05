@@ -72,7 +72,6 @@ import (
 	"girginospanel/internal/reseller"
 	"girginospanel/internal/runtime"
 	"girginospanel/internal/sifrekoruma"
-	"girginospanel/internal/sitekopya"
 	"girginospanel/internal/sshaccess"
 	"girginospanel/internal/subdomain"
 	"girginospanel/internal/surum"
@@ -417,7 +416,6 @@ func main() {
 	bildirimH := &bildirim.Handlers{DB: d}
 	panoH := &pano.Handlers{DB: d}
 	zincirH := &zincir.Handlers{DB: d}
-	kopyaH := &sitekopya.Handlers{DB: d}
 	wpH := &wordpress.Handlers{DB: d}
 	fwH := &guvenlikduvari.Handlers{DB: d}
 	wafH := &waf.Handlers{DB: d}
@@ -848,9 +846,6 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/antivirus/karantina/{bid}/sil", avH.KarantinaSil)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/antivirus/karantina/{bid}/incele", avH.KarantinaIncele)
 				r.With(middleware.AdminOnly).Post("/domains/{id}/antivirus/imza-guncelle", avH.ImzaGuncelle) // sunucu geneli freshclam: yalnız yönetici
-				r.With(middleware.MusteriScope).Get("/domains/{id}/kopya", kopyaH.Liste)
-				r.With(middleware.MusteriScope).Post("/domains/{id}/kopya", kopyaH.Olustur)
-				r.With(middleware.MusteriScope).Delete("/domains/{id}/kopya/{ad}", kopyaH.Sil)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/wordpress", wpH.Liste)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/wordpress", wpH.Kur)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/wordpress/guncelle", wpH.Guncelle)
