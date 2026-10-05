@@ -6,6 +6,7 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { ARAC_EN } from './araclar'
 
 export const MUSTERI_ANA_EN: Record<string, string> = {
+  'SSL yönet — tüm alan adları': 'Manage SSL — all domains',
   // Sayfa / genel
   'Yükleniyor…': 'Loading…',
   'Hesap bilgileri': 'Account information',

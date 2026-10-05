@@ -908,6 +908,9 @@ func main() {
 				r.With(middleware.MusteriScope).Post("/domains/{id}/ek-alan-adlari/{eid}/ssl", subH.EkSSLKur)
 				r.With(middleware.MusteriScope).Delete("/domains/{id}/ek-alan-adlari/{eid}/ssl", subH.EkSSLKaldir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ek-alan-adlari/{eid}/dns", subH.EkDNS)
+				// Hesap düzeyinde SSL hedef listesi (ana + ek + alt alan adı; salt okuma). Kurulum/kaldırma
+				// mevcut üç uçta kalır; API anahtarı izin tablosunda YOK (varsayılan reddet).
+				r.With(middleware.MusteriScope).Get("/domains/{id}/ssl/hedefler", subH.SSLHedefler)
 				// Subdomain WordPress (docroot-kapsamli, wpKapsam ile alt-alana hapis)
 				// Ek alan adı WordPress (docroot-kapsamlı; {eid} hesaba bağlanır, başka hesap 404)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/ek-alan-adlari/{eid}/wordpress", wpH.Liste)

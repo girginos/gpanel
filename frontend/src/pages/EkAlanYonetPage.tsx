@@ -126,6 +126,7 @@ function SslKarti({ id, eid, d, ssl }: { id: string; eid: string; d: Detay; ssl:
           )}
         </div>
         <p className="mt-3 text-xs text-gray-500 dark:text-dark-300">{cevirF('Let’s Encrypt için {0} A kaydının bu sunucuya{1} çözümlenmesi gerekir.', d.alan_adi, d.ip ? ` (${d.ip})` : '')}</p>
+        <Link to={`/abonelikler/${id}/ssl?hedef=ek:${eid}`} className="mt-1 inline-block text-xs text-primary-600 hover:underline dark:text-primary-400">{cevir('SSL yönet — tüm alan adları')}</Link>
         {hata && (
           <UyariKutusu ton="tehlike" kucuk className="mt-3">
             <p className="break-words">{hata}</p>
