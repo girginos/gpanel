@@ -23,7 +23,7 @@ func TestEkAlanRotalari_MusteriScopeVeBagli(t *testing.T) {
 	}
 	var satirlar []string
 	for _, s := range strings.Split(string(b), "\n") {
-		if strings.Contains(s, `"/domains/{id}/ek-alan-adlari`) {
+		if strings.Contains(s, `"/domains/{id}/ek-alan-adlari`) && !strings.Contains(s, "/wordpress") {
 			satirlar = append(satirlar, s)
 		}
 	}

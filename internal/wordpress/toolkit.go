@@ -27,8 +27,11 @@ func (h *Handlers) dizinQP(r *http.Request, sk string) (string, error) {
 	if d == "" {
 		d = "/"
 	}
-	root, _, _ := h.wpKapsam(r, sk)
-	return cozDizin(root, d)
+	kp, ok := h.kapsam(r, sk)
+	if !ok {
+		return "", errHedefYok
+	}
+	return cozDizin(kp.Root, d)
 }
 
 // GET /domains/{id}/wordpress/durum?dizin= — çekirdek sürüm/güncelleme + PHP + DB boyutu + bakım
@@ -46,7 +49,7 @@ func (h *Handlers) Durum(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, err := h.dizinQP(r, sk)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		hedefHata(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, durumOlustur(r.Context(), sk, dir))
@@ -100,7 +103,7 @@ func (h *Handlers) Eklentiler(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, err := h.dizinQP(r, sk)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		hedefHata(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, listeTur(r.Context(), sk, dir, "plugin"))
@@ -115,7 +118,7 @@ func (h *Handlers) Temalar(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, err := h.dizinQP(r, sk)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		hedefHata(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, listeTur(r.Context(), sk, dir, "theme"))
@@ -130,7 +133,7 @@ func (h *Handlers) Kullanicilar(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, err := h.dizinQP(r, sk)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		hedefHata(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, listeTur(r.Context(), sk, dir, "user"))
@@ -147,8 +150,12 @@ func (h *Handlers) mutasyonHazir(w http.ResponseWriter, r *http.Request, dizin s
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğinde kullanılamaz")
 		return "", "", false
 	}
-	root, _, _ := h.wpKapsam(r, sk)
-	d, err := cozDizin(root, dizin)
+	kp, kok := h.kapsam(r, sk)
+	if !kok {
+		httpx.WriteError(w, http.StatusNotFound, errHedefYok.Error())
+		return "", "", false
+	}
+	d, err := cozDizin(kp.Root, dizin)
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return "", "", false

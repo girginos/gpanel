@@ -70,7 +70,7 @@ var reSurumSatir = regexp.MustCompile(`(?m)^\s*\$wp_version\s*=\s*'([^'\r\n]{1,4
 // symlink'iyle root okumasını başka yere çeviremez), O_NONBLOCK ile FIFO'da takılmaz,
 // yalnız düz dosya, en çok 32 KiB. Okunamazsa/biçim dışıysa "" döner.
 func surumOku(sk, dir string) string {
-	home := "/home/" + sk
+	home := wpEv + "/" + sk
 	rel, err := filepath.Rel(home, dir)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return ""
