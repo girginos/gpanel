@@ -4,17 +4,21 @@ import i18n from '@/lib/i18n'
 import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Ikon, I } from '@/components/Ikon'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
-import { Button, Badge, butonSinifi } from '@/components/ui'
+import { Button, Badge, Select, butonSinifi } from '@/components/ui'
 import { SatirIskeleti } from '@/components/SatirIskeleti'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import { hedefAnahtar, hedefBase, hedefSslYol, derinBaglanti, urlOnizleme, type WpTur } from '@/lib/wpHedef'
 
-type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string; admin_kullanici?: string; parola_var?: boolean }
+type Tur = WpTur
+type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string; admin_kullanici?: string; parola_var?: boolean; alan_adi?: string; tur?: Tur; ek_alan_id?: number; alt_alan_id?: number }
+// Kurulum hedefi (GET /domains/{id}/wordpress/hedefler): ana alan adı, ek alan adı ya da alt alan adı.
+type Hedef = { tur: Tur; alan_adi: string; ek_alan_id?: number; alt_alan_id?: number; docroot_durum: 'bos' | 'dolu' | 'wp_var' | 'yok'; ssl: boolean; url_onizleme: string; kurulabilir: boolean; kok_kurulabilir: boolean; neden?: string }
 type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola?: string; surum: string }
 type Durum = { surum: string; guncelleme_var: boolean; hedef_surum: string; php: string; db_mb: string; bakim: boolean; yukleniyor?: boolean }
 type Paket = { name: string; status: string; version: string; update: string; update_version: string }
@@ -31,7 +35,6 @@ const WP_EN: Record<string, string> = {
   "Bakım modu kapatıldı.": "Maintenance mode disabled.",
   "Bakım moduna al": "Enable maintenance mode",
   "Bakım modunu kapat": "Disable maintenance mode",
-  "Bu domainde henüz WordPress yok": "No WordPress on this domain yet",
   "Devre dışı": "Disabled",
   "Dosyalar silindi, veritabanı KALDI": "Files deleted, the database REMAINS",
   "Hızlı bakım işlemleri. Sürüm güncellemesi varsa üstteki metrikte görünür.": "Quick maintenance operations. If a version update is available it shows in the metric above.",
@@ -97,22 +100,52 @@ const WP_EN: Record<string, string> = {
   "Yeni parola gerekli.": "New password is required.",
   "{0} parolası güncellendi.": "Password for {0} updated.",
   "Aboneliğe dön": "Back to subscription",
+  "Alan adı": "Domain",
+  "Alan adı süzgeci": "Domain filter",
+  "Tüm alan adları": "All domains",
+  "ana": "primary",
+  "ek alan adı": "addon domain",
+  "alt alan adı": "subdomain",
+  "Ana": "Primary",
+  "Ek": "Addon",
+  "Alt": "Sub",
+  "WordPress kurulu": "WordPress installed",
+  "Bu alan adında SSL yok; site http olarak kurulur, sonra SSL ekleyebilirsiniz.": "This domain has no SSL; the site is installed over http and you can add SSL later.",
+  "SSL sayfasına git": "Go to SSL",
+  "Site adresi": "Site address",
+  "Hesabınızda henüz WordPress yok": "No WordPress in your account yet",
+  "Bu alan adında henüz WordPress yok": "No WordPress on this domain yet",
+  "Bu alan adında WordPress kurulu; yalnız bir alt dizine kurulabilir.": "WordPress is already installed on this domain; you can only install into a subdirectory.",
+  "Bu alan adının dizini boş değil; bir alt dizin girin.": "This domain's directory is not empty; enter a subdirectory.",
+  "Bu alan adının dizini bulunamadı; kurulum yapılamaz.": "This domain's directory was not found; installation is not possible.",
+  "Alan adı bilgisi alınamadı": "Could not load domain information",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
+
+// Hedef seçici etiketi: "girginos.cloud (ana)", "test5.com (ek alan adı)" (+ "— WordPress kurulu").
+function hedefEtiket(h: Hedef, kuruluEtiketi: boolean): string {
+  const tur = h.tur === 'ek' ? cevir('ek alan adı') : h.tur === 'alt' ? cevir('alt alan adı') : cevir('ana')
+  return `${h.alan_adi} (${tur})${kuruluEtiketi && h.docroot_durum === 'wp_var' ? ` — ${cevir('WordPress kurulu')}` : ''}`
+}
 
 export default function DomainWordPressPage() {
   useTranslation() // dil re-render aboneligi
   useDialog()
   const toast = useToast()
   const { id, sid } = useParams()
-  const base = sid ? `/domains/${id}/subdomain/${sid}/wordpress` : `/domains/${id}/wordpress`
+  const [sp] = useSearchParams()
+  // Derin bağlantı: ?hedef=ek:<id> | alt:<id> | ana  (alt alan adı rotası :sid de aynısını verir).
+  const derinBag = derinBaglanti(sid, sp.get('hedef'))
   const [liste, setListe] = useState<Kurulum[]>([])
+  const [hedefler, setHedefler] = useState<Hedef[]>([])
   const [yuk, setYuk] = useState(true)
   // Hata artik sag ust toast'ta gosterilir; state mantik icin duruyor.
   const [, setHata] = useState<string | null>(null)
   const [kuruyor, setKuruyor] = useState(false)
   const [sonuc, setSonuc] = useState<Sonuc | null>(null)
   const [formAcik, setFormAcik] = useState(false)
+  const [filtre, setFiltre] = useState(derinBag) // '' = tüm alan adları
+  const [secili, setSecili] = useState(derinBag) // kurulum formundaki hedef
 
   const [alanAdi, setAlanAdi] = useState('')
   const [altDizin, setAltDizin] = useState('')
@@ -120,6 +153,8 @@ export default function DomainWordPressPage() {
   // 'admin' brute-force'un bir numarali hedefi — varsayilan BOS, alan zorunlu.
   const [adminK, setAdminK] = useState('')
   const [adminE, setAdminE] = useState('')
+
+  useEffect(() => { setFiltre(derinBag); setSecili(derinBag) }, [derinBag])
 
   useEffect(() => {
     let iptal = false
@@ -129,22 +164,35 @@ export default function DomainWordPressPage() {
   }, [id])
 
   const listeleNesli = useRef(0)
+  // Hesabın TÜM alan adlarındaki kurulumlar (ana + ek + alt) ve kurulum hedefleri tek turda.
   const listele = useCallback(() => {
     if (!id) return
     setYuk(true)
     const _n = ++listeleNesli.current
-    api.get<Kurulum[]>(`${base}`).then(r => { if (_n !== listeleNesli.current) return; setListe(r.data || []) }).catch(() => { if (_n !== listeleNesli.current) return; setListe([]) }).finally(() => { if (_n !== listeleNesli.current) return; setYuk(false) })
+    api.get<Hedef[]>(`/domains/${id}/wordpress/hedefler`).then(r => { if (_n !== listeleNesli.current) return; setHedefler(r.data || []) }).catch(() => { if (_n !== listeleNesli.current) return; setHedefler([]) })
+    api.get<Kurulum[]>(`/domains/${id}/wordpress/hesap`).then(r => { if (_n !== listeleNesli.current) return; setListe(r.data || []) }).catch(() => { if (_n !== listeleNesli.current) return; setListe([]) }).finally(() => { if (_n !== listeleNesli.current) return; setYuk(false) })
   }, [id])
   useEffect(() => { listele(); return () => { listeleNesli.current++ } }, [listele])
 
+  // Seçili hedef yoksa/geçersizse makul bir varsayılan: kökü boş olan ilk alan adı.
+  useEffect(() => {
+    if (hedefler.length === 0 || hedefler.some(h => hedefAnahtar(h) === secili)) return
+    const ilk = hedefler.find(h => h.kurulabilir && h.kok_kurulabilir) || hedefler.find(h => h.kurulabilir) || hedefler[0]
+    setSecili(hedefAnahtar(ilk))
+  }, [hedefler, secili])
+
+  const seciliHedef = hedefler.find(h => hedefAnahtar(h) === secili)
+
   async function kur(e: React.FormEvent) {
     e.preventDefault()
+    if (!id || !seciliHedef) return
     setHata(null); setSonuc(null); setKuruyor(true)
     try {
-      const { data } = await api.post<Sonuc>(`${base}`, {
+      const { data } = await api.post<Sonuc>(`${hedefBase(id, seciliHedef)}`, {
         alt_dizin: altDizin.trim(), site_basligi: baslik.trim(), admin_kullanici: adminK.trim(), admin_email: adminE.trim(),
       }, UZUN_ISTEK)
       setSonuc(data); setBaslik(''); setAltDizin(''); setFormAcik(false)
+      if (filtre && filtre !== secili) setFiltre(secili)
       listele()
     } catch (err) {
       const m = apiHata(err, cevir("Kurulum başarısız"))
@@ -155,6 +203,9 @@ export default function DomainWordPressPage() {
   }
 
   const bosDurum = !yuk && liste.length === 0
+  const gorunen = filtre ? liste.filter(k => hedefAnahtar(k) === filtre) : liste
+  const filtreBos = !yuk && liste.length > 0 && gorunen.length === 0
+  const formGorunur = bosDurum || filtreBos || formAcik
 
   return (
     <div>
@@ -168,7 +219,7 @@ export default function DomainWordPressPage() {
           <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 tracking-tight">WordPress Toolkit</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{cevir("Sürüm, eklenti, tema ve kullanıcıları tek yerden yönetin.")}</p>
         </div>
-        {!bosDurum && !formAcik && (
+        {!formGorunur && (
           <Button color="primary" ikon={I.arti} onClick={() => { setFormAcik(true); setSonuc(null) }}
             className="w-full sm:w-auto">
             {cevir("Yeni WordPress")}
@@ -178,25 +229,33 @@ export default function DomainWordPressPage() {
 
       {sonuc && <KurulumSonuc s={sonuc} kapat={() => setSonuc(null)} />}
 
+      {!yuk && liste.length > 0 && hedefler.length > 1 && (
+        <div className="mb-4 max-w-xs">
+          <Select aria-label={cevir("Alan adı süzgeci")} value={filtre} onChange={e => setFiltre(e.target.value)}
+            data={[{ value: '', label: cevir("Tüm alan adları") }, ...hedefler.map(h => ({ value: hedefAnahtar(h), label: hedefEtiket(h, false) }))]} />
+        </div>
+      )}
+
       {yuk ? (
         <div className="rounded-lg border border-slate-200/70 dark:border-dark-600/60 bg-white dark:bg-dark-700/40 p-5"><SatirIskeleti satir={4} yukseklik="h-14" etiket={cevir("Yükleniyor…")} /></div>
-      ) : bosDurum ? (
+      ) : (bosDurum || filtreBos) ? (
         <div className="rounded-lg border border-dashed border-slate-200 dark:border-dark-600 bg-white dark:bg-dark-700/40 p-12 text-center mb-5">
           <div className="w-12 h-12 mx-auto rounded-lg bg-slate-100 dark:bg-dark-600/50 flex items-center justify-center mb-3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 text-slate-400 dark:text-slate-500"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></div>
-          <p className="text-base font-medium text-slate-800 dark:text-slate-100">{cevir("Bu domainde henüz WordPress yok")}</p>
+          <p className="text-base font-medium text-slate-800 dark:text-slate-100">{bosDurum ? cevir("Hesabınızda henüz WordPress yok") : cevir("Bu alan adında henüz WordPress yok")}</p>
           <p className="text-sm text-slate-400 mt-1">{cevir("Aşağıdaki formdan tek tıkla kurabilirsiniz.")}</p>
         </div>
       ) : (
         <div className="space-y-5">
-          {liste.map(k => <Toolkit key={k.dizin} id={id!} base={base} kurulum={k} onDegisti={listele} />)}
+          {gorunen.map(k => <Toolkit key={`${hedefAnahtar(k)}|${k.dizin}`} id={id!} base={hedefBase(id!, k)} kurulum={k} onDegisti={listele} />)}
         </div>
       )}
 
-      {(bosDurum || formAcik) && (
+      {formGorunur && (
         <div className="mt-5">
-          <KurulumFormu baslik={baslik} setBaslik={setBaslik} altDizin={altDizin} setAltDizin={setAltDizin}
+          <KurulumFormu id={id!} hedefler={hedefler} secili={secili} setSecili={setSecili} seciliHedef={seciliHedef}
+            baslik={baslik} setBaslik={setBaslik} altDizin={altDizin} setAltDizin={setAltDizin}
             adminK={adminK} setAdminK={setAdminK} adminE={adminE} setAdminE={setAdminE}
-            kur={kur} kuruyor={kuruyor} kapat={bosDurum ? undefined : () => setFormAcik(false)} />
+            kur={kur} kuruyor={kuruyor} kapat={(bosDurum || filtreBos) ? undefined : () => setFormAcik(false)} />
         </div>
       )}
 
@@ -359,7 +418,11 @@ function Toolkit({ id, base, kurulum, onDegisti }: { id: string; base: string; k
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-dark-600/50 flex items-center justify-center shrink-0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 text-slate-500 dark:text-slate-300"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">WordPress <span className="text-slate-400 font-normal font-mono text-xs">· {dizin}</span></div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+              <span className="min-w-0 break-all">{kurulum.alan_adi || 'WordPress'}</span>
+              {kurulum.tur && <Badge variant="soft" color={kurulum.tur === 'ek' ? 'info' : 'neutral'} className="px-1.5 py-0.5 text-[10px]">{kurulum.tur === 'ek' ? cevir("Ek") : kurulum.tur === 'alt' ? cevir("Alt") : cevir("Ana")}</Badge>}
+              <span className="text-slate-400 font-normal font-mono text-xs">· {dizin}</span>
+            </div>
             <div className="text-xs text-slate-400 mt-0.5 truncate">{kurulum.site_url}</div>
           </div>
         </div>
@@ -545,10 +608,17 @@ function KullaniciListe({ liste, mesgul, onReset }: { liste: Kullanici[] | null;
 // ================= kurulum formu · sonuç · modal =================
 
 function KurulumFormu(p: {
+  id: string; hedefler: Hedef[]; secili: string; setSecili: (s: string) => void; seciliHedef?: Hedef
   baslik: string; setBaslik: (s: string) => void; altDizin: string; setAltDizin: (s: string) => void
   adminK: string; setAdminK: (s: string) => void; adminE: string; setAdminE: (s: string) => void
   kur: (e: React.FormEvent) => void; kuruyor: boolean; kapat?: () => void
 }) {
+  const h = p.seciliHedef
+  const altGerekli = !!h && !h.kok_kurulabilir // kök dolu/WordPress kurulu → yalnız alt dizin
+  const url = h ? urlOnizleme(h.url_onizleme, p.altDizin) : ''
+  const kokNotu = !h ? '' : h.docroot_durum === 'wp_var' ? cevir("Bu alan adında WordPress kurulu; yalnız bir alt dizine kurulabilir.")
+    : h.docroot_durum === 'dolu' ? cevir("Bu alan adının dizini boş değil; bir alt dizin girin.")
+      : h.docroot_durum === 'yok' && !h.kurulabilir ? cevir("Bu alan adının dizini bulunamadı; kurulum yapılamaz.") : ''
   return (
     <form onSubmit={p.kur} className="rounded-lg border border-slate-200/70 dark:border-dark-600/60 bg-white dark:bg-dark-700/40 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -556,12 +626,24 @@ function KurulumFormu(p: {
         {p.kapat && <Button type="button" isIcon variant="flat" ikon={I.kapat} onClick={p.kapat} className="size-8 rounded-full" aria-label={cevir("Kapat")} title={cevir("Kapat")} />}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Select label={cevir("Alan adı")} value={p.secili} onChange={e => p.setSecili(e.target.value)} classNames={{ root: 'sm:col-span-2' }}
+          data={p.hedefler.map(x => ({ value: hedefAnahtar(x), label: hedefEtiket(x, true), disabled: !x.kurulabilir }))} />
+        {kokNotu && <p className="sm:col-span-2 -mt-2 text-xs text-slate-500 dark:text-slate-400">{kokNotu}</p>}
+        {h && !h.ssl && (
+          <UyariKutusu ton="uyari" className="sm:col-span-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>{cevir("Bu alan adında SSL yok; site http olarak kurulur, sonra SSL ekleyebilirsiniz.")}</span>
+              <Link to={hedefSslYol(p.id, h)} className={butonSinifi({ variant: 'outlined', boyut: 'sm' })}>{cevir("SSL sayfasına git")}</Link>
+            </div>
+          </UyariKutusu>
+        )}
+        <Girdi et={cevir("Alt dizin (isteğe bağlı)")} v={p.altDizin} set={p.setAltDizin} zorunlu={altGerekli} ph={altGerekli ? 'blog' : cevir("boş = kök · örn: blog")} mono />
         <Girdi et={cevir("Site başlığı")} v={p.baslik} set={p.setBaslik} zorunlu ph={cevir("Benim Blogum")} />
-        <Girdi et={cevir("Alt dizin (isteğe bağlı)")} v={p.altDizin} set={p.setAltDizin} ph={cevir("boş = kök · örn: blog")} mono />
         <Girdi et={cevir("Admin kullanıcı")} v={p.adminK} set={p.setAdminK} zorunlu mono ph={cevir("örn. site-yoneticisi")} />
         <Girdi et={cevir("Admin e-posta")} v={p.adminE} set={p.setAdminE} zorunlu type="email" ph="admin@site.com" />
+        {h && <p className="sm:col-span-2 text-xs text-slate-500 dark:text-slate-400">{cevir("Site adresi")}: <span className="font-mono text-slate-700 dark:text-slate-200 break-all">{url}</span></p>}
       </div>
-      <Button type="submit" color="primary" ikon={I.oynat} disabled={!p.adminK.trim()} yukleniyor={p.kuruyor} className="mt-5">
+      <Button type="submit" color="primary" ikon={I.oynat} disabled={!p.adminK.trim() || !h || !h.kurulabilir || (altGerekli && !p.altDizin.trim())} yukleniyor={p.kuruyor} className="mt-5">
         {p.kuruyor ? cevir('Kuruluyor… (~30 sn)') : cevir('WordPress kur')}
       </Button>
     </form>
