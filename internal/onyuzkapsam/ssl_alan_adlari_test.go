@@ -40,8 +40,8 @@ func TestSslTablosu_HedefeGoreDogruUc(t *testing.T) {
 	if !strings.Contains(s, "return `/domains/${id}/subdomain/${h.alt_alan_id}/ssl`") {
 		t.Error("alt hedef → /domains/{id}/subdomain/{sid}/ssl değil")
 	}
-	if !regexp.MustCompile(`if \(h\.tur === 'ek'\) return ` + "`" + `/domains/\$\{id\}/ek-alan-adlari`).MatchString(s) ||
-		!regexp.MustCompile(`if \(h\.tur === 'alt'\) return ` + "`" + `/domains/\$\{id\}/subdomain`).MatchString(s) {
+	if !regexp.MustCompile(`if \(h\.tur === 'ek'\) return `+"`"+`/domains/\$\{id\}/ek-alan-adlari`).MatchString(s) ||
+		!regexp.MustCompile(`if \(h\.tur === 'alt'\) return `+"`"+`/domains/\$\{id\}/subdomain`).MatchString(s) {
 		t.Error("sslUc tür koşulları yanlış eşleşiyor")
 	}
 	// ana hedef kendi uçlarına gitmez: sayfanın akışını çağırır
@@ -75,11 +75,12 @@ func TestSslTablosu_DNSUyarisiVeHatalar(t *testing.T) {
 	s := oku(t, "components/SslAlanAdlari.tsx")
 	for _, w := range []string{
 		"Alan adı bu sunucuya yönlenmiyor; Let’s Encrypt başarısız olabilir",
-		"h.dns_hazir === false",
+		"const dnsUyari = h.dns_hazir === false && (!h.ssl_aktif || h.tur_sertifika === 'oz-imza')",
+		"{dnsUyari && (",
 		"DNS’i tekrar kontrol et",
 		"dns_hazir === null", // arka plan çözümü: sınırlı yeniden okuma
 		"dnsDeneme.current >= 3",
-		"apiHata(e,",                 // sunucunun sınıflandırılmış mesajı; ham çıktı gösterilmez
+		"apiHata(e,",                     // sunucunun sınıflandırılmış mesajı; ham çıktı gösterilmez
 		"toast.hata(t('SSL kurulamadı')", // hata → toast
 		"toast.basari(",
 		"yukleniyor={mesgul === 'kur'}", // satır içi spinner
