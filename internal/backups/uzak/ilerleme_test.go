@@ -74,6 +74,10 @@ func TestIlerlemeOku_TurMandalVeTamamlandiOzeti(t *testing.T) {
 		yid := o.yedek(int64(k+1), fmt.Sprintf("c_t%d", k), "20260825-010101", make([]byte, 1000), "oto", nil)
 		ids = append(ids, o.kuyrukla(yid))
 	}
+	// ilk ikisi 5 dk önce, sonuncusu şimdi kuyruğa alınmıştı (mandal olmazsa tur kalan işe daralır)
+	if _, err := o.db.Exec(`UPDATE backup_uzak_kopyalar SET created_at = NOW() - INTERVAL 5 MINUTE WHERE id IN (?,?)`, ids[0], ids[1]); err != nil {
+		t.Fatal(err)
+	}
 	if r := o.oku(z); r.Kuyruk.ToplamIs != 3 {
 		t.Fatalf("tur 3 iş: %+v", r.Kuyruk)
 	}

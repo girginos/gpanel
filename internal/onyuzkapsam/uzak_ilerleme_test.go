@@ -14,7 +14,7 @@ func TestUzakIlerleme_YoklamaKalibi(t *testing.T) {
 	lib := oku(t, "lib/uzakIlerleme.ts")
 	for _, gerek := range []string{
 		"/admin/backups/uzak-kopya/ilerleme",
-		"document.hidden",                   // sekme gizliyken istek yok
+		"if (document.hidden) return",       // sekme gizliyken istek yok
 		"visibilitychange",                  // görününce hemen yenile
 		"removeEventListener",               // temizlik
 		"clearTimeout",                      // temizlik
@@ -35,7 +35,7 @@ func TestUzakIlerleme_CubukErisilebilirVeDilMetinleri(t *testing.T) {
 	bil := oku(t, "components/UzakIlerleme.tsx")
 	lib := oku(t, "lib/uzakIlerleme.ts")
 	for _, gerek := range []string{
-		`role="progressbar"`, "aria-valuenow", "aria-valuemin={0}", "aria-valuemax={100}", "aria-valuetext",
+		`role="progressbar"`, "aria-valuenow={Math.floor(yuzde)}", "aria-valuenow={y}", "aria-valuemin={0}", "aria-valuemax={100}", "aria-valuetext",
 		"dark:bg-dark-600", "dark:border-sky-500/30", // koyu tema
 		"motion-reduce:transition-none",       // hareket azaltma
 		"break-words", "min-w-0", "flex-wrap", // 375px taşma yok
@@ -44,6 +44,10 @@ func TestUzakIlerleme_CubukErisilebilirVeDilMetinleri(t *testing.T) {
 		if !strings.Contains(bil+lib, gerek) {
 			t.Errorf("ilerleme arayüzü beklenen öğeyi içermiyor: %q", gerek)
 		}
+	}
+	// iki çubuk (genel + satır) da koyu temada ve erişilebilir
+	if strings.Count(bil, "dark:bg-dark-600") < 2 || strings.Count(bil, `role="progressbar"`) != 2 || strings.Count(bil, "aria-valuetext") != 2 {
+		t.Error("her iki çubuk da progressbar rolü, aria-valuetext ve koyu tema sınıfı taşımalı")
 	}
 	// "yaklaşık" dili: kesin süre vaadi yok
 	if !strings.Contains(lib, "yaklaşık {0} dk kalan") || !strings.Contains(lib, "1 dakikadan az kalan") {
