@@ -444,6 +444,8 @@ func main() {
 	// Eski şablonla yazılmış alt alan vhost'larının ACME challenge kökünü düzelt
 	// (Let's Encrypt 404; yalnız panelin ürettiği biçim, nginx -t geri alma).
 	subdomain.HealAltAlanAcmeKalibi(d)
+	// ek-alanlar -> domains klasör taşıması HealEkAlanlar'dan ÖNCE (idempotent).
+	subdomain.HealEkAlanKlasorTasima(d)
 	subdomain.HealEkAlanlar(d, ipv4)
 	// Hesap askısı uzlaştırması: askıdaki HER hesaba askı adımlarını (ana + alt
 	// alan vhost'ları, PHP havuzları, Laravel işleyicileri, FTP/SSH/DB girişleri,

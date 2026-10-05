@@ -187,6 +187,19 @@ func HealEkAlanlar(db *sql.DB, varsayilanIPv4 string) {
 			log.Printf("ek alan heal: güvensiz kayıt atlandı (id=%d)", s.id)
 			continue
 		}
+		if ekDocrootTasimaBekliyor(s.sk, s.ad) {
+			log.Printf("ek alan heal: %s klasörü eski yerde (taşıma atlanmış) — vhost'a dokunulmadı", s.ad)
+			continue
+		}
+		// Kiracı domains klasörünü/alan klasörünü sildiyse (vhost 404): boş docroot'u yeniden
+		// kur. Hesap ev dizini yoksa (hesap diskte kaldırılmış) dokunma.
+		if fi, e := os.Stat(evKoku + "/" + s.sk); e == nil && fi.IsDir() && !dosyaVar(ekDocroot(s.sk, s.ad)) {
+			if _, _, e := ekDocrootHazirla(s.sk, s.ad); e != nil {
+				log.Printf("ek alan heal: %s docroot yeniden kurulamadı: %v", s.ad, e)
+			} else {
+				log.Printf("✓ ek alan heal: %s eksik docroot yeniden oluşturuldu", s.ad)
+			}
+		}
 		if ekVhostSapmasi(ctx, db, s.sk, s.ad, s.php) {
 			if e := ekVhostYenidenKur(ctx, db, s.id); e != nil {
 				log.Printf("ek alan heal: %s vhost yeniden kurulamadı: %v", s.ad, e)

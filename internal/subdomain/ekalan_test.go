@@ -602,22 +602,22 @@ func TestEk_YolGuvenligi_SembolikBaglanti(t *testing.T) {
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// (1) ek-alanlar dizininin KENDİSİ dışarıya sembolik bağlantı.
-	if err := os.Symlink(dis, home+"/ek-alanlar"); err != nil {
+	// (1) domains dizininin KENDİSİ dışarıya sembolik bağlantı.
+	if err := os.Symlink(dis, home+"/domains"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := ekDocrootHazirla(ek_sk1, "ornek.org"); err == nil {
-		t.Fatal("ek-alanlar sembolik bağlantıyken docroot oluşturulmamalı")
+		t.Fatal("domains sembolik bağlantıyken docroot oluşturulmamalı")
 	}
 	if _, err := os.Stat(filepath.Join(dis, "ornek.org")); err == nil {
 		t.Fatal("dış hedefte dizin oluştu (kök işlemi sızdı)")
 	}
-	_ = os.Remove(home + "/ek-alanlar")
+	_ = os.Remove(home + "/domains")
 	// (2) alan dizini dışarıya sembolik bağlantı (kiracı oluşturabilir).
-	if err := os.MkdirAll(home+"/ek-alanlar", 0o755); err != nil {
+	if err := os.MkdirAll(home+"/domains", 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(dis, home+"/ek-alanlar/kurban.org"); err != nil {
+	if err := os.Symlink(dis, home+"/domains/kurban.org"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := ekDocrootHazirla(ek_sk1, "kurban.org"); err == nil {
@@ -642,7 +642,7 @@ func TestEk_YolGuvenligi_SembolikBaglanti(t *testing.T) {
 
 func TestEk_YolGuvenligi_Cikis(t *testing.T) {
 	ek_dikisler(t)
-	for _, y := range []string{evKoku + "/c_baska/ek-alanlar/x", evKoku + "/" + ek_sk1 + "/../c_baska/x", "/etc/passwd", evKoku + "/" + ek_sk1 + "x/y"} {
+	for _, y := range []string{evKoku + "/c_baska/domains/x", evKoku + "/" + ek_sk1 + "/../c_baska/x", "/etc/passwd", evKoku + "/" + ek_sk1 + "x/y"} {
 		if err := ekYolGuvenli(ek_sk1, y); err == nil {
 			t.Errorf("%q hesap dizini dışında, kabul edilmemeli", y)
 		}

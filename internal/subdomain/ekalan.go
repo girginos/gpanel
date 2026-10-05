@@ -4,7 +4,7 @@ package subdomain
 // altında birden fazla alan adı (cPanel modeli). Kullanıcı kararı: model = TEK
 // SİSTEM KULLANICISI + EK DOMAIN; müşteri hesabı modeli DEĞİL.
 //
-// Her ek alan adı: kendi docroot'u (/home/<sk>/ek-alanlar/<alan>/public_html), kendi
+// Her ek alan adı: kendi docroot'u (/home/<sk>/domains/<alan>/public_html), kendi
 // nginx vhost'u (ek_<sk>_<alan>.conf; hesabın PHP havuzu), kendi SSL'i ve kendi DNS
 // bölgesi (ek_dns_kayitlari) vardır. Alt alan adı (subdomanlar) modelinden bağımsızdır:
 // ek alan adı kendi bölgesinin ÜST adıdır. vhost üreticisi alt alanla ORTAKTIR
@@ -422,7 +422,7 @@ func ekDocrootHazirla(sk, ad string) (docroot string, yeni bool, err error) {
 	}
 	taban := ekDocrootTaban(sk)
 	if fi, e := os.Lstat(taban); e == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return "", false, errors.New("ek-alanlar dizini sembolik bağlantı")
+		return "", false, errors.New(ekAlanKlasoru + " dizini sembolik bağlantı")
 	}
 	docroot = ekDocroot(sk, ad)
 	if err := ekYolGuvenli(sk, docroot); err != nil {
@@ -445,7 +445,7 @@ func ekDocrootHazirla(sk, ad string) (docroot string, yeni bool, err error) {
 	return docroot, yeni, nil
 }
 
-// ekAlanDizininiSil — <ev>/<sk>/ek-alanlar/<alan> dizinini, yol hesap dizini altında
+// ekAlanDizininiSil — <ev>/<sk>/domains/<alan> dizinini, yol hesap dizini altında
 // kaldığı doğrulanırsa siler.
 func ekAlanDizininiSil(sk, ad string) {
 	if !reEkSK.MatchString(sk) || !ekAdGuvenli(ad) {
