@@ -9,6 +9,7 @@ import { api, apiHata } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
 import Breadcrumb from '@/components/Breadcrumb'
 import YedekGenelAyar from '@/components/YedekGenelAyar'
+import YedekGoogleDrive from '@/components/YedekGoogleDrive'
 import { Button, butonSinifi } from '@/components/ui'
 import { useToast } from '@/components/Toast'
 import { useDialog } from '@/components/Dialog'
@@ -120,6 +121,7 @@ export default function BackupYonetimiPage() {
       </div>
 
       <YedekGenelAyar />
+      <YedekGoogleDrive />
 
       <div className="mb-5 flex flex-wrap items-center gap-3 px-4 py-3 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
         <span className="inline-flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0" aria-hidden><path d="M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{cevir("Otomatik yedekleme:")} <strong>{o?.zamanlama || cevir('Her gün 03:00')}</strong></span>
