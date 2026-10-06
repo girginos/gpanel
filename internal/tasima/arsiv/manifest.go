@@ -137,11 +137,11 @@ var sistemDBler = map[string]bool{
 	"leechprotect": true, "modsec": true, "cpanel_ssl_ingest": true,
 }
 
-// AlanAdiGecerli — alan adı SÖZ DİZİMİ (küçük harf, ≥2 etiket, etiket ≤63, toplam ≤253,
+// AlanAdiGecerli — alan adı SÖZ DİZİMİ (küçük harf — reEtiket zorlar —, ≥2 etiket, etiket ≤63, toplam ≤253,
 // son etiket yalnız rakamlardan oluşmaz → IP değil, joker yok). Sahiplik/çakışma
 // denetimi DEĞİLDİR (faz 2: domains.AdAlaniDenetle).
 func AlanAdiGecerli(s string) bool {
-	if len(s) < 4 || len(s) > 253 || s != strings.ToLower(s) {
+	if len(s) < 4 || len(s) > 253 {
 		return false
 	}
 	et := strings.Split(s, ".")
