@@ -885,6 +885,24 @@ func TestArsivIsYurut_AcilisTemizlikVeRet(t *testing.T) {
 	}
 	kismi = false
 
+	// 2c) İPTAL (kullanıcı): başarısız kalem yok ama iş 'tamam' değil → yükleme KALIR.
+	o.exec(t, `UPDATE tasima_isleri SET durum='tamam' WHERE sahip_rid=7`)
+	isID, yid = hazirla()
+	iptalCtx, iptalEt := context.WithCancel(context.Background())
+	hesapAktarici = func(h *Handlers, ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kp Kapsam, log func(string, ...any)) (*AktarSonuc, error) {
+		iptalEt()
+		return nil, errors.New("iptal edildi")
+	}
+	o.exec(t, `UPDATE tasima_isleri SET durum='calisiyor' WHERE id=?`, isID)
+	o.h.isYurut(iptalCtx, isID)
+	if d, _ := durum(isID); d != "iptal" || !varMi(yid) {
+		t.Errorf("iptal: iş=%s yükleme kaldı=%v", d, varMi(yid))
+	}
+	hesapAktarici = func(h *Handlers, ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kp Kapsam, log func(string, ...any)) (*AktarSonuc, error) {
+		gor = append(gor, goruldu{hs.AlanAdi, k.arsiv != nil, kp.RID})
+		return &AktarSonuc{DomainID: 1}, nil
+	}
+
 	// 3) Dosya keşiften sonra değişti → iş başlamadan 'hata' (yürütücü HİÇ çağrılmadı).
 	o.exec(t, `UPDATE tasima_isleri SET durum='tamam' WHERE sahip_rid=7`)
 	gor = nil
