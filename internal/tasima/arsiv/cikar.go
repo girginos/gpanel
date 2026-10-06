@@ -92,7 +92,7 @@ func (a *Arsiv) Cikar(ctx context.Context, onek string, h Hedef) (*Rapor, error)
 		hedefYol += "/" + kok
 	}
 	// SK EvDizini'de doğrulandı; Kul testte ayrıcalıksız kimliğe çevrilebilir.
-	cmd, err := kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home}.Komut(ctx, "tar", "-x",
+	cmd, err := kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home, Dilim: true, DilimSK: h.SK}.Komut(ctx, "tar", "-x",
 		"--no-same-owner", "--no-same-permissions", "-f", "-", "-C", hedefYol)
 	if err != nil {
 		return nil, err

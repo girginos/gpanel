@@ -96,9 +96,10 @@ func wpArgv(args []string) []string {
 	return append([]string{"/usr/bin/php", "-d", "memory_limit=512M", wpBin}, args...)
 }
 
-// kiraciKomut: argv'yi kiracı (sk) kimliğinde, panel ortamı OLMADAN hazırlar.
+// kiraciKomut: argv'yi kiracı (sk) kimliğinde, panel ortamı OLMADAN hazırlar;
+// süreç ağacı kiracının kaynak dilimine girer (Dilim: wp-cli/rm -rf kiracı yükü).
 func kiraciKomut(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
-	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk, Dilim: true}.Komut(ctx, argv...)
 }
 
 // guvenliSilTenant: hedefi TENANT kimliğinde (runuser -u sk) siler.

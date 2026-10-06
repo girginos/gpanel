@@ -8,16 +8,17 @@ package git
 // rename(2) ile atomik değiştirebilir) kurbanı koruyan TEK şey komutun kiracı kimliğinde
 // çalışmasıdır. Bu dosya o bariyeri iki katmanda kilitler:
 //
-//  1. Sahte sudo/runuser/komut (PATH'in başına konur): tam argv ("-u <sk>", "--"), stdin
-//     (tee ile ~/.ssh/config), cwd, ortam (panel ortamı sızmaz, HOME kiracının evi),
-//     stdout/stderr ayrımı ve "ikisi de başarısızsa komut root olarak ASLA doğrudan
-//     çalıştırılmaz".
-//  2. Tümleşik (euid 0 + nobody varsa; 181'de testler root koşar): GERÇEK sudo/runuser ile
+//  1. Sahte systemd-run/runuser/komut (PATH'in başına konur): tam argv (kiracı diliminde
+//     "runuser -u <sk> --"), stdin (tee ile ~/.ssh/config), cwd, ortam (panel ortamı
+//     sızmaz, HOME kiracının evi), stdout/stderr ayrımı ve "kimlik düşürülemezse komut
+//     root olarak ASLA doğrudan çalıştırılmaz" (sudo yolu kalktı: kiraci.Komut tek yol).
+//  2. Tümleşik (euid 0 + nobody varsa; 181'de testler root koşar): GERÇEK systemd-run/runuser ile
 //     çekirdeğin erişimi kiracı kimliğinde değerlendirdiği — symlink İŞLEM ANINDA kurulu
 //     olsa bile (yarış kazanılmış gibi) kök dosyası okunamaz, üzerine yazılamaz, silinemez;
 //     meşru akış (kendi evinde yazma/silme) ise çalışır.
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"os/user"
@@ -27,17 +28,19 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"girginospanel/internal/kiraci"
 )
 
-// ---------- 1. katman: sahte sudo / runuser ----------
+// ---------- 1. katman: sahte systemd-run / runuser ----------
 
 type sahteKomutOrtami struct {
 	kayit, cwd string
 }
 
 // sahteKomutKur: bin/<ad> — argv'yi, ortamı, cwd'yi ve stdin'i kayit/<ad>.* dosyalarına
-// yazar; kayit/<ad>.basarisiz varsa 1 ile çıkar. Yalnız mutlak yollar gömülür: runuser
-// yedeğinde ortam (dolayısıyla test ortam değişkenleri) bilinçli olarak boşaltılır.
+// yazar; kayit/<ad>.basarisiz varsa 1 ile çıkar. Yalnız mutlak yollar gömülür: kiraci.Komut
+// çocuğun ortamını (dolayısıyla test ortam değişkenlerini) bilinçli olarak boşaltır.
 func sahteKomutKur(t *testing.T, bin, kayit, ad string) {
 	t.Helper()
 	k := filepath.Join(kayit, ad)
@@ -54,6 +57,21 @@ func sahteKomutKur(t *testing.T, bin, kayit, ad string) {
 	}
 }
 
+// sahteSystemdRunKur: gerçek --scope gibi "--"dan sonraki komutu AYNI süreçte (stdin/
+// cwd/ortam aynen) çalıştırır; sahte runuser'ı mutlak yolla çağırır.
+func sahteSystemdRunKur(t *testing.T, bin, kayit string) {
+	t.Helper()
+	k := filepath.Join(kayit, "systemd-run")
+	betik := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > '" + k + ".argv'\n" +
+		"while [ $# -gt 0 ]; do a=$1; shift; [ \"$a\" = \"--\" ] && break; done\n" +
+		"c=$1; shift\n" +
+		"exec '" + bin + "'/\"$c\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "systemd-run"), []byte(betik), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func sahteKomutOrtamiKur(t *testing.T) sahteKomutOrtami {
 	t.Helper()
 	if _, err := os.Stat("/bin/sh"); err != nil {
@@ -64,13 +82,22 @@ func sahteKomutOrtamiKur(t *testing.T) sahteKomutOrtami {
 	for _, d := range []string{bin, kayit, cwd} {
 		mustMkdir(t, d)
 	}
-	// "kokcalisti": kiracı adına çalıştırılacak komut. sudo/runuser sahteleri onu
+	// "kokcalisti": kiracı adına çalıştırılacak komut. runuser sahtesi onu
 	// ÇALIŞTIRMAZ → kayıt dosyası oluşursa komut kimlik düşürülmeden (root) çalışmıştır.
-	for _, ad := range []string{"sudo", "runuser", "kokcalisti"} {
+	for _, ad := range []string{"runuser", "kokcalisti"} {
 		sahteKomutKur(t, bin, kayit, ad)
 	}
+	sahteSystemdRunKur(t, bin, kayit)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GOSP_TEST_PANEL_SIRRI", "panel-ortami-sizmamali")
+	// c_* adları sistemde kullanıcı olmadan çözülür (uid 4242).
+	eskiBul := user.Lookup
+	t.Cleanup(kiraci.KullaniciDikisi(func(ad string) (*user.User, error) {
+		if len(ad) > 2 && ad[:2] == "c_" {
+			return &user.User{Username: ad, Uid: "4242", Gid: "4242"}, nil
+		}
+		return eskiBul(ad)
+	}))
 	eskiKok := evKoku
 	evKoku = filepath.Join(tmp, "home")
 	t.Cleanup(func() { evKoku = eskiKok })
@@ -105,7 +132,7 @@ func (s sahteKomutOrtami) basarisizYap(t *testing.T, ad string) {
 
 var kiraciKomutu = []string{"kokcalisti", "-a", "b c"}
 
-func TestKiraciCalistirGercek_SudoIleKiraciKimligindeCalisir(t *testing.T) {
+func TestKiraciCalistirGercek_KiraciDilimindeRunuserIleCalisir(t *testing.T) {
 	s := sahteKomutOrtamiKur(t)
 	o, e, err := kiraciCalistirGercek(testSK, s.cwd, []byte("GIRDI-VERISI\n"), kiraciKomutu...)
 	if err != nil {
@@ -114,46 +141,21 @@ func TestKiraciCalistirGercek_SudoIleKiraciKimligindeCalisir(t *testing.T) {
 	if s.cagrildi("kokcalisti") {
 		t.Fatal("komut kiracı kimliğine düşürülmeden (root olarak) DOĞRUDAN çalıştırıldı")
 	}
-	want := append([]string{"-u", testSK, "-H", "--"}, kiraciKomutu...)
-	if got := s.argv(t, "sudo"); !reflect.DeepEqual(got, want) {
-		t.Fatalf("sudo argv:\n got %q\nwant %q", got, want)
-	}
-	if got := s.dosya(t, "sudo", "stdin"); got != "GIRDI-VERISI\n" {
-		t.Fatalf("stdin komuta verilmedi (tee ile ~/.ssh/config boş yazılır): %q", got)
-	}
-	if got := strings.TrimSpace(s.dosya(t, "sudo", "pwd")); got != s.cwd {
-		t.Fatalf("cwd: got %q want %q", got, s.cwd)
-	}
-	if o != "sahte-sudo-cikti\n" || e != "sahte-sudo-hata\n" {
-		t.Fatalf("stdout/stderr ayrı dönmeli: o=%q e=%q", o, e)
-	}
-	if s.cagrildi("runuser") {
-		t.Fatal("sudo başarılıyken runuser yedeği de çalıştı")
-	}
-}
-
-func TestKiraciCalistirGercek_SudoBasarisizsaRunuserKiraciOlarak(t *testing.T) {
-	s := sahteKomutOrtamiKur(t)
-	s.basarisizYap(t, "sudo")
-	o, e, err := kiraciCalistirGercek(testSK, s.cwd, []byte("GIRDI-VERISI\n"), kiraciKomutu...)
-	if err != nil {
-		t.Fatalf("beklenmeyen hata: %v (%s)", err, e)
-	}
-	if s.cagrildi("kokcalisti") {
-		t.Fatal("yedek yolda komut kiracı kimliğine düşürülmeden (root olarak) DOĞRUDAN çalıştırıldı")
-	}
-	if got, want := s.argv(t, "sudo"), append([]string{"-u", testSK, "-H", "--"}, kiraciKomutu...); !reflect.DeepEqual(got, want) {
-		t.Fatalf("önce sudo denenmeli:\n got %q\nwant %q", got, want)
+	// Kaynak dilimi: kiraci.Komut'un systemd-run --scope sarmalı, slice kiracının.
+	wantSR := append([]string{"--scope", "--quiet", "--collect", "--slice=girginos-" + testSK + ".slice",
+		"--description=girginospanel kiraci " + testSK, "--", "runuser", "-u", testSK, "--"}, kiraciKomutu...)
+	if got := s.argv(t, "systemd-run"); !reflect.DeepEqual(got, wantSR) {
+		t.Fatalf("systemd-run argv:\n got %q\nwant %q", got, wantSR)
 	}
 	want := append([]string{"-u", testSK, "--"}, kiraciKomutu...)
 	if got := s.argv(t, "runuser"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("runuser argv:\n got %q\nwant %q", got, want)
 	}
 	if got := s.dosya(t, "runuser", "stdin"); got != "GIRDI-VERISI\n" {
-		t.Fatalf("yedek yolda stdin komuta verilmedi: %q", got)
+		t.Fatalf("stdin komuta verilmedi (tee ile ~/.ssh/config boş yazılır): %q", got)
 	}
 	if got := strings.TrimSpace(s.dosya(t, "runuser", "pwd")); got != s.cwd {
-		t.Fatalf("yedek yolda cwd: got %q want %q", got, s.cwd)
+		t.Fatalf("cwd: got %q want %q", got, s.cwd)
 	}
 	ortamSatirlari := strings.Split(s.dosya(t, "runuser", "env"), "\n")
 	for _, gerekli := range []string{
@@ -176,45 +178,43 @@ func TestKiraciCalistirGercek_SudoBasarisizsaRunuserKiraciOlarak(t *testing.T) {
 		}
 	}
 	if o != "sahte-runuser-cikti\n" || e != "sahte-runuser-hata\n" {
-		t.Fatalf("yedek yolda stdout/stderr: o=%q e=%q", o, e)
+		t.Fatalf("stdout/stderr ayrı dönmeli: o=%q e=%q", o, e)
 	}
 }
 
-func TestKiraciCalistirGercek_IkisiDeBasarisizsaRootOlarakCalistirmaz(t *testing.T) {
+func TestKiraciCalistirGercek_KimlikDusmezseRootOlarakCalistirmaz(t *testing.T) {
 	s := sahteKomutOrtamiKur(t)
-	s.basarisizYap(t, "sudo")
 	s.basarisizYap(t, "runuser")
 	_, e, err := kiraciCalistirGercek(testSK, s.cwd, []byte("GIRDI"), kiraciKomutu...)
 	if err == nil {
-		t.Fatal("sudo ve runuser başarısızken hata dönmeli")
+		t.Fatal("runuser başarısızken hata dönmeli")
 	}
 	if s.cagrildi("kokcalisti") {
 		t.Fatal("kimlik düşürülemeyince komut root olarak DOĞRUDAN çalıştırıldı")
 	}
-	if got := s.argv(t, "sudo"); len(got) < 2 || got[0] != "-u" || got[1] != testSK {
-		t.Fatalf("sudo kiracı kimliğiyle denenmedi: %q", got)
-	}
-	if got := s.argv(t, "runuser"); len(got) < 2 || got[0] != "-u" || got[1] != testSK {
-		t.Fatalf("runuser kiracı kimliğiyle denenmedi: %q", got)
-	}
 	if !strings.Contains(e, "sahte runuser hata") {
-		t.Fatalf("son denemenin hatası dönmeli: %q", e)
+		t.Fatalf("hata stderr'de dönmeli: %q", e)
+	}
+	// Kiracı olamayacak kullanıcılar komutu hiç başlatmaz (sudo'suz tek yol: kiraci.Komut).
+	for _, sk := range []string{"root", ""} {
+		_, _, err := kiraciCalistirGercek(sk, s.cwd, nil, kiraciKomutu...)
+		if !errors.Is(err, kiraci.ErrKomut) {
+			t.Errorf("sk=%q için ErrKomut bekleniyordu: %v", sk, err)
+		}
+	}
+	if s.cagrildi("kokcalisti") {
+		t.Fatal("reddedilen kiracıda komut çalıştı")
 	}
 }
 
 // ---------- 2. katman: gerçek kimlik düşürme (root + nobody) ----------
 
-// Birincil yol: gerçek sudo.
-func TestKiraciCalistirGercek_GercekKimlikDusurme_Sudo(t *testing.T) {
-	gercekKimlikDusurmeDenetle(t, false)
+// Gerçek systemd-run --scope + runuser (kiracı diliminde; slice birimi yok → örtük).
+func TestKiraciCalistirGercek_GercekKimlikDusurme(t *testing.T) {
+	gercekKimlikDusurmeDenetle(t)
 }
 
-// Yedek yol: PATH başındaki sahte sudo başarısız olur → gerçek runuser çalışır.
-func TestKiraciCalistirGercek_GercekKimlikDusurme_RunuserYedegi(t *testing.T) {
-	gercekKimlikDusurmeDenetle(t, true)
-}
-
-func gercekKimlikDusurmeDenetle(t *testing.T, runuserYedegi bool) {
+func gercekKimlikDusurmeDenetle(t *testing.T) {
 	t.Helper()
 	if os.Geteuid() != 0 {
 		t.Skip("gerçek kimlik düşürme root gerektirir (181'de testler root koşar)")
@@ -225,29 +225,16 @@ func gercekKimlikDusurmeDenetle(t *testing.T, runuserYedegi bool) {
 	}
 	uid, _ := strconv.Atoi(u.Uid)
 	gid, _ := strconv.Atoi(u.Gid)
-	_, sErr := exec.LookPath("sudo")
-	_, rErr := exec.LookPath("runuser")
-	if sErr != nil && rErr != nil {
-		t.Skip("sudo da runuser da yok")
-	}
-	if runuserYedegi {
-		if rErr != nil {
-			t.Skip("runuser yok")
+	for _, ad := range []string{"systemd-run", "runuser"} {
+		if _, err := exec.LookPath(ad); err != nil {
+			t.Skipf("%s yok", ad)
 		}
-		bin := filepath.Join(t.TempDir(), "bin")
-		mustMkdir(t, bin)
-		isaret := filepath.Join(bin, "sudo-denendi")
-		if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte("#!/bin/sh\n: > '"+isaret+"'\nexit 1\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-		defer func() {
-			if !t.Failed() && !varMi(isaret) {
-				t.Fatal("sudo denenmedi → runuser yedeği sınanmadı")
-			}
-		}()
 	}
-	const kiraci = "nobody"
+	// nobody panel biçimli değil: slice adı c_ biçimli bir ada eşlenir (kimlik nobody kalır).
+	eskiDilim := dilimSK
+	dilimSK = func(string) string { return "c_gitgercek_test" }
+	t.Cleanup(func() { dilimSK = eskiDilim })
+	const kiraciKul = "nobody"
 
 	base := t.TempDir()
 	// t.TempDir'in üst dizini 0700 (MkdirTemp): nobody'nin yolu geçebilmesi için aç.
@@ -271,17 +258,17 @@ func gercekKimlikDusurmeDenetle(t *testing.T, runuserYedegi bool) {
 	mustYaz(t, yazilmaz, "DOKUNULMAZ")
 
 	// (1) Kimlik: komut nobody olarak çalışır — root DEĞİL.
-	o, e, err := kiraciCalistirGercek(kiraci, ev, nil, "id", "-un")
+	o, e, err := kiraciCalistirGercek(kiraciKul, ev, nil, "id", "-un")
 	if err != nil {
 		t.Fatalf("id -un kiracı olarak çalışmadı: %v (%s)", err, e)
 	}
-	if got := strings.TrimSpace(o); got != kiraci {
-		t.Fatalf("komut %q kimliğiyle çalıştı, %q bekleniyordu", got, kiraci)
+	if got := strings.TrimSpace(o); got != kiraciKul {
+		t.Fatalf("komut %q kimliğiyle çalıştı, %q bekleniyordu", got, kiraciKul)
 	}
 
 	// (2) Meşru akış: stdin → tee kiracının kendi dosyasına ulaşır, dosya kiracıya aittir.
 	cfg := filepath.Join(ev, "config")
-	if _, e, err := kiraciCalistirGercek(kiraci, ev, []byte(sshConfigGovde), "tee", "--", cfg); err != nil {
+	if _, e, err := kiraciCalistirGercek(kiraciKul, ev, []byte(sshConfigGovde), "tee", "--", cfg); err != nil {
 		t.Fatalf("kiracı kendi evine yazamadı: %v (%s)", err, e)
 	}
 	if got := icerik(t, cfg); got != sshConfigGovde {
@@ -297,10 +284,10 @@ func gercekKimlikDusurmeDenetle(t *testing.T, runuserYedegi bool) {
 
 	// (3) Meşru akış: gitClone'un temizlik komutu kiracının kendi hedefinde siler.
 	kendi := filepath.Join(ev, "public_html")
-	if _, e, err := kiraciCalistirGercek(kiraci, ev, nil, "mkdir", "-p", "--", filepath.Join(kendi, "eski")); err != nil {
+	if _, e, err := kiraciCalistirGercek(kiraciKul, ev, nil, "mkdir", "-p", "--", filepath.Join(kendi, "eski")); err != nil {
 		t.Fatalf("kiracı kendi evinde dizin oluşturamadı: %v (%s)", err, e)
 	}
-	if _, e, err := kiraciCalistirGercek(kiraci, ev, nil, "find", kendi, "-mindepth", "1", "-maxdepth", "1",
+	if _, e, err := kiraciCalistirGercek(kiraciKul, ev, nil, "find", kendi, "-mindepth", "1", "-maxdepth", "1",
 		"-exec", "rm", "-rf", "--", "{}", "+"); err != nil {
 		t.Fatalf("kiracı kendi hedefini temizleyemedi: %v (%s)", err, e)
 	}
@@ -314,7 +301,7 @@ func gercekKimlikDusurmeDenetle(t *testing.T, runuserYedegi bool) {
 	// (4) Okuma: .pub → kök 0600 dosyası; içerik kiracıya (deploy_key_pub) dönmez.
 	pubLink := filepath.Join(ev, "gospanel_deploy.pub")
 	mustLink(t, gizli, pubLink)
-	o, e, err = kiraciCalistirGercek(kiraci, ev, nil, pubOkuArgv(pubLink)...)
+	o, e, err = kiraciCalistirGercek(kiraciKul, ev, nil, pubOkuArgv(pubLink)...)
 	if err == nil || strings.Contains(o+e, "KOK-GIZLI") {
 		t.Fatalf("symlink üzerinden kök dosyası okundu: err=%v o=%q", err, o)
 	}
@@ -322,7 +309,7 @@ func gercekKimlikDusurmeDenetle(t *testing.T, runuserYedegi bool) {
 	// (5) Yazma: ~/.ssh/config → kök dosyası; tee açamaz, içerik değişmez.
 	cfgLink := filepath.Join(ev, "config-link")
 	mustLink(t, yazilmaz, cfgLink)
-	if _, _, err := kiraciCalistirGercek(kiraci, ev, []byte("SALDIRI\n"), "tee", "--", cfgLink); err == nil {
+	if _, _, err := kiraciCalistirGercek(kiraciKul, ev, []byte("SALDIRI\n"), "tee", "--", cfgLink); err == nil {
 		t.Fatal("symlink üzerinden kök dosyasına yazma hata vermedi")
 	}
 	if got := icerik(t, yazilmaz); got != "DOKUNULMAZ" {
@@ -332,9 +319,9 @@ func gercekKimlikDusurmeDenetle(t *testing.T, runuserYedegi bool) {
 	// (6) Silme: ara bileşen symlink (site → kök ağacı); temizlik kök dosyasını silemez.
 	site := filepath.Join(ev, "site")
 	mustLink(t, kurban, site)
-	_, _, _ = kiraciCalistirGercek(kiraci, ev, nil, "find", filepath.Join(site, "app"), "-mindepth", "1", "-maxdepth", "1",
+	_, _, _ = kiraciCalistirGercek(kiraciKul, ev, nil, "find", filepath.Join(site, "app"), "-mindepth", "1", "-maxdepth", "1",
 		"-exec", "rm", "-rf", "--", "{}", "+")
-	_, _, _ = kiraciCalistirGercek(kiraci, ev, nil, "rm", "-f", "--", filepath.Join(site, "yazilmaz.txt"))
+	_, _, _ = kiraciCalistirGercek(kiraciKul, ev, nil, "rm", "-f", "--", filepath.Join(site, "yazilmaz.txt"))
 	if !varMi(gizli) || !varMi(yazilmaz) {
 		t.Fatal("ara bileşen symlink'i üzerinden kök ağacındaki dosya silindi")
 	}

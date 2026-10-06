@@ -3,6 +3,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -23,6 +24,7 @@ import (
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -115,7 +117,7 @@ func randomHex(n int) string {
 //   - ~/.ssh → /root/.ssh ya da .pub → herhangi bir dosya: içerik root olarak okunup
 //     deploy_key_pub olarak kiracıya DÖNER;
 //   - ~/.ssh/config → herhangi bir dosya: root üzerine yazar + chown ile kiracıya verir.
-// Çözüm (kök neden): TÜM dosya işlemleri kiracı KİMLİĞİNDE (sudo -u / runuser) yapılır —
+// Çözüm (kök neden): TÜM dosya işlemleri kiracı KİMLİĞİNDE (kiraci.Komut: runuser) yapılır —
 // kiracı kendi evinde zaten ne yapabiliyorsa panel onun adına yalnız onu yapar; komşunun
 // 0710 evine ya da sistem dosyalarına çekirdek DAC erişim vermez (symlink'i ne zaman
 // değiştirirse değiştirsin: TOCTOU bu bariyeri aşamaz). Ek olarak (savunma derinliği +
@@ -138,37 +140,33 @@ func gecerliSK(sk string) bool { return reSK.MatchString(sk) }
 // kirlenmesin). stdin nil değilse komuta verilir. Testte kaydedici sahteyle değiştirilir.
 var kiraciCalistir = kiraciCalistirGercek
 
+// dilimSK — kiracının kaynak dilimini belirleyen panel adı (sk). Üretimde sk'nın
+// kendisi; testler ayrıcalıksız gerçek bir kullanıcıyı (nobody) c_ biçimli bir
+// dilim adına eşler (dilim adı yalnız panel biçimli kiracıda üretilir).
+var dilimSK = func(sk string) string { return sk }
+
+// kiraciCalistirGercek: kiraci.Komut (panelin TEK kimlik düşürme yolu): runuser -u sk --
+// argv, kabuk yok, panel ortamı AKTARILMAZ (yalnız PATH/HOME=<ev>/LANG); süreç ağacı
+// kiracının kaynak dilimine girer (Dilim: git clone/pull ağ+disk+bellek yükü kiracının
+// planına sayılır, panel cgroup'una değil). Eski sudo→runuser ikilisi kalktı: sudo'nun
+// env_reset'i sudoers'a bağlıydı, yedek yol da ortamı elle kuruyordu. Kimlik düşürülemezse
+// (kullanıcı yok / uid 0 / biçim dışı sk) komut ASLA root olarak çalışmaz: ErrKomut.
 func kiraciCalistirGercek(sk, cwd string, stdin []byte, argv ...string) (string, string, error) {
-	calistir := func(ad string, args, env []string) (string, string, error) {
-		cmd := exec.Command(ad, args...)
-		if cwd != "" {
-			cmd.Dir = cwd
-		}
-		// Ortam DAİMA açık (boşsa bile boş dilim): Env nil olsaydı exec.Cmd panelin süreç
-		// ortamını miras alırdı.
-		cmd.Env = append([]string{}, env...)
-		if stdin != nil {
-			cmd.Stdin = bytes.NewReader(stdin)
-		}
-		var so, se bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &so, &se
-		err := cmd.Run()
-		return so.String(), se.String(), err
-	}
-	// 🔴 Panel ortamı (PANEL_JWT_SECRET, PANEL_DB_DSN, ...) sudo'ya da VERİLMEZ: sudo'nun
-	// env_reset'i sudoers'a bağlıdır (env_keep / !env_reset sırrı kiracı komutuna
-	// geçirirdi). İki yol da yalnız bu asgari ortamla koşar.
-	// TODO(kiraci): sudo→runuser ikilisi kiraci.Komut'a taşınacak (testler sudo'yu kilitliyor).
-	temizOrtam := []string{
-		"HOME=" + evDizini(sk),
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"LANG=C",
-	}
-	o, e, err := calistir("sudo", append([]string{"-u", sk, "-H", "--"}, argv...), temizOrtam)
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: evDizini(sk), Dilim: true, DilimSK: dilimSK(sk)}.
+		Komut(context.Background(), argv...)
 	if err != nil {
-		o, e, err = calistir("runuser", append([]string{"-u", sk, "--"}, argv...), temizOrtam)
+		return "", "", err
 	}
-	return o, e, err
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var so, se bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &so, &se
+	err = cmd.Run()
+	return so.String(), se.String(), err
 }
 
 // restoreconCalistir: SELinux etiketini politika varsayılanına döndürür (root). Testte

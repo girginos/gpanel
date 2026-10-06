@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"girginospanel/internal/kiraci/kiracitest"
+	"girginospanel/internal/kiraci/dilimtest"
 )
 
 func TestKiraciCikar_PanelSirriGecmez(t *testing.T) {
-	k := kiracitest.Kur(t)
+	k := dilimtest.Kur(t)
 	dir := t.TempDir()
 	tgz := filepath.Join(dir, "a.tar.gz")
 	zip := filepath.Join(dir, "a.zip")
@@ -33,11 +33,12 @@ func TestKiraciCikar_PanelSirriGecmez(t *testing.T) {
 		{zip, TurZip, nil},
 		{zip, TurZip, func(int) {}},
 	} {
-		if _, err := kiraciCikar(c.arsiv, dest, "nobody", c.tur, c.ilerle); err != nil {
+		if _, err := kiraciCikar(c.arsiv, dest, dilimtest.SK, c.tur, c.ilerle); err != nil {
 			t.Fatalf("%s: %v", c.arsiv, err)
 		}
 	}
-	if n := len(k.SizintiYok(t, "runuser", "-u", "nobody", "--")); n != 4 {
+	dilimtest.DilimKilidi(t, k, dilimtest.SK)
+	if n := len(k.SizintiYok(t, "runuser", "-u", dilimtest.SK, "--")); n != 4 {
 		t.Fatalf("4 çıkarma çağrısı bekleniyordu, %d", n)
 	}
 }

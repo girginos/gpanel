@@ -149,9 +149,10 @@ func (h *Handlers) Calistir(w http.ResponseWriter, r *http.Request) {
 // PANEL_DB_DSN, ...) alt-surece VERILMEZ (yalniz PATH/HOME/LANG + composer ayarlari).
 // Composer kiracının composer.json'unu ve (izin verilen komutlarda) autoload'unu
 // işler → ortam burada genişletilmez. Kiracı olamayacak kullanıcı → kiraci.ErrKomut.
-// Kilit: sir_cocuk_test.go.
+// Kaynak: Dilim — composer uzun/bellek yoğun iş; kiracının plan dilimine (RAM/CPU/
+// süreç tavanı) girer, panel cgroup'unda koşmaz. Kilit: sir_cocuk_test.go + dilim_test.go.
 func kiraciComposer(ctx context.Context, sk string, args ...string) ([]byte, error) {
-	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, args...)
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk, Dilim: true}.Komut(ctx, args...)
 	if err != nil {
 		return nil, err
 	}

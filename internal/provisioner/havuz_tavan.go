@@ -67,3 +67,12 @@ func havuzYedekleri(maxCh int) (start, minSpare, maxSpare int) {
 // tabanı (LPE/izolasyon kaçışı primitifleri) ekler. Per-tenant havuzla aynı kural
 // paylaşılan ve alt alan havuzlarında da geçerli olsun diye dışa açık.
 func DisableFunctionsTabanli(df string) string { return dfBirlestir(df) }
+
+// HavuzYedekleri — havuzYedekleri'nin dışa açık biçimi (pm.start/min_spare/max_spare,
+// max_children'dan): hesap bazlı tavanla kısılan alt alan havuzu yedeklerini yeniden türetir.
+func HavuzYedekleri(maxCh int) (start, minSpare, maxSpare int) { return havuzYedekleri(maxCh) }
+
+// PlanPMMaxChildren — domain'in efektif planından pm.max_children (tenantPMMaxChildren:
+// plan/özel üst yazım → yoksa max(4, ram_mb/64) → plan yoksa 8). Hesap bazlı alt alan
+// havuzu bütçesinin kaynağı.
+func PlanPMMaxChildren(db *sql.DB, domainID int64) int { return tenantPMMaxChildren(db, domainID) }

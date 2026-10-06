@@ -195,7 +195,8 @@ func tenantExecEnv(ctx context.Context, sk, cwd string, env []string, bin string
 // ortam burada genişletilmez. Kiracı olamayacak kullanıcı → kiraci.ErrKomut.
 // Doğrulama (gecerliSK, dir kiracı evinde) çağıranın işidir. Kilit: sir_cocuk_test.go.
 func tenantCalistir(ctx context.Context, sk, dir string, env []string, argv ...string) (string, error) {
-	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
+	// Dilim: artisan/composer/npm kiracı kodu — plan dilimine girer (RAM/CPU/süreç tavanı).
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk, Dilim: true}.Komut(ctx, argv...)
 	if err != nil {
 		return "", err
 	}

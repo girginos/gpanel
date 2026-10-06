@@ -636,7 +636,8 @@ func kiraciCikar(ctx context.Context, sk, icerikTuru, arsiv, hedef string) error
 }
 
 // kiraciKomut: argv'yi kiracı (sk) kimliğinde, kabuksuz ve panel ortamı OLMADAN
-// (kiraci.Komut: yalnız PATH/HOME/LANG) çalıştıracak komutu hazırlar.
+// (kiraci.Komut: yalnız PATH/HOME/LANG) çalıştıracak komutu hazırlar; süreç ağacı
+// kiracının kaynak dilimine girer (Dilim: arşiv çıkarma/taşıma kiracı yükü).
 func kiraciKomut(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
-	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk, Dilim: true}.Komut(ctx, argv...)
 }

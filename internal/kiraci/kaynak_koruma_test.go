@@ -30,10 +30,7 @@ var kimlikDusurenler = map[string]bool{
 // kaynakIstisnalari — gerekçeli, sayısı sabit istisnalar (dosya → izinli değişmez sayısı).
 // Yeni istisna EKLENMEZ: yeni kod Komut kullanır.
 var kaynakIstisnalari = map[string]int{
-	// git.kiraciCalistirGercek: sudo → runuser yedeği; ortam AÇIKÇA asgari
-	// (TestKiraciCalistirGercek_PanelSirriGecmez + kiraci_calistir_linux_test kilitler).
-	// Komut'a taşınması ayrı iş (testleri sudo birincil yolunu kilitliyor).
-	"internal/git/git.go": 2,
+	// (boş) — git.kiraciCalistirGercek kiraci.Komut'a taşındı; istisna kalmadı.
 }
 
 func TestKaynakKoruma_KimlikDusurmeYalnizKiraciKomut(t *testing.T) {
