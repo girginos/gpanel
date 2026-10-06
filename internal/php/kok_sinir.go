@@ -214,7 +214,7 @@ func havuzTavanla(db *sql.DB, domainID int64, sk string, s Settings) Settings {
 }
 
 // altHavuzAyarlari — alt alan havuzunun render edilecek ayarları: kayıt + üst
-// alan adının planına göre tavan.
+// alan adının planına göre tavan + hesap bazlı toplam tavan.
 func altHavuzAyarlari(ctx context.Context, db *sql.DB, sk string, subID int64) (Settings, error) {
 	s, err := GetSub(ctx, db, subID)
 	if err != nil {
@@ -223,5 +223,7 @@ func altHavuzAyarlari(ctx context.Context, db *sql.DB, sk string, subID int64) (
 	var domainID int64
 	// Okunamazsa domainID=0 → plan yok varsayılanı (8 işçi; süre tavanı yine uygulanır).
 	_ = db.QueryRowContext(ctx, `SELECT domain_id FROM subdomanlar WHERE id=?`, subID).Scan(&domainID)
-	return havuzTavanla(db, domainID, sk, s), nil
+	// Tek havuz plan tavanına kırpıldı; hesabın TÜM alt alan havuzlarının toplamı da
+	// hesap bütçesini aşamaz (alt_havuz_tavan.go: karar + formül).
+	return hesapTavaniUygula(ctx, db, sk, subID, domainID, havuzTavanla(db, domainID, sk, s)), nil
 }

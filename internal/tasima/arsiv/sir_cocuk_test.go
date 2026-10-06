@@ -7,6 +7,7 @@ package arsiv
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -45,7 +46,8 @@ func TestSirCocuk_AciciPanelOrtamiGecmez(t *testing.T) {
 }
 
 func TestSirCocuk_CikarPanelOrtamiGecmez(t *testing.T) {
-	kayit := kiracitest.Kur(t, "runuser")
+	// Çıkarıcı kiracı DİLİMİNDE koşar: slice panel SK'sından, kimlik OS kullanıcısından.
+	kayit := kiracitest.Kur(t, "runuser", "systemd-run")
 	yeniOrtam(t)
 	t.Setenv(ozelDegisken, "1")
 	a, err := acT(t, gzUret(t, tarUret(t, iyiUyeler()...)), Sinirlar{}, nil)
@@ -55,4 +57,8 @@ func TestSirCocuk_CikarPanelOrtamiGecmez(t *testing.T) {
 	// Sahte runuser tar'ı çalıştırmaz; çıkarma sonucu önemsiz.
 	_, _ = a.Cikar(context.Background(), "./"+secimOnek+"/", sinirsizHedef("public_html"))
 	panelOrtamiYok(t, kayit.SizintiYok(t, "runuser", "-u", "nobody", "--", "tar"))
+	sr := kayit.SizintiYok(t, "systemd-run", "--scope")
+	if len(sr) != 1 || !slices.Contains(sr[0].Argv, "--slice=girginos-"+testSK+".slice") {
+		t.Errorf("tar çıkarıcı kiracı diliminde değil: %q", sr)
+	}
 }

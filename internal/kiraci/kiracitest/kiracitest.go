@@ -46,7 +46,7 @@ func Kur(t testing.TB, adlar ...string) Kayit {
 		t.Skip("/bin/sh yok")
 	}
 	if len(adlar) == 0 {
-		adlar = []string{"runuser", "sudo"}
+		adlar = []string{"runuser", "sudo", "systemd-run"}
 	}
 	tmp := t.TempDir()
 	bin, kayit := filepath.Join(tmp, "bin"), filepath.Join(tmp, "kayit")
@@ -64,6 +64,20 @@ func Kur(t testing.TB, adlar ...string) Kayit {
 			"/usr/bin/env > \"$d/env\"\n" +
 			"/bin/cat > /dev/null\n" +
 			"exit 0\n"
+		if ad == "systemd-run" {
+			// Sahte systemd-run (--scope kipi): argv/ortamı kaydeder, "--"dan sonraki
+			// komutu AYNI süreçte çalıştırır (gerçek --scope gibi; çıkış kodu, stdout/
+			// stderr, stdin aynen geçer). Komut bu dizindeki sahte bir araçsa (runuser)
+			// onu mutlak yolla çağırır: çocuğun PATH'i temizlenmiştir.
+			betik = "#!/bin/sh\n" +
+				"d=$(/usr/bin/mktemp -d '" + filepath.Join(kayit, ad) + ".XXXXXX') || exit 97\n" +
+				"printf '%s\\n' \"$@\" > \"$d/argv\"\n" +
+				"/usr/bin/env > \"$d/env\"\n" +
+				"while [ $# -gt 0 ]; do a=$1; shift; [ \"$a\" = \"--\" ] && break; done\n" +
+				"[ $# -gt 0 ] || exit 96\n" +
+				"if [ -x '" + bin + "'/\"$1\" ]; then c='" + bin + "'/$1; shift; exec \"$c\" \"$@\"; fi\n" +
+				"exec \"$@\"\n"
+		}
 		if err := os.WriteFile(filepath.Join(bin, ad), []byte(betik), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -140,4 +154,14 @@ func (k Kayit) SizintiYok(t testing.TB, ad string, beklenenOnEk ...string) []Cag
 		}
 	}
 	return cs
+}
+
+// KomutYaz: sahte komutun (ör. runuser) betiğini ÜZERİNE yazar — çıkış kodu/çıktı
+// sözleşmesini sınayan testler için (kayıt tutmaz). Betik sh betiğidir.
+func (k Kayit) KomutYaz(t testing.TB, ad, betik string) {
+	t.Helper()
+	yol := filepath.Join(filepath.Dir(k.dir), "bin", ad)
+	if err := os.WriteFile(yol, []byte("#!/bin/sh\n"+betik+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 }

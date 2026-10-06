@@ -8,14 +8,15 @@ import (
 	"context"
 	"testing"
 
-	"girginospanel/internal/kiraci/kiracitest"
+	"girginospanel/internal/kiraci/dilimtest"
 )
 
 func TestWPCliJSON_PanelSirriGecmez(t *testing.T) {
-	k := kiracitest.Kur(t)
-	_, _ = wpCliJSON(context.Background(), "nobody", t.TempDir(), "core", "version")
+	k := dilimtest.Kur(t)
+	_, _ = wpCliJSON(context.Background(), dilimtest.SK, t.TempDir(), "core", "version")
 	if cs := k.Cagrilar(t, "sudo"); len(cs) > 0 {
 		t.Errorf("sudo kullanıldı (ortam politikası sudoers'a bağlı): %q", cs[0].Argv)
 	}
-	k.SizintiYok(t, "runuser", "-u", "nobody", "--")
+	k.SizintiYok(t, "runuser", "-u", dilimtest.SK, "--")
+	dilimtest.DilimKilidi(t, k, dilimtest.SK)
 }

@@ -67,7 +67,7 @@ func wpCliJSON(ctx context.Context, sk, path string, altKomut ...string) ([]byte
 	// --format=json sadece list-tarzı komutlarda çalışır; "core version"
 	// düz metin döner. Komut tipine göre bayrağı ekleme kararı çağrı yerinde.
 	args = append(args, altKomut...)
-	c, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, args...)
+	c, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk, Dilim: true}.Komut(ctx, args...) // Dilim: wp-cli kiracı kodunu yükler
 	if err != nil {
 		return nil, fmt.Errorf("wp-cli %s: %w", strings.Join(altKomut, " "), err)
 	}

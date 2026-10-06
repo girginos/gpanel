@@ -347,7 +347,7 @@ func tarTara(archivePath string, tur Tur) error {
 // temiz env ile çalıştıracak komutu hazırlar — panelin tek sarmalayıcısı kiraci.Komut
 // (kabuk yok, yalnız PATH/HOME/LANG; boş argv / kök ya da çözülmeyen kullanıcı reddedilir).
 func runuserKomut(sk string, argv ...string) (*exec.Cmd, error) {
-	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(context.Background(), argv...)
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk, Dilim: true}.Komut(context.Background(), argv...) // Dilim: arşiv aç/sıkıştır kiracı yükü
 }
 
 // UyeSay: arşivdeki üye sayısını döner (ilerleme çubuğu TOPLAM'ı için).

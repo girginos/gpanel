@@ -18,8 +18,8 @@
 // edemez → <EvKoku>/<sk> güvenilir bir çapadır.
 //
 // Panelin TEK runuser sarmalayıcısı Komut'tur (evalti ve taşıma bunu kullanır).
-// Öncüller: archivex.runuserKomut ve git.kiraciCalistir
-// (ayrı işte bu pakete geçirilir). Paket yapraktır: panelin başka paketini içe
+// Öncüller (archivex.runuserKomut, git.kiraciCalistir) bu pakete geçirildi.
+// Paket yapraktır: panelin başka paketini içe
 // aktarmaz.
 package kiraci
 
@@ -69,6 +69,10 @@ type Kiraci struct {
 	// (sınırsız) cgroup'unda, arka plana attığı süreçler de orada yaşar. Kiracının
 	// KENDİ kodunu (cron, "şimdi çalıştır") koşan yollar Dilim kullanır.
 	Dilim bool
+	// DilimSK — dilim adının türetildiği panel kiracı adı (sk). Boşsa Kul. Yalnız
+	// işletim sistemi kullanıcısı sk'dan FARKLI olabilen yollar (taşıma/arşiv:
+	// evalti.OSKullanici; testlerde ayrıcalıksız kimlik) için; üretimde Kul == sk.
+	DilimSK string
 }
 
 // DilimOnek — kiracı kaynak dilimi adının öneki (kaynaklimit.sliceName ve
@@ -86,6 +90,15 @@ func DilimAdi(sk string) (string, error) {
 
 // kullaniciBul — Kul çözümü (testler sahte kiracı kullanıcısıyla değiştirir).
 var kullaniciBul = user.Lookup
+
+// KullaniciDikisi — YALNIZ TESTLER: Kul çözümünü değiştirir (gerçek bir "c_<ad>"
+// sistem kullanıcısı olmadan Dilim yolunu sınamak için); geri alma işlevi döner.
+// Üretim kodu çağırmaz.
+func KullaniciDikisi(f func(string) (*user.User, error)) (geri func()) {
+	eski := kullaniciBul
+	kullaniciBul = f
+	return func() { kullaniciBul = eski }
+}
 
 // Komut — argv'yi kiracı kimliğinde çalıştıracak komutu hazırlar: runuser -u
 // <Kul> -- argv (kabuk yok; argv[0] PATH'te aranır), panel ortamı AKTARILMAZ
@@ -115,12 +128,19 @@ func (k Kiraci) Komut(ctx context.Context, argv ...string) (*exec.Cmd, error) {
 		// Dilim adı biçim denetimli (ErrKomut); açıklama sabit: komut satırı birim
 		// açıklamasına (D-Bus'tan herkesçe okunur) girmez. systemd-run yoksa ya da
 		// kapsam açılamazsa komut ÇALIŞMAZ (dilimsiz yedek yol yok: o sınırı aşmak olur).
-		dilim, err := DilimAdi(k.Kul)
+		// Slice birimi/dosyası YOKSA (plan henüz yazılmamış, kaynaklimit kapalı):
+		// systemd-run örtük (sınırsız) bir dilim yaratır ve komut YİNE çalışır —
+		// sınır yokluğu çalıştırmayı engellemez (dilim_gercek_test.go 181'de ölçer).
+		dilimSK := k.DilimSK
+		if dilimSK == "" {
+			dilimSK = k.Kul
+		}
+		dilim, err := DilimAdi(dilimSK)
 		if err != nil {
 			return nil, ErrKomut
 		}
 		args = append([]string{"--scope", "--quiet", "--collect",
-			"--slice=" + dilim, "--description=girginospanel kiraci " + k.Kul,
+			"--slice=" + dilim, "--description=girginospanel kiraci " + dilimSK,
 			"--", "runuser"}, args...)
 		ad = "systemd-run"
 	}

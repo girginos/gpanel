@@ -189,7 +189,9 @@ func kiraciAl(sk string) (kiraci.Kiraci, error) {
 	if !kiraci.GecerliSK(sk) {
 		return kiraci.Kiraci{}, fmt.Errorf("gecersiz sistem kullanicisi")
 	}
-	return kiraci.Kiraci{Kul: kiraciKul(sk), Ev: filepath.Join(evKoku, sk)}, nil
+	// Dilim: kiracı kimliğinde rsync/cp yerleşimi kiracının kaynak diliminde koşar;
+	// slice adı panel sk'sından (Kul testte ayrıcalıksız kimlik olabilir).
+	return kiraci.Kiraci{Kul: kiraciKul(sk), Ev: filepath.Join(evKoku, sk), Dilim: true, DilimSK: sk}, nil
 }
 
 // kiraciYolu — <evKoku>/<sk>/<göreli> biçimindeki mutlak yolu kiracıya ve ev'e
