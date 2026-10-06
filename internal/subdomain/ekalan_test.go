@@ -39,7 +39,14 @@ const (
 // "--" ile başlayan satırlar atılır).
 func ek_migrasyon(t *testing.T, db *sql.DB) {
 	t.Helper()
-	body, err := os.ReadFile("../../migrations/0160_ek_alan_adlari.sql")
+	for _, dosya := range []string{"0160_ek_alan_adlari.sql", "0215_ek_alan_web_root.sql"} {
+		ek_migrasyonDosya(t, db, dosya)
+	}
+}
+
+func ek_migrasyonDosya(t *testing.T, db *sql.DB, dosya string) {
+	t.Helper()
+	body, err := os.ReadFile("../../migrations/" + dosya)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +59,7 @@ func ek_migrasyon(t *testing.T, db *sql.DB) {
 	for _, ifade := range strings.Split(strings.Join(temiz, "\n"), ";") {
 		if s := strings.TrimSpace(ifade); s != "" {
 			if _, err := db.Exec(s); err != nil {
-				t.Fatalf("göç 0160: %v\n%s", err, s)
+				t.Fatalf("göç %s: %v\n%s", dosya, err, s)
 			}
 		}
 	}

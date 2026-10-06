@@ -32,13 +32,17 @@ var ekVhostYenidenKur = ekVhostYenidenKurDB
 func ekSunucuAdlari(ad string) string { return ad + " www." + ad }
 
 // ekVhostGovde — askıda OLMAYAN hesabın ek alan adı vhost gövdesi.
-func ekVhostGovde(sk, ad, php string) (string, error) {
+func ekVhostGovde(sk, ad, php string) (string, error) { return ekVhostGovdeKok(sk, ad, php, "") }
+
+// ekVhostGovdeKok — ekVhostGovde + belge kökü (DB'deki web_root; "" = taban). Kök render'da
+// GuvenliWebRootTaban ile savunulur (taban dışı/bozuk değer tabana düşer).
+func ekVhostGovdeKok(sk, ad, php, webRoot string) (string, error) {
 	socket, err := provisioner.PHPSocketFor(sk, php)
 	if err != nil {
 		return "", err
 	}
 	crt, key := certYolu(sk, ad)
-	o := subVhostOpts{TamAd: ad, DocRoot: ekDocroot(sk, ad), Socket: socket, Backend: "php-fpm",
+	o := subVhostOpts{TamAd: ad, DocRoot: ekWebRootGuvenli(sk, ad, webRoot), Socket: socket, Backend: "php-fpm",
 		SSL: dosyaVar(crt) && dosyaVar(key), Crt: crt, Key: key, N: subNginxDefaults()}
 	body := renderSubVhost(o)
 	// www takma adı: renderSubVhost TamAd'ı günlük dosyası adında da kullanır, bu yüzden
@@ -54,10 +58,10 @@ func ekVhostYenidenKurDB(ctx context.Context, db *sql.DB, ekID int64) error {
 	birak := provisioner.RenderKilidiAl()
 	defer birak()
 
-	var sk, ad, php string
+	var sk, ad, php, webRoot string
 	if err := db.QueryRowContext(ctx,
-		`SELECT d.sistem_kullanici, e.alan_adi, COALESCE(d.php_surum,'8.3')
-		   FROM ek_alan_adlari e JOIN domains d ON d.id=e.domain_id WHERE e.id=?`, ekID).Scan(&sk, &ad, &php); err != nil {
+		`SELECT d.sistem_kullanici, e.alan_adi, COALESCE(d.php_surum,'8.3'), COALESCE(e.web_root,'')
+		   FROM ek_alan_adlari e JOIN domains d ON d.id=e.domain_id WHERE e.id=?`, ekID).Scan(&sk, &ad, &php, &webRoot); err != nil {
 		return fmt.Errorf("ek alan adı okunamadı: %w", err)
 	}
 	if !reEkSK.MatchString(sk) || !ekAdGuvenli(ad) {
@@ -79,7 +83,7 @@ func ekVhostYenidenKurDB(ctx context.Context, db *sql.DB, ekID int64) error {
 		}
 		body = b
 	} else {
-		b, err := ekVhostGovde(sk, ad, php)
+		b, err := ekVhostGovdeKok(sk, ad, php, webRoot)
 		if err != nil {
 			return err
 		}
@@ -248,7 +252,9 @@ func ekVhostSapmasi(ctx context.Context, db *sql.DB, sk, ad, php string) bool {
 		}
 		beklenen = b
 	} else {
-		b, e := ekVhostGovde(sk, ad, php)
+		var wr string
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(web_root,'') FROM ek_alan_adlari WHERE alan_adi=?`, ad).Scan(&wr)
+		b, e := ekVhostGovdeKok(sk, ad, php, wr)
 		if e != nil {
 			return false
 		}
