@@ -1097,11 +1097,11 @@ func (h *Handlers) SetFTPPassword(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "parola geçersiz karakter (satır sonu) içeriyor")
 		return
 	}
-	var sk string
+	var sk, alan string
 	var isDemo int
 	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT sistem_kullanici, is_demo FROM domains WHERE id=?`, id).
-		Scan(&sk, &isDemo)
+		`SELECT sistem_kullanici, alan_adi, is_demo FROM domains WHERE id=?`, id).
+		Scan(&sk, &alan, &isDemo)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -1114,6 +1114,9 @@ func (h *Handlers) SetFTPPassword(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "FTP parola güncelleme: "+err.Error())
 		return
 	}
+	// Parola yazıldı: ana hesabın AÇIK FTP oturumları düşer (hata parolayı bozmaz).
+	uid, aktor := middleware.Aktor(r)
+	h.ftpOturumlariDusur(r, uid, aktor, alan, sk, id)
 	// SSH açıksa sistem (SSH) parolasını da FTP ile senkronla
 	var sshOn int
 	_ = h.DB.QueryRowContext(r.Context(), `SELECT ssh_erisim FROM domains WHERE id=?`, id).Scan(&sshOn)
