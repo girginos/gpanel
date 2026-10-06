@@ -330,6 +330,11 @@ func TestArsivKapi_BayiVarsayilanKapaliVeKokAnahtari(t *testing.T) {
 	if kod, g := o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"etkin": false}); kod != 200 || !strings.Contains(g, `"iptal_edilen":2`) {
 		t.Fatalf("kapatılamadı: %d %s", kod, g)
 	}
+	var bayiKaydi int
+	_ = o.db.QueryRow(`SELECT bayi_etkin FROM tasima_kaynak_ayar WHERE kod='arsiv-cpanel'`).Scan(&bayiKaydi)
+	if bayiKaydi != 1 {
+		t.Errorf("etkin kapanırken bayi_etkin korunmalı: %d", bayiKaydi)
+	}
 	var kalan int
 	_ = o.db.QueryRow(`SELECT COUNT(*) FROM tasima_isleri WHERE kaynak_tip='arsiv-cpanel' AND durum='kuyrukta'`).Scan(&kalan)
 	if kalan != 0 {
