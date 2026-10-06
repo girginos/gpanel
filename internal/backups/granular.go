@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"girginospanel/internal/selinuxetiket"
 	"io"
 	"log"
 	"net/http"
@@ -749,7 +750,7 @@ func secilenDosyalariGeriYukle(tmp, sk string, yollar []string, hedef string) (i
 		n++
 	}
 	_, _ = exec.Command("chown", "-R", sk+":"+sk, kokHedef).CombinedOutput()
-	_, _ = exec.Command("restorecon", "-R", kokHedef).CombinedOutput()
+	selinuxetiket.LoglaYol("yedek geri yukle (secili)", kokHedef)
 	return n, altKlasor, nil
 }
 
@@ -940,5 +941,5 @@ func homeGeriYukle(tmp, sk string, temiz bool) {
 		_, _ = exec.Command("cp", "-af", extractedHome+"/.", "/home/"+sk+"/").CombinedOutput()
 	}
 	_, _ = exec.Command("chown", "-R", sk+":"+sk, "/home/"+sk).CombinedOutput()
-	_, _ = exec.Command("restorecon", "-R", "/home/"+sk).CombinedOutput()
+	selinuxetiket.Logla("yedek geri yukle (home)", "/home/"+sk)
 }

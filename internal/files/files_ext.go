@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"girginospanel/internal/selinuxetiket"
 	"log"
 	"net/http"
 	"os"
@@ -136,6 +137,9 @@ func (h *Handlers) Rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = chownTreeBeneath(home, req.Yeni, sk) // taşınan öğeyi tenant'a chown (symlink-güvenli)
+	// 🔴 rename inode'u taşır → etiket de taşınır (ör. ~/ içinden public_html'e taşınan
+	// dosya user_home_t kalır). Hedefi politika varsayılanına döndür (yalnız taşınan alt ağaç).
+	selinuxetiket.Logla("dosya yoneticisi tasi", home, relClean(req.Yeni))
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "eski": req.Eski, "yeni": req.Yeni})
 }
 
@@ -415,7 +419,7 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 		if cerr := chownTreeBeneath(home, hedef, sk); cerr != nil {
 			log.Printf("files Extract: chown agaci (rel=%s): %v", hedef, cerr)
 		}
-		_, _ = exec.Command("restorecon", "-R", hedefAbs).CombinedOutput()
+		selinuxetiket.Logla("dosya yoneticisi arsiv ac", home, hedef)
 		// Per-user izin modeli (FIX 1): çıkarılan içeriğe nginx okuma-ACL'ini teyit et. docroot'un
 		// default-ACL'i genelde bunu zaten miras verir; hedef docroot-dışıysa/ACL yoksa garanti.
 		// setfacl yoksa (acl paketi eksik) sessiz atlanır — dosyalar tenant'ta, site diğer yolla servis edilir.

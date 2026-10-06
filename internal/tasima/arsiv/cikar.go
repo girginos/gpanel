@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"girginospanel/internal/selinuxetiket"
 	"io"
 	"time"
 
@@ -92,7 +93,11 @@ func (a *Arsiv) Cikar(ctx context.Context, onek string, h Hedef) (*Rapor, error)
 		hedefYol += "/" + kok
 	}
 	// SK EvDizini'de doğrulandı; Kul testte ayrıcalıksız kimliğe çevrilebilir.
-	return a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home, Dilim: true, DilimSK: h.SK}, hedefYol, nil, false)
+	r, err := a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home, Dilim: true, DilimSK: h.SK}, hedefYol, nil, false)
+	// Çıkarma kiracı kimliğinde yapılır (yeni dosya ebeveynden etiket miras alır); yine de
+	// hedef zaten yanlış etiketliyse (kalıntı) politika varsayılanına döndür.
+	selinuxetiket.LoglaYol("arsiv cikar", hedefYol)
+	return r, err
 }
 
 // cikarCalistir: süzülmüş akışı ki kimliğinde `tar -x -C hedefYol`a besler (Cikar ve

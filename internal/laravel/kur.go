@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"girginospanel/internal/selinuxetiket"
 	"net/http"
 	"os"
 	"os/exec"
@@ -233,6 +234,10 @@ func (h *Handlers) KurDurum(w http.ResponseWriter, r *http.Request) {
 	if !calisiyor && k.SonDeployDurum == "kuruluyor" {
 		artisan, _ := laravelKurulu(appDir)
 		durum := "hata"
+		// 🔴 `cp -al $TMP/. $DEST/` hardlink'tir: kaynağın (~/.lt-skel-*, user_home_t) etiketi
+		// public_html altına taşınır → Enforcing'de php-fpm database.sqlite/storage yazamaz.
+		// İş bitince (başarılı ya da yarım) kurulum dizinini politika varsayılanına döndür.
+		selinuxetiket.LoglaYol("laravel kur", appDir)
 		if artisan {
 			durum = "hazir"
 			if _, e := os.Stat(filepath.Join(appDir, "public")); e == nil {
