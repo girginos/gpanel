@@ -387,3 +387,69 @@ func TestKilit_EszamanliDuzeltGeriAl_KilitlenmeYok(t *testing.T) {
 		t.Fatal("kilitlenme: eşzamanlı Duzelt/GeriAl bitmedi")
 	}
 }
+
+// Karşılıklı dışlama: bir Duzelt render ortasındayken (kilit elde) aynı domain için ikinci
+// Duzelt/GeriAl BEKLER; render bitince ilerler. (Kilit kalkarsa ikincisi hemen biter.)
+func TestKilit_AyniDomain_SerilesirDiger_Domain_Beklemez(t *testing.T) {
+	e := bk_ev(t)
+	ctx := context.Background()
+	e.set(t, 1, e.base+"/public")
+	girdi, birak := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	RerenderFn = func(*sql.DB, int64) error {
+		blok := false
+		once.Do(func() { blok = true; close(girdi) })
+		if blok {
+			<-birak // yalnız ilk çağrı bekletilir
+		}
+		return nil
+	}
+	ilk := make(chan error, 1)
+	go func() { ilk <- Duzelt(ctx, e.db, 1, "c_a", e.base, e.base+"/public") }()
+	<-girdi // ilk çağrı render içinde, kilit elde
+	biti := make(chan struct{})
+	go func() { _ = Duzelt(ctx, e.db, 1, "c_a", e.base, e.base+"/public"); close(biti) }()
+	gbiti := make(chan struct{})
+	go func() { _, _ = GeriAl(ctx, e.db, 1, "c_a", e.base, e.base); close(gbiti) }()
+	select {
+	case <-biti:
+		t.Fatal("aynı domain: ikinci Duzelt kilidi beklemedi")
+	case <-gbiti:
+		t.Fatal("aynı domain: GeriAl kilidi beklemedi")
+	case <-time.After(300 * time.Millisecond):
+	}
+	// farklı domain bloklanmaz
+	d2 := make(chan struct{})
+	go func() { _ = Duzelt(ctx, e.db, 2, "c_b", e.base, ""); close(d2) }()
+	select {
+	case <-d2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("farklı domain bloklandı")
+	}
+	close(birak)
+	if err := <-ilk; err != nil {
+		t.Fatal(err)
+	}
+	<-biti
+	<-gbiti
+}
+
+// GeriAl başarı yolu kendi kilidini yeniden almaz (self-deadlock yok): zaman aşımıyla doğrulanır.
+func TestGeriAl_BasariYolu_KendiKendineKilitlenmez(t *testing.T) {
+	e := bk_ev(t)
+	_ = os.MkdirAll(e.base+"/public", 0o755)
+	e.set(t, 1, e.base+"/public")
+	sonuc := make(chan bool, 1)
+	go func() {
+		geri, err := GeriAl(context.Background(), e.db, 1, "c_a", e.base, e.base)
+		sonuc <- geri && err == nil
+	}()
+	select {
+	case ok := <-sonuc:
+		if !ok {
+			t.Fatal("GeriAl başarılı olmalı")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GeriAl kilitlendi")
+	}
+}
