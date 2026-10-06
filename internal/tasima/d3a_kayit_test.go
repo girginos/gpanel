@@ -29,6 +29,9 @@ func TestKaynakKayit_Tanimlar(t *testing.T) {
 		"gpanel":      {olgunlukDogrulandi, true, false, true},
 		"cpanel":      {olgunlukDeneysel, false, true, false},
 		"directadmin": {olgunlukDeneysel, false, true, false},
+		// Arşiv kaynakları (faz 2): ayrı kod, deneysel, varsayılan KAPALI, sahip taşımaz.
+		"arsiv-cpanel":      {olgunlukDeneysel, false, true, false},
+		"arsiv-directadmin": {olgunlukDeneysel, false, true, false},
 	}
 	liste := kaynakSurucuSirali()
 	if len(liste) != len(beklenen) {
@@ -43,8 +46,12 @@ func TestKaynakKayit_Tanimlar(t *testing.T) {
 		if s.Olgunluk != b.olgunluk || s.VarsayilanEtkin != b.etkin || s.Yetenekler.Posta != b.posta || s.Yetenekler.Sahipler != b.sahipler {
 			t.Errorf("%s = (%s etkin=%v posta=%v sahipler=%v), beklenen %+v", s.Kod, s.Olgunluk, s.VarsayilanEtkin, s.Yetenekler.Posta, s.Yetenekler.Sahipler, b)
 		}
-		if (s.postaKesfet != nil) != s.Yetenekler.Posta {
+		// Arşiv kaynağında posta uzak keşiften değil arşivden gelir (arsivMailAktar).
+		if !s.Arsiv && (s.postaKesfet != nil) != s.Yetenekler.Posta {
 			t.Errorf("%s: posta yeteneği ile keşif fonksiyonu tutarsız", s.Kod)
+		}
+		if s.Arsiv && (s.VarsayilanEtkin || s.Olgunluk != olgunlukDeneysel || !s.Yetenekler.Cron) {
+			t.Errorf("%s: arşiv kaynağı deneysel+varsayılan kapalı+cron yetenekli olmalı", s.Kod)
 		}
 		if (s.sahipKomutu != "") != s.Yetenekler.Sahipler {
 			t.Errorf("%s: sahip yeteneği ile komut tutarsız", s.Kod)

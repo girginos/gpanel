@@ -135,3 +135,49 @@ func TestSemaDogrula_DenetimAdina0114(t *testing.T) {
 		t.Fatalf("0114 sonrası %s hâlâ eksik görünüyor: %q", k, gunluk.String())
 	}
 }
+
+// 0216: arşiv kaynakları — bayi_etkin (varsayılan KAPALI), işin yüklemesi, yükleme tablosu.
+// Boş şemada eksik raporlanır, göç sonrası raporlanmaz; göç iki kez koşunca hata vermez
+// ve mevcut kaynak satırları bayide KAPALI kalır.
+func TestSemaDogrula_Tasima0216(t *testing.T) {
+	db := semaTestDB(t)
+	var gunluk bytes.Buffer
+	eski := log.Writer()
+	log.SetOutput(&gunluk)
+	t.Cleanup(func() { log.SetOutput(eski) })
+
+	kolonlar := []string{"tasima_kaynak_ayar.bayi_etkin", "tasima_isleri.arsiv_yukleme_id", "tasima_yuklemeleri.sahip_rid"}
+	semaDogrula(db)
+	for _, k := range kolonlar {
+		if !strings.Contains(gunluk.String(), k) {
+			t.Errorf("boş şemada %s eksik diye raporlanmadı: %q", k, gunluk.String())
+		}
+	}
+	for _, f := range []string{"0051_tasima.sql", "0055_eklenti_lisans.sql", "0096_tasima_oturum.sql", "0109_tasima_kaynak_kapsam.sql"} {
+		semaTestGoc(t, db, f)
+	}
+	if _, err := db.Exec(`INSERT INTO tasima_kaynak_ayar (kod, etkin) VALUES ('arsiv-cpanel', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	semaTestGoc(t, db, "0216_tasima_arsiv.sql")
+	semaTestGoc(t, db, "0216_tasima_arsiv.sql") // idempotent
+	gunluk.Reset()
+	semaDogrula(db)
+	for _, k := range kolonlar {
+		if strings.Contains(gunluk.String(), k) {
+			t.Errorf("0216 sonrası %s hâlâ eksik görünüyor: %q", k, gunluk.String())
+		}
+	}
+	var bayi int
+	if err := db.QueryRow(`SELECT bayi_etkin FROM tasima_kaynak_ayar WHERE kod='arsiv-cpanel'`).Scan(&bayi); err != nil || bayi != 0 {
+		t.Errorf("mevcut kaynak satırı bayide KAPALI olmalı: %d %v", bayi, err)
+	}
+	if _, err := db.Exec(`INSERT INTO tasima_yuklemeleri (ad, boyut) VALUES ('a', 1000)`); err != nil {
+		t.Fatalf("yükleme satırı: %v", err)
+	}
+	var durum string
+	var rid int64
+	if err := db.QueryRow(`SELECT durum, sahip_rid FROM tasima_yuklemeleri`).Scan(&durum, &rid); err != nil || durum != "yukleniyor" || rid != 0 {
+		t.Errorf("yükleme varsayılanları: %s %d %v", durum, rid, err)
+	}
+}

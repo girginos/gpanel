@@ -92,12 +92,12 @@ func (a *Arsiv) Cikar(ctx context.Context, onek string, h Hedef) (*Rapor, error)
 		hedefYol += "/" + kok
 	}
 	// SK EvDizini'de doğrulandı; Kul testte ayrıcalıksız kimliğe çevrilebilir.
-	return a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home}, hedefYol, nil)
+	return a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home}, hedefYol, nil, false)
 }
 
 // cikarCalistir: süzülmüş akışı ki kimliğinde `tar -x -C hedefYol`a besler (Cikar ve
 // CikarDizin ortak gövdesi). Hedefin hazırlığı ve denetimi çağıranındır.
-func (a *Arsiv) cikarCalistir(ctx context.Context, onek string, ki kiraci.Kiraci, hedefYol string, izin func(rel string) bool) (*Rapor, error) {
+func (a *Arsiv) cikarCalistir(ctx context.Context, onek string, ki kiraci.Kiraci, hedefYol string, izin func(rel string) bool, baglarYok bool) (*Rapor, error) {
 	cmd, err := ki.Komut(ctx, "tar", "-x",
 		"--no-same-owner", "--no-same-permissions", "-f", "-", "-C", hedefYol)
 	if err != nil {
@@ -113,7 +113,7 @@ func (a *Arsiv) cikarCalistir(ctx context.Context, onek string, ki kiraci.Kiraci
 		return nil, fmt.Errorf("%w: çıkarıcı başlatılamadı", ErrCikarma)
 	}
 	r := &Rapor{}
-	akErr := a.akit(ctx, onek, girdi, r, izin)
+	akErr := a.akit(ctx, onek, girdi, r, izin, baglarYok)
 	_ = girdi.Close() // yarıda kesilen akışta tar eksik girdiyle hata verip çıkar
 	werr := cmd.Wait()
 	r.TarCikti = string(kuyruk.b)
@@ -192,7 +192,7 @@ func (k *kuyrukYazici) Write(p []byte) (int, error) {
 
 // akit: arşivi baştan okur (üyeler envanterle birebir aynı olmalı) ve onek altındaki
 // üyeleri süzüp w'ye YENİ bir tar akışı olarak yazar. Denetim ve yazım aynı geçiştedir.
-func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor, izin func(rel string) bool) error {
+func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor, izin func(rel string) bool, baglarYok bool) error {
 	g, err := a.gecisAc(ctx, a.Uyeler)
 	if err != nil {
 		return err
@@ -201,7 +201,7 @@ func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor, iz
 	iy := &izliYazici{w: w}
 	bw := bufio.NewWriterSize(iy, 256<<10)
 	tw := tar.NewWriter(bw)
-	s := &suzgec{onek: onek, baglar: bagAgaciKur(a.Uyeler, onek), dosya: map[string]bool{}, r: r, izin: izin}
+	s := &suzgec{onek: onek, baglar: bagAgaciKur(a.Uyeler, onek), dosya: map[string]bool{}, r: r, izin: izin, baglarYok: baglarYok}
 	yazmaHatasi := func(err error) error {
 		if iy.err != nil {
 			return fmt.Errorf("%w (%v)", ErrCikarma, iy.err)
@@ -252,6 +252,8 @@ type suzgec struct {
 	// izin: nil değilse yalnız izin(rel)=true üyeler yazılır (posta: yalnız bilinen kutular,
 	// dovecot iç dosyaları hariç). false → "seçim dışı" olarak atlanır ve raporlanır.
 	izin func(rel string) bool
+	// baglarYok: symlink ve hardlink üyeler atlanır (bkz. DizinSecenek.BaglarYok).
+	baglarYok bool
 }
 
 // karar: üye yazılacaksa çıkarıcıya gidecek temiz başlık, değilse nil (atlananlar
@@ -276,6 +278,10 @@ func (s *suzgec) karar(u Uye, hdr *tar.Header) *tar.Header {
 		Mode:    hdr.Mode & 0o777,
 		ModTime: time.Unix(hdr.ModTime.Unix(), 0),
 		Format:  tar.FormatGNU,
+	}
+	if s.baglarYok && (u.Tur == tar.TypeSymlink || u.Tur == tar.TypeLink) {
+		s.r.atla(rel, "bağ (bu hedefte bağ yazılmaz)")
+		return nil
 	}
 	switch u.Tur {
 	case tar.TypeDir:

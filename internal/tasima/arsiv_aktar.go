@@ -37,6 +37,12 @@ var mailVmailKul = "vmail"
 // (posta/parola özetleri/günlük/sertifika kiracıya "uygulama dizini" diye geçmesin).
 var arsivEvDisiYasak = map[string]bool{"mail": true, "etc": true, "ssl": true, "logs": true, "access-logs": true, "tmp": true}
 
+// Test dikişleri: kiracı bütçesi ve içe aktarma (gerçek MariaDB/mysql istemcisi gerektirir).
+var (
+	arsivButceFn  = (*Handlers).arsivButce
+	dbIceAktarici = (*Handlers).dbIceAktar
+)
+
 func arsivAlan(m *arsiv.Manifest, ad string) (arsiv.Alan, bool) {
 	for _, a := range m.Alanlar {
 		if a.Ad == ad {
@@ -125,7 +131,7 @@ func (h *Handlers) arsivDosyalariAktar(ctx context.Context, k *Kaynak, hs Hesap,
 	if err != nil {
 		return fmt.Errorf("hedef sistem kullanicisi bulunamadi")
 	}
-	butce := h.arsivButce(ctx, kp, sonuc.DomainID)
+	butce := arsivButceFn(h, ctx, kp, sonuc.DomainID)
 
 	log("dosyalar arsivden cikariliyor → %s", webRoot)
 	rap, err := a.Cikar(ctx, onek, arsiv.Hedef{SK: sk, Kok: kok, Butce: butce})
@@ -225,11 +231,16 @@ func (h *Handlers) arsivDBAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefD
 		return fmt.Errorf("dump acilamadi: %w", err)
 	}
 	defer rc2.Close()
-	return h.dbIceAktar(ctx, io.LimitReader(rc2, sinir), hedefDB)
+	return dbIceAktarici(h, ctx, io.LimitReader(rc2, sinir), hedefDB)
 }
 
 // arsivZoneOku — cPanel bölge dosyası (arşivin üst verisi). DirectAdmin'de bölge yoktur.
 func arsivZoneOku(k *Kaynak, alanAdi string) []zoneKayit {
+	// 🔴 Yalnız hesabın KENDİ alan adlarının bölgesi (arşivde başkasının alanı için bölge
+	// bulunsa da okunmaz): çağıran zincir alanı zaten manifestten seçer, bu ikinci kilittir.
+	if _, ok := arsivAlan(k.arsiv.M, alanAdi); !ok {
+		return nil
+	}
 	uye := k.arsiv.M.DNSUye(alanAdi)
 	if uye == "" {
 		return nil
@@ -308,19 +319,20 @@ func (h *Handlers) arsivMailAktar(ctx context.Context, k *Kaynak, hs0 Hesap, log
 		}
 		if onek != b.M.PostaAlanOnek(alanAdi)+"/"+p.Yerel {
 			// İç içe yerleşim (ör. DirectAdmin <kutu>/Maildir): kutuyu tek başına çıkar.
-			rap, err := b.A.CikarDizin(ctx, onek, hedef, mailVmailKul, arsiv.ButceSinirsiz,
-				func(rel string) bool { return !mailDovecotDosyasi(rel) })
+			rap, err := b.A.CikarDizin(ctx, onek, hedef, mailVmailKul, arsiv.DizinSecenek{
+				Butce: arsiv.ButceSinirsiz, BaglarYok: true, Izin: func(rel string) bool { return !mailDovecotDosyasi(rel) }})
 			uyarilar = append(uyarilar, mailRaporUyari(email, rap, err, log)...)
 			continue
 		}
 		grup[p.Yerel] = true
 	}
 	if len(grup) > 0 && domainDir != "" {
-		rap, err := b.A.CikarDizin(ctx, b.M.PostaAlanOnek(alanAdi), domainDir, mailVmailKul, arsiv.ButceSinirsiz,
-			func(rel string) bool {
+		rap, err := b.A.CikarDizin(ctx, b.M.PostaAlanOnek(alanAdi), domainDir, mailVmailKul, arsiv.DizinSecenek{
+			Butce: arsiv.ButceSinirsiz, BaglarYok: true,
+			Izin: func(rel string) bool {
 				kutu, kalan, _ := strings.Cut(rel, "/")
 				return grup[kutu] && !mailDovecotDosyasi(kalan)
-			})
+			}})
 		uyarilar = append(uyarilar, mailRaporUyari(alanAdi, rap, err, log)...)
 	}
 	uyarilar = append(uyarilar, "Posta: kutu parolaları arşivde bulunmuyor — yeni parola belirlendi; kullanıcılar panelden parolayı sıfırlamalı")
@@ -362,6 +374,7 @@ func (h *Handlers) arsivCronAktar(k *Kaynak, alanAdi, sk string, sonuc *AktarSon
 		e, y, r, n, err := cronKur(sk, satirlar, b.M.Kullanici)
 		if err != nil {
 			log("uyari: cron eklenemedi: %v", kisalt(temizHata(err.Error()), 160))
+			redler = append(redler, r...)
 			redler = append(redler, cronRed{Satir: fmt.Sprintf("(%d satır)", len(satirlar)), Neden: "hesabın cron deposu şu an yazılamıyor (askıda olabilir)"})
 		} else {
 			eklenen, yinelenen = e, y

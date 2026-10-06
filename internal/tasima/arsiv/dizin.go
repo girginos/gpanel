@@ -10,6 +10,17 @@ import (
 	"girginospanel/internal/kiraci"
 )
 
+// DizinSecenek: CikarDizin ayarları.
+type DizinSecenek struct {
+	// Butce: seçimin kaplayabileceği en çok bayt (ButceSinirsiz = yalnız sunucu boş alanı denetlenir).
+	Butce int64
+	// Izin: nil değilse yalnız Izin(rel)=true üyeler yazılır (rel: seçime göre göreli ad).
+	Izin func(rel string) bool
+	// BaglarYok: true → symlink ve hardlink üyeler HİÇ yazılmaz (posta kutusu: bir kutudan
+	// başka kutuya bağ, kutular arası okumaya dönüşürdü).
+	BaglarYok bool
+}
+
 // CikarDizin: onek altındaki üyeleri (adlar oneke göre göreli) KİRACI OLMAYAN bir
 // hedefe (posta kutusu: /var/vmail/<alan>/<kutu>) `kul` kimliğinde çıkarır. Süzme,
 // bağ/hardlink/aygıt/suid kuralları Cikar ile AYNI geçiştir (aynı akit); fark yalnız
@@ -19,9 +30,7 @@ import (
 //   - kul boş/"root" olamaz; kiraci.Komut uid 0'a çözülen kullanıcıyı da reddeder;
 //   - butce (ButceSinirsiz dışında) seçimin boyutunu aşarsa ErrKota; hedefin dosya
 //     sisteminde boş alan + inode denetlenir (ErrDisk).
-//
-// izin nil değilse yalnız izin(rel)=true üyeler yazılır (rel: seçime göre göreli ad).
-func (a *Arsiv) CikarDizin(ctx context.Context, onek, hedef, kul string, butce int64, izin func(rel string) bool) (*Rapor, error) {
+func (a *Arsiv) CikarDizin(ctx context.Context, onek, hedef, kul string, s DizinSecenek) (*Rapor, error) {
 	onek, err := adTemizle(onek)
 	if err != nil {
 		return nil, err
@@ -37,11 +46,11 @@ func (a *Arsiv) CikarDizin(ctx context.Context, onek, hedef, kul string, butce i
 		return nil, fmt.Errorf("%w: hedef dizin yok ya da dizin değil", ErrGecersiz)
 	}
 	bayt, uye := a.secim(onek)
-	if butce != ButceSinirsiz && bayt > butce {
+	if s.Butce != ButceSinirsiz && bayt > s.Butce {
 		return nil, ErrKota
 	}
 	if err := diskYeterli(hedef, bayt+a.s.DiskPayi, uye); err != nil {
 		return nil, err
 	}
-	return a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: kul, Ev: hedef}, hedef, izin)
+	return a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: kul, Ev: hedef}, hedef, s.Izin, s.BaglarYok)
 }

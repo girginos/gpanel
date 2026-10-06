@@ -853,6 +853,7 @@ func (h *Handlers) AcilistaTemizle() {
 		}
 	}
 	h.kuyrukTemizle()
+	h.arsivYuklemeTemizle()
 	// Guvenlik: biten islerin kimlik bilgilerini de temizle.
 	_, _ = h.DB.Exec(
 		`UPDATE tasima_isleri SET kaynak_parola=NULL, kaynak_anahtar=NULL, kimlik_temiz=1

@@ -71,11 +71,12 @@ func init() {
 
 // arsivTuruUyar — sürücü kodu ile arşivin tanınan türü tutarlı mı.
 func arsivTuruUyar(tip string, m *arsiv.Manifest) error {
+	ad := map[arsiv.Tur]string{arsiv.TurCPanel: "cPanel", arsiv.TurDirectAdmin: "DirectAdmin"}
 	switch {
 	case tip == "arsiv-cpanel" && m.Tur != arsiv.TurCPanel:
-		return fmt.Errorf("bu dosya cPanel yedeği değil (%s olarak tanındı); doğru kaynak türünü seçin", m.Tur)
+		return fmt.Errorf("bu dosya cPanel yedeği değil (%s olarak tanındı); doğru kaynak türünü seçin", ad[m.Tur])
 	case tip == "arsiv-directadmin" && m.Tur != arsiv.TurDirectAdmin:
-		return fmt.Errorf("bu dosya DirectAdmin yedeği değil (%s olarak tanındı); doğru kaynak türünü seçin", m.Tur)
+		return fmt.Errorf("bu dosya DirectAdmin yedeği değil (%s olarak tanındı); doğru kaynak türünü seçin", ad[m.Tur])
 	}
 	return nil
 }
@@ -286,10 +287,11 @@ func (h *Handlers) ArsivKesif(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusConflict, "başka bir arşiv inceleniyor; bitince yeniden deneyin")
 		return
 	}
-	meta := arsivOturumMeta{Durum: "kesif", Tip: g.Tip, Yol: bilgi.Yol, YuklemeID: bilgi.YuklemeID,
+	// Yol YALNIZ kök yolu girdisinde saklanır (yükleme dosyasının yolu kimlikten türetilir).
+	meta := arsivOturumMeta{Durum: "kesif", Tip: g.Tip, YuklemeID: bilgi.YuklemeID,
 		ParmakIzi: arsivParmakIzi{Boyut: bilgi.Boyut, MtimeNs: bilgi.MtimeNs}, Baslangic: time.Now().Unix()}
 	if bilgi.YuklemeID == 0 {
-		meta.Yol = bilgi.Yol // yalnız kök; istemciye dönmez
+		meta.Yol = bilgi.Yol
 	}
 	mj, _ := json.Marshal(meta)
 	// Aynı kapsamın eski arşiv oturumları silinir (tek taze oturum).
@@ -307,7 +309,7 @@ func (h *Handlers) ArsivKesif(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := res.LastInsertId()
 	arsivKesifAktif.Store(id, true)
-	go h.arsivKesifCalis(id, kp.Kapsam, g.Tip, bilgi)
+	go h.arsivKesifCalis(id, kp.Kapsam, g.Tip, bilgi, meta.Baslangic)
 	httpx.Denetim(h.DB, r, kp.UID, kp.Kul, "tasima_arsiv_kesif", strconv.FormatInt(id, 10), g.Tip, kp.RID, true)
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"oturum_id": id, "durum": "kesif"})
 }
@@ -315,10 +317,13 @@ func (h *Handlers) ArsivKesif(w http.ResponseWriter, r *http.Request) {
 // arsivAcSecenek — Oku seçenekleri; testler ucuzlatır.
 var arsivAc = arsiv.AcHesap
 
-func (h *Handlers) arsivKesifCalis(id int64, kp Kapsam, tip string, bilgi *arsivKaynakBilgi) {
+func (h *Handlers) arsivKesifCalis(id int64, kp Kapsam, tip string, bilgi *arsivKaynakBilgi, baslangic int64) {
 	defer func() { <-arsivKesifSem; arsivKesifAktif.Delete(id) }()
-	meta := arsivOturumMeta{Tip: tip, Yol: bilgi.Yol, YuklemeID: bilgi.YuklemeID,
+	meta := arsivOturumMeta{Tip: tip, YuklemeID: bilgi.YuklemeID, Baslangic: baslangic,
 		ParmakIzi: arsivParmakIzi{Boyut: bilgi.Boyut, MtimeNs: bilgi.MtimeNs}}
+	if bilgi.YuklemeID == 0 {
+		meta.Yol = bilgi.Yol
+	}
 	hataYaz := func(err error) {
 		log.Printf("tasima: arsiv kesfi basarisiz (oturum=%d bayi=%d): %v", id, kp.RID, err)
 		meta.Durum, meta.Hata = "hata", kisaMetin(hataMetni(kp.Yonetici(), err).Error(), 400)
@@ -342,7 +347,7 @@ func (h *Handlers) arsivKesifCalis(id int64, kp Kapsam, tip string, bilgi *arsiv
 		return
 	}
 	// Okuma sırasında dosya değiştiyse sonuç güvenilmez.
-	if yeni, err := h.arsivKaynakCoz(ctx, kp, map[bool]string{true: bilgi.Yol, false: ""}[bilgi.YuklemeID == 0], bilgi.YuklemeID); err != nil || !yeni.parmakIziEslesir(meta.ParmakIzi) {
+	if yeni, err := h.arsivKaynakCoz(ctx, kp, meta.Yol, meta.YuklemeID); err != nil || !yeni.parmakIziEslesir(meta.ParmakIzi) {
 		hataYaz(errArsivDegisti)
 		return
 	}
@@ -394,6 +399,10 @@ func (h *Handlers) ArsivKesifDurum(w http.ResponseWriter, r *http.Request) {
 		oturumBulunamadi(w)
 		return
 	}
+	// 🔴 Sıra önemli: çalışıyor mu bilgisi DB okumasından ÖNCE alınır. Goroutine sonucu DB'ye
+	// yazar, SONRA aktif işaretini siler; ters sırada okumak, tamamlanma anında yoklayan
+	// kullanıcıya "panel yeniden başlatıldı" yanlış hatasını gösterirdi.
+	_, aktif := arsivKesifAktif.Load(id)
 	var ayarlar, kesifJSON string
 	err = h.DB.QueryRowContext(r.Context(),
 		`SELECT COALESCE(ayarlar,''), COALESCE(kesif_json,'') FROM tasima_isleri
@@ -410,7 +419,7 @@ func (h *Handlers) ArsivKesifDurum(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = h.DB.ExecContext(r.Context(), `UPDATE tasima_isleri SET son_kullanim=NOW() WHERE id=? AND sahip_rid=?`, id, kp.RID)
 	y := map[string]any{"oturum_id": id, "durum": meta.Durum, "gecen_sn": time.Now().Unix() - meta.Baslangic}
-	if _, aktif := arsivKesifAktif.Load(id); meta.Durum == "kesif" && !aktif {
+	if meta.Durum == "kesif" && !aktif {
 		y["durum"], y["hata"] = "hata", "panel yeniden başlatıldı; arşivi yeniden keşfedin"
 	}
 	if meta.Hata != "" {
