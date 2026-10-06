@@ -292,11 +292,18 @@ sec_htpasswd() {
 sec_clamav() {
   want clamav || return 0
   head_ "ClamAV imza veritabanı"
-  local C=/var/lib/clamav
+  local C=${GOSP_CLAMAV_DIZIN:-/var/lib/clamav}   # (testler geçici dizin verir)
   [ -d "$C" ] || { ok "clamav yok"; return 0; }
-  local OWN; OWN=$(getent passwd 992 | cut -d: -f1); OWN=${OWN:-clamupdate}
+  # 🔴 Sahip ADLA bulunur, UID ile DEĞİL. Eskiden `getent passwd 992` vardı: UID'ler kurulumdan kuruluma
+  # değişir; temiz AlmaLinux 10'da 992 = valkey çıktı → imza dizini valkey'e devredildi, freshclam
+  # (clamupdate olarak çalışır) "Can't create temporary directory" ile her güncellemede düştü ve imzalar
+  # bayatladı (2026-10-06, test sunucusu 144.76.189.3).
+  local OWN
+  for OWN in clamupdate clamav; do id -u "$OWN" >/dev/null 2>&1 && break; OWN=""; done
+  [ -n "$OWN" ] || { ok "clamav kullanıcısı yok (clamupdate/clamav) — sahiplik atlandı"; return 0; }
+  local GRP; GRP=$(id -gn "$OWN" 2>/dev/null) || GRP=$OWN
   # freshclam bu dizine yazamazsa imza güncellenemez
-  ensure_owner "$C" "$OWN:$OWN" -R
+  ensure_owner "$C" "$OWN:$GRP" -R
   ensure_mode  "$C" 755
 }
 
