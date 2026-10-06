@@ -16,7 +16,7 @@ const PGUNC_EN: Record<string, string> = {
   "Panel Güncellemesi": "Panel Update",
   "Araçlar ve Ayarlar": "Tools and Settings",
   "Anasayfa": "Home",
-  "Paneli GitHub'daki son sürüme günceller. Ortam değişkenleri, veritabanı ve siteler korunur;": "Updates the panel to the latest version on GitHub. Environment variables, database and sites are preserved;",
+  "Paneli yayınlanmış son sürüme günceller. Ortam değişkenleri, veritabanı ve siteler korunur;": "Updates the panel to the latest published version. Environment variables, database and sites are preserved;",
   "yeni sürüm sağlıklı başlamazsa otomatik geri alınır. İşlem arka planda çalışır —": "if the new version does not start healthy it is automatically rolled back. The process runs in the background —",
   "bu sayfayı kapatabilirsiniz, güncelleme kesintisiz devam eder.": "you can close this page, the update continues uninterrupted.",
 }
@@ -36,7 +36,7 @@ export default function PanelGuncellemePage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{cevir("Panel Güncellemesi")}</h1>
         {/* Yalnız açıklama metni okunur satır boyunda daralır; başlık ve kart kabuk genişliğindedir. */}
         <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-          {cevir("Paneli GitHub'daki son sürüme günceller. Ortam değişkenleri, veritabanı ve siteler korunur;")}
+          {cevir("Paneli yayınlanmış son sürüme günceller. Ortam değişkenleri, veritabanı ve siteler korunur;")}
           {' '}{cevir("yeni sürüm sağlıklı başlamazsa otomatik geri alınır. İşlem arka planda çalışır —")}
           {cevir(cevir("bu sayfayı kapatabilirsiniz, güncelleme kesintisiz devam eder."))}
         </p>

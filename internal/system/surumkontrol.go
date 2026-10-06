@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -258,17 +259,19 @@ func SurumKontrolDurum(w http.ResponseWriter, r *http.Request) {
 	mevcut, y, son, hata, acik := surumMevcut, surumYayin, surumSon, surumHata, surumAcik
 	surumMu.RUnlock()
 
-	// Kasıtlı olarak SADECE eşitlik kıyası: sürüm etiketleri "0.3.0-f2" gibi
-	// serbest biçimli; semver sıralaması yanlış pozitif üretir. Farklıysa
-	// "yeni sürüm var" deriz — dev makinede ileri sürüm çalıştıran operatör
-	// için yanıltıcı olabilir, bilinçli kabul.
-	guncellemeVar := acik && y.SonSurum != "" && y.SonSurum != mevcut
+	// Sıralı kıyas (surumYeniMi): yayındaki sürüm kurulundan ESKİ ise "yeni sürüm var"
+	// denmez — geri dönüş kapısı zaten reddeder. Kurulu yayındakinden yeniyse
+	// (önizleme/ön yayın) arayüze ayrıca kurulu_yeni bildirilir.
+	guncellemeVar := acik && y.SonSurum != "" && surumYeniMi(y.SonSurum, mevcut)
+	kuruluYeni := acik && y.SonSurum != "" && mevcut != "" &&
+		surumYeniMi(mevcut, y.SonSurum) && !surumYeniMi(y.SonSurum, mevcut)
 
 	cevap := map[string]any{
 		"acik":           acik,
 		"mevcut":         mevcut,
 		"son":            y.SonSurum,
 		"guncelleme_var": guncellemeVar,
+		"kurulu_yeni":    kuruluYeni,
 		"duyuru":         y.Duyuru,
 		"kritik":         y.Kritik && guncellemeVar,
 		"yayin_tarihi":   y.YayinTarihi,
@@ -278,4 +281,60 @@ func SurumKontrolDurum(w http.ResponseWriter, r *http.Request) {
 		cevap["son_kontrol"] = son.UTC().Format(time.RFC3339)
 	}
 	httpx.WriteJSON(w, http.StatusOK, cevap)
+}
+
+// surumAyir — "0.3.0-20261009" / "0.3.0-f3" / "0.3.0" / "v0.3.0" biçimlerini
+// (ana-ikincil-yama, ek sayı, ek sayısal mı, çekirdek geçerli mi) olarak ayırır.
+// Ek yoksa 0 sayılır (düz sürüm, aynı çekirdekteki tarihli yayından eskidir).
+func surumAyir(s string) (cekirdek [3]int, ek int64, ekOK, cekirdekOK bool) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+	c, e, ekVar := strings.Cut(s, "-")
+	parcalar := strings.Split(c, ".")
+	if c == "" || len(parcalar) > 3 {
+		return
+	}
+	for i, p := range parcalar {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return
+		}
+		cekirdek[i] = n
+	}
+	cekirdekOK = true
+	if !ekVar {
+		return cekirdek, 0, true, true
+	}
+	if n, err := strconv.ParseInt(e, 10, 64); err == nil && n >= 0 {
+		return cekirdek, n, true, true
+	}
+	return cekirdek, 0, false, true
+}
+
+// surumYeniMi — son, mevcuttan KESİN olarak yeni mi? Çekirdek (ana.ikincil.yama)
+// önce sayısal kıyaslanır, eşitse sondaki tarih/sayı eki. Mevcut ayrıştırılamıyorsa
+// (dev "f3") ve son ayrıştırılabiliyorsa true; ikisi de ayrıştırılamıyorsa eski
+// davranış (!=). Eşit/eski → false.
+func surumYeniMi(son, mevcut string) bool {
+	son, mevcut = strings.TrimSpace(son), strings.TrimSpace(mevcut)
+	if son == "" {
+		return false
+	}
+	sc, se, seOK, sOK := surumAyir(son)
+	mc, me, meOK, mOK := surumAyir(mevcut)
+	if !sOK || !mOK {
+		return son != mevcut
+	}
+	for i := range sc {
+		if sc[i] != mc[i] {
+			return sc[i] > mc[i]
+		}
+	}
+	switch {
+	case seOK && meOK:
+		return se > me
+	case seOK && !meOK:
+		return true // dev/etiketsiz kurulum yayına güncellenebilsin
+	default:
+		return son != mevcut
+	}
 }
