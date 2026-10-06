@@ -155,3 +155,38 @@ func TestZamanGecerli_Disa(t *testing.T) {
 		t.Fatal("ZamanGecerli")
 	}
 }
+
+// Askıdaki hesapta eklenecek görev olmasa da (geçersiz / yinelenen / boş girdi)
+// hata dönmeli: kapı yalnız yazma anında değil, baştan çalışır.
+func TestEkle_AskidaYazmasizGirdideDeHata(t *testing.T) {
+	temizle(t)
+	if err := os.MkdirAll(askiKok, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(askiYolu("c_var1"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range [][]Gorev{nil, {gorev("x y", "echo")}} {
+		if _, err := Ekle("c_var1", in); !errors.Is(err, ErrAskida) {
+			t.Errorf("%v: ErrAskida bekleniyordu, %v", in, err)
+		}
+	}
+}
+
+// Zamanlayıcı satırındaki görev kimliği, depodan geri okunan görevinkiyle
+// aynı olmalı (Tip varsayılanı "komut" Ekle'de de uygulanır); aksi halde
+// cron-calistir görevi bulamaz.
+func TestEkle_CronDKimligiGeriOkunanlaAyni(t *testing.T) {
+	temizle(t)
+	g := Gorev{Dakika: "7", Saat: "*", Gun: "*", Ay: "*", Hafta: "*", Komut: "echo kimlik"}
+	if _, err := Ekle("c_var1", []Gorev{g}); err != nil {
+		t.Fatal(err)
+	}
+	l, _ := read("c_var1")
+	if len(l) != 1 {
+		t.Fatal(l)
+	}
+	if icerik := dosya(t, cronDYolu("c_var1")); !strings.Contains(icerik, gorevKimlik("c_var1", l[0])) {
+		t.Fatalf("cron.d kimliği geri okunanla uyuşmuyor:\n%s", icerik)
+	}
+}
