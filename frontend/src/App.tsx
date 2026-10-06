@@ -4,7 +4,8 @@ import { useAuth, depoBaskaOturumda, adinaDonusAl } from '@/store/auth'
 import { guvenliDonus } from '@/lib/adina'
 import { useHesapAski } from '@/store/hesapAski'
 import HesapAskidaPage from '@/pages/HesapAskidaPage'
-import { girisYolu, musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
+import { bayiAbonelikID, bayiYoluIzinli, bayiYonlendirme, girisYolu, musteriDomainID, musteriYoluIzinli } from '@/lib/rol'
+import { useBayiAbonelikSahibi } from '@/lib/bayiAbonelik'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const AdinaGirisPage = lazy(() => import('@/pages/AdinaGirisPage'))
 import DashboardLayout from '@/components/DashboardLayout'
@@ -110,15 +111,16 @@ function GuardedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-// 🔴 ROL KAPISI (yalnız 'user' = hosting müşterisi). Karar ROTA düzeyinde: sayfa
-// bileşeni hiç mount edilmez (HomePage içinde <Navigate> dönmek yetmezdi — efekti
-// yine koşar, 4 yönetici ucuna 403 attırırdı). İzin listesi dışındaki her yol
-// (/, bilinmeyenler, /domainler, /abonelikler, başka abonelik…) müşterinin kendi
-// aboneliğine gider. Yönetici ve bayi için kapı şeffaftır — davranış değişmez.
+// 🔴 ROL KAPISI ('user' = hosting müşterisi, 'reseller' = bayi). Karar ROTA düzeyinde:
+// sayfa bileşeni hiç mount edilmez (HomePage içinde <Navigate> dönmek yetmezdi — efekti
+// yine koşar, 4 yönetici ucuna 403 attırırdı). Müşteride izin listesi dışındaki her yol
+// (/, bilinmeyenler, /domainler, /abonelikler, başka abonelik…) kendi aboneliğine gider;
+// bayide bkz. BayiKapisi. Yönetici için kapı şeffaftır — davranış değişmez.
 function RolKapisi() {
-  const musteri = useAuth((s) => s.kullanici?.rol === 'user')
+  const rol = useAuth((s) => s.kullanici?.rol)
   const { pathname } = useLocation()
-  if (!musteri) return <Outlet />
+  if (rol === 'reseller') return <BayiKapisi yol={pathname} />
+  if (rol !== 'user') return <Outlet />
   const id = musteriDomainID()
   // domain_id boş/bozuk: yönlendirme döngü kurardı (/abonelikler/ → kapı → …) —
   // oturum kapatılır, GuardedRoute müşteri giriş formuna götürür.
@@ -136,6 +138,20 @@ function AbonelikSayfasi() {
   // Rota KabukDisi bloğunda (müşteri ana sayfasının tam genişlik uyarı bandı);
   // yönetici/bayi görünümü ise her panel sayfası gibi tek kabukta çizilir.
   return musteri ? <MusteriAnaSayfa /> : <SayfaCercevesi><SubscriptionDetailPage /></SayfaCercevesi>
+}
+
+// 🔴 BAYİ KAPISI. İzin listesi (lib/rol bayiYoluIzinli) dışındaki yol — AdminOnly uçlara
+// dayanan yönetici sayfaları ve bilinmeyenler — bayinin en yakın sayfasına gider (sayfa
+// mount edilmez → yönetici uçlarına istek yok). Abonelik yolları yalnız bayinin KENDİ
+// aboneliğinde açılır; başka bayinin/kökün (ya da var olmayan) kimliği → /domainler.
+function BayiKapisi({ yol }: { yol: string }) {
+  const izinli = bayiYoluIzinli(yol)
+  const abonelik = izinli ? bayiAbonelikID(yol) : null
+  const sahip = useBayiAbonelikSahibi(abonelik)
+  if (!izinli) return <Navigate to={bayiYonlendirme(yol)} replace />
+  if (abonelik === null) return <Outlet />
+  if (sahip === null) return <SayfaYukleniyor />
+  return sahip ? <Outlet /> : <Navigate to="/domainler" replace />
 }
 
 function BozukMusteriOturumu() {
@@ -185,7 +201,7 @@ export default function App() {
           </GuardedRoute>
         }
       >
-        {/* Rol kapısı: altındaki TÜM rotalar müşteride izin listesinden geçer (yeni rota = varsayılan yasak). */}
+        {/* Rol kapısı: altındaki TÜM rotalar müşteride ve bayide izin listesinden geçer (yeni rota = varsayılan yasak). */}
         <Route element={<RolKapisi />}>
         {/* 🔴 KABUK DIŞI (açık istisnalar — sessiz kaçış yok). Tam genişlik ZEMİN
             kullanan sayfalar; içerik genişliği yine --container-sayfa'dır:

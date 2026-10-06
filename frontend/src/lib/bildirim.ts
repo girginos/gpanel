@@ -95,7 +95,7 @@ export function hedef(b: Bildirim, rol: Rol | null | undefined): string | null {
     case 'kota': return '/' // bayi havuzu: pano
     case 'toplu': return rol === 'admin' ? '/domainler' : null
     case 'antivirus': return rol === 'admin' ? '/antivirus' : null
-    case 'zincir': return '/saldiri-zincirleri'
+    case 'zincir': return rol === 'admin' ? '/saldiri-zincirleri' : null
     case 'yedek': return rol === 'admin' ? '/backup-yonetimi' : null
     default: return null
   }
