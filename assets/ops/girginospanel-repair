@@ -426,6 +426,16 @@ etiket_duzelt() {
   echo "${n:-0}"
 }
 
+# WAF (ModSecurity v3, PCRE2 JIT) nginx (httpd_t) altında her başlatma/reload'da `execmem` ister;
+# `httpd_execmem` kapalıysa Enforcing'de AVC üretir ve PCRE2 JIT'siz yorumlayıcıya düşer (WAF yine
+# çalışır). Boolean bir güvenlik gevşetmesidir → YALNIZ WAF kuruluysa açılır; WAF yoksa dokunulmaz
+# (ve açıksa KAPATILMAZ: kullanıcının kendi ayarı olabilir).
+# GOSP_REPAIR_WAF_MODUL / GOSP_REPAIR_WAF_DAMGA: yalnız test kancası; üretimde ayarlanmaz.
+waf_kurulu() {
+  [ -f "${GOSP_REPAIR_WAF_MODUL:-/usr/lib64/nginx/modules/ngx_http_modsecurity_module.so}" ] \
+    || [ -f "${GOSP_REPAIR_WAF_DAMGA:-/etc/nginx/modsec/.built_for_nginx}" ]
+}
+
 sec_selinux_temel() {
   want selinux_temel || return 0
   head_ "SELinux temel (booleanlar + fcontext + port + etiketler)"
@@ -440,11 +450,20 @@ sec_selinux_temel() {
     if command -v pure-ftpd >/dev/null 2>&1 || rpm -q pure-ftpd >/dev/null 2>&1; then
       liste="$liste $SELINUX_FTP_BOOLEANLAR"
     fi
+    # WAF modülü kuruluysa httpd_execmem de istenir (yoksa listeye girmez → hiç dokunulmaz).
+    if waf_kurulu; then
+      liste="$liste httpd_execmem"
+    fi
     for b in $liste; do
       cur=$(getsebool "$b" 2>/dev/null)
       case "$cur" in
         *"--> on") ok "boolean $b=on" ;;
-        *"--> off") eksik="$eksik $b=1"; act "boolean $b kapalı → açılacak (kalıcı)" ;;
+        *"--> off") eksik="$eksik $b=1"
+          if [ "$b" = httpd_execmem ]; then
+            act "boolean $b kapalı → açılacak (kalıcı; WAF kurulu: libmodsecurity PCRE2 JIT)"
+          else
+            act "boolean $b kapalı → açılacak (kalıcı)"
+          fi ;;
         *) warn "boolean $b politikada yok / okunamadı — atlandı" ;;
       esac
     done

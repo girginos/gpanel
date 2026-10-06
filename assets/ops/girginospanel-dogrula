@@ -714,10 +714,17 @@ if command -v getenforce >/dev/null 2>&1; then
       # (a) booleans
       _bl="httpd_can_network_connect httpd_can_network_connect_db httpd_enable_homedirs httpd_read_user_content"
       if command -v pure-ftpd >/dev/null 2>&1; then _bl="$_bl ftpd_full_access ftpd_connect_db ftpd_use_passive_mode"; fi
+      # WAF (ModSecurity v3 JIT) installed -> httpd_execmem is expected on. NOT checked when no WAF
+      # (the boolean is a security relaxation; never required for a server without WAF).
+      # GOSP_REPAIR_WAF_MODUL / GOSP_REPAIR_WAF_DAMGA: test hooks only.
+      if [ -f "${GOSP_REPAIR_WAF_MODUL:-/usr/lib64/nginx/modules/ngx_http_modsecurity_module.so}" ] \
+         || [ -f "${GOSP_REPAIR_WAF_DAMGA:-/etc/nginx/modsec/.built_for_nginx}" ]; then
+        _bl="$_bl httpd_execmem"
+      fi
       if ! command -v getsebool >/dev/null 2>&1; then
         uyar "SELinux booleans" "no getsebool — COULD NOT MEASURE (not counted as passed)"
       else
-        _bkapali=""; _bkritik=""; _bok=0
+        _bkapali=""; _bkritik=""; _bok=0; _bexec=0
         for _b in $_bl; do
           _bv=$(getsebool "$_b" 2>/dev/null)
           case "$_bv" in
@@ -725,6 +732,7 @@ if command -v getenforce >/dev/null 2>&1; then
             *"--> off")
               case "$_b" in
                 httpd_enable_homedirs|httpd_read_user_content) _bkritik="$_bkritik $_b" ;;
+                httpd_execmem) _bexec=1 ;;
                 *) _bkapali="$_bkapali $_b" ;;
               esac ;;
             *) : ;;   # boolean not in this policy (e.g. no ftpd_*): not a finding
@@ -740,7 +748,10 @@ if command -v getenforce >/dev/null 2>&1; then
         if [ -n "$_bkapali" ]; then
           uyar "SELinux booleans" "OFF:$_bkapali — panel/PHP network or DB access may fail. Fix: girginospanel-repair --only selinux_temel"
         fi
-        [ -z "$_bkritik" ] && [ -z "$_bkapali" ] && gec "SELinux booleans" "$_bok on ($_se)"
+        if [ "$_bexec" = 1 ]; then
+          uyar "SELinux booleans" "httpd_execmem OFF while WAF (ModSecurity) is installed — WAF runs without PCRE2 JIT + an execmem AVC on every nginx start/reload when Enforcing. Fix: girginospanel-repair --only selinux_temel"
+        fi
+        [ -z "$_bkritik" ] && [ -z "$_bkapali" ] && [ "$_bexec" = 0 ] && gec "SELinux booleans" "$_bok on ($_se)"
       fi
 
       # (b) persistent fcontext rules (the tenant docroot rule is reported above)

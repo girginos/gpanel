@@ -53,6 +53,35 @@ warn() { echo -e "  ${c_y}!${c_0} $*"; }
 die()  { echo -e "${c_r}✗ $*${c_0}" >&2; exit 1; }
 step() { echo -e "${c_b}══ $* ══${c_0}"; }
 
+# SELinux: libmodsecurity (PCRE2 JIT) nginx (httpd_t) altinda her baslatma/reload'da `execmem` ister.
+# `httpd_execmem` kapaliysa Enforcing'de AVC + JIT'siz yorumlayici (WAF yine calisir). Boolean bir
+# guvenlik gevsetmesidir → yalniz WAF KURULDUYSA (bu betik) acilir; WAF kurulu degilse dokunulmaz.
+# Yalniz modul kuruldu + nginx -t gate GECTIKTEN sonra cagrilir (rollback dalinda die ile cikilir,
+# boolean'a hic dokunulmaz → geri alinacak bir sey kalmaz). Zaten aciksa yazmaz; hata kurulumu
+# DUSURMEZ (uyari). SELinux Disabled/yok → sessiz gec. Modu (setenforce) DEGISTIRMEZ.
+waf_selinux_execmem() {
+  command -v getenforce >/dev/null 2>&1 || return 0
+  case "$(getenforce 2>/dev/null)" in Enforcing|Permissive) ;; *) return 0 ;; esac
+  if ! command -v getsebool >/dev/null 2>&1 || ! command -v setsebool >/dev/null 2>&1; then
+    warn "getsebool/setsebool yok (policycoreutils) — httpd_execmem denetlenemedi (WAF JIT'siz calisir + nginx baslatmada execmem AVC)"
+    return 0
+  fi
+  local cur; cur=$(getsebool httpd_execmem 2>/dev/null)
+  case "$cur" in
+    *"--> on") ok "SELinux httpd_execmem zaten acik" ;;
+    *"--> off")
+      if setsebool -P httpd_execmem 1 >/dev/null 2>&1; then
+        ok "SELinux httpd_execmem=on (kalici) — WAF PCRE2 JIT + nginx baslatmada execmem AVC yok"
+      else
+        warn "setsebool -P httpd_execmem 1 BASARISIZ — WAF JIT'siz calisir + her nginx baslatmada execmem AVC (elle: setsebool -P httpd_execmem 1)"
+      fi ;;
+    *) warn "httpd_execmem boolean'i politikada yok / okunamadi — atlandi" ;;
+  esac
+  return 0
+}
+# Test kancasi: GOSP_WAF_KUTUPHANE=1 ile `source` edilince yalniz fonksiyonlar yuklenir.
+if [ "${GOSP_WAF_KUTUPHANE:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
+
 [ "$(id -u)" = 0 ] || die "root gerekli"
 command -v nginx >/dev/null || die "nginx bulunamadi"
 NGVER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
@@ -82,6 +111,7 @@ step "GirginOSPanel WAF kurulum (ModSecurity $MODSEC_VER + CRS $CRS_VER, nginx $
 # Her sey hazir + ABI uyumlu + zorlanmiyorsa → hizli cik (agir derleme atlanir).
 if have_lib && have_module && abi_ok && have_crs && module_loaded && [ "$FORCE" = 0 ]; then
   ok "her sey hazir + nginx ABI ($NGVER) uyumlu — yapilacak bir sey yok (--force ile yeniden derle)"
+  waf_selinux_execmem   # eski kurulum: boolean sonradan kapanmis/hic acilmamis olabilir (idempotent)
   exit 0
 fi
 
@@ -252,6 +282,7 @@ fi
 # son kontrol: main nginx hala -t OK olmali
 if nginx -t >/dev/null 2>&1; then
   ok "ana nginx -t OK — kurulum tamam"
+  waf_selinux_execmem
 else
   die "beklenmeyen: kurulum sonrasi nginx -t basarisiz (elle kontrol: nginx -t)"
 fi
