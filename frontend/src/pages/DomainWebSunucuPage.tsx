@@ -12,6 +12,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Badge, Button, Select, Toggle } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import AlanAdiSecici, { type AlanAdiSecenek } from '@/components/AlanAdiSecici'
 
 type Ayarlar = {
   hdr_x_content_type: boolean
@@ -147,6 +148,11 @@ const WEBSRV_EN: Record<string, string> = {
   "{0} gün": "{0} days",
   "POST istekleri, oturum çerezleri, giriş ve önizleme sayfaları": "POST requests, session cookies, login and preview pages",
   "WP Site Health \"Page cache detected\" uyarısını giderir.": "Resolves the WP Site Health \"Page cache detected\" warning.",
+  "Belge kökü ayarlanacak alan adı": "Domain to set the document root for",
+  "Belge kökü \"{0}\" olarak ayarlandı": "Document root set to \"{0}\"",
+  "Belge kökü ek alan adının köküne ayarlandı": "Document root set to the addon domain root",
+  "Belge kökü alınamadı": "Failed to load document root",
+  "Ek alan adının kendi public_html dizini içindeki alt klasör.": "Subfolder inside the addon domain's own public_html directory.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WEBSRV_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -169,6 +175,17 @@ export default function DomainWebSunucuPage() {
   const [webRootKayitli, setWebRootKayitli] = useState('')
   const [webRootAdaylar, setWebRootAdaylar] = useState<string[]>([])
   const [webRootKaydediliyor, setWebRootKaydediliyor] = useState(false)
+  // Belge kökü hedefi: 'ana' (hesabın ana alan adı) | 'ek:<id>' (ek alan adı). Ana alan
+  // ucu ile ek alan ucu AYNI kuralları paylaşır (sunucu tarafı tek doğrulayıcı).
+  const [ekAlanlar, setEkAlanlar] = useState<{ id: number; alan_adi: string }[]>([])
+  const [hedef, setHedef] = useState('ana')
+  const hedefEk = hedef.startsWith('ek:') ? ekAlanlar.find(e => `ek:${e.id}` === hedef) : undefined
+  const webRootUrl = hedefEk ? `/domains/${id}/ek-alan-adlari/${hedefEk.id}/web-root` : `/domains/${id}/web-root`
+  const webRootOnek = hedefEk ? `domains/${hedefEk.alan_adi}/public_html` : 'public_html'
+  const hedefSecenekleri: AlanAdiSecenek[] = [
+    { deger: 'ana', alanAdi: yanit?.alan_adi || '…', tur: 'ana' },
+    ...ekAlanlar.map(e => ({ deger: `ek:${e.id}`, alanAdi: e.alan_adi, tur: 'ek' as const })),
+  ]
 
   function yukle() {
     if (!id) return
@@ -176,12 +193,9 @@ export default function DomainWebSunucuPage() {
     Promise.all([
       api.get<Yanit>(`/domains/${id}/nginx-settings`),
       api.get<{backend: string}>(`/domains/${id}/web-backend`),
-      api.get<{alt_dizin: string; adaylar: string[]}>(`/domains/${id}/web-root`),
-    ]).then(([y, b, w]) => {
+    ]).then(([y, b]) => {
       setYanit(y.data); setA(y.data.ayarlar)
       setBackend(b.data.backend)
-      setWebRoot(w.data.alt_dizin); setWebRootKayitli(w.data.alt_dizin)
-      setWebRootAdaylar(w.data.adaylar || [])
     }).catch(e => {
       const m = apiHata(e)
       setHata(m)
@@ -190,6 +204,32 @@ export default function DomainWebSunucuPage() {
       .finally(() => setYuk(false))
   }
   useEffect(yukle, [id])
+
+  // Ek alan adları (seçici için); alınamazsa seçici yalnız ana alanı gösterir.
+  useEffect(() => {
+    if (!id) return
+    let iptal = false
+    api.get<{ ekler: { id: number; alan_adi: string }[] }>(`/domains/${id}/ek-alan-adlari`)
+      .then(r => { if (!iptal) setEkAlanlar(r.data.ekler || []) })
+      .catch(() => { if (!iptal) setEkAlanlar([]) })
+    return () => { iptal = true }
+  }, [id])
+
+  // Seçili hedefin belge kökü (ana: /web-root, ek: /ek-alan-adlari/{eid}/web-root).
+  useEffect(() => {
+    if (!id) return
+    if (hedef.startsWith('ek:') && !hedefEk) return // liste henüz gelmedi
+    let iptal = false
+    api.get<{ alt_dizin: string; adaylar: string[] }>(webRootUrl)
+      .then(w => {
+        if (iptal) return
+        setWebRoot(w.data.alt_dizin); setWebRootKayitli(w.data.alt_dizin)
+        setWebRootAdaylar(w.data.adaylar || [])
+      })
+      .catch(e => { if (!iptal) toast.hata(cevir("İşlem başarısız"), apiHata(e, cevir("Belge kökü alınamadı"))) })
+    return () => { iptal = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, hedef, hedefEk?.id])
 
   async function backendKaydet(yeni: string) {
     if (yeni === backend || backendDegistiriliyor) return
@@ -214,9 +254,13 @@ export default function DomainWebSunucuPage() {
     if (webRoot.trim() === webRootKayitli || webRootKaydediliyor) return
     setWebRootKaydediliyor(true); setHata(null); setBasari(null)
     try {
-      const r = await api.put<{ alt_dizin: string }>(`/domains/${id}/web-root`, { alt_dizin: webRoot.trim() })
+      const r = await api.put<{ alt_dizin: string }>(webRootUrl, { alt_dizin: webRoot.trim() })
       setWebRoot(r.data.alt_dizin); setWebRootKayitli(r.data.alt_dizin)
-      const m = r.data.alt_dizin
+      const m = hedefEk
+        ? (r.data.alt_dizin
+          ? cevirT(cevir("Belge kökü \"{0}\" olarak ayarlandı"), `${webRootOnek}/${r.data.alt_dizin}`)
+          : cevir("Belge kökü ek alan adının köküne ayarlandı"))
+        : r.data.alt_dizin
         ? cevirT(cevir("Belge kökü \"public_html/{0}\" olarak ayarlandı"), r.data.alt_dizin)
         : cevir("Belge kökü public_html köküne ayarlandı")
       setBasari(m)
@@ -315,10 +359,17 @@ export default function DomainWebSunucuPage() {
           </p>
         </div>
 
-        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{cevir("public_html içindeki alt klasör")}</label>
+        {ekAlanlar.length > 0 && (
+          <AlanAdiSecici
+            secenekler={hedefSecenekleri} deger={hedef} onDegis={setHedef}
+            etiket={cevir("Belge kökü ayarlanacak alan adı")}
+            disabled={webRootKaydediliyor} className="mb-4 max-w-md"
+          />
+        )}
+        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">{hedefEk ? cevir("Ek alan adının kendi public_html dizini içindeki alt klasör.") : cevir("public_html içindeki alt klasör")}</label>
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="flex items-stretch flex-1 min-w-0 rounded-md border border-slate-300 dark:border-slate-600 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500/30">
-            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-dark-800 text-xs font-mono text-slate-400 dark:text-slate-500 border-r border-slate-200 dark:border-dark-600 select-none whitespace-nowrap">public_html/</span>
+            <span className="px-2.5 flex items-center bg-slate-50 dark:bg-dark-800 text-xs font-mono text-slate-400 dark:text-slate-500 border-r border-slate-200 dark:border-dark-600 select-none whitespace-nowrap">{webRootOnek}/</span>
             <input
               list="webroot-adaylar"
               value={webRoot}
@@ -355,7 +406,7 @@ export default function DomainWebSunucuPage() {
           <Ikon d={I.ileri} className="mt-px size-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
           <div className="text-xs text-slate-600 dark:text-slate-400 min-w-0">
             <span className="text-slate-400 dark:text-slate-500">{cevir("Etkin kök:")} </span>
-            <code className="font-mono break-all text-slate-700 dark:text-slate-300">public_html{webRoot.trim() ? '/' + webRoot.trim().replace(/^\/+|\/+$/g, '') : ''}</code>
+            <code className="font-mono break-all text-slate-700 dark:text-slate-300">{webRootOnek}{webRoot.trim() ? '/' + webRoot.trim().replace(/^\/+|\/+$/g, '') : ''}</code>
             <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
               {cevir(cevir("Klasör önceden var olmalı."))} <span className="font-medium text-slate-500 dark:text-slate-400">{cevir("Laravel için:")} <code className="font-mono">public</code></span> {cevir("· Kaydedince nginx vhost anında yeniden render edilir.")}
             </div>
