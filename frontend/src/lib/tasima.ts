@@ -31,6 +31,8 @@ export type TasimaYetenek = {
   ssl: boolean
   posta: boolean
   sahipler: boolean
+  /** Cron görevleri taşınır mı (arşiv kaynakları için true). */
+  cron: boolean
 }
 
 export type TasimaKaynak = {
@@ -38,19 +40,27 @@ export type TasimaKaynak = {
   etiket: string
   olgunluk: TasimaOlgunluk
   etkin: boolean
+  /** Arşiv kaynağı mı (dosya yolu/yükleme ile; SSH sunucusu yok). */
+  arsiv: boolean
+  /** Yalnız kök yanıtında anlamlı: bayiler bu arşiv kaynağını kullanabilir mi. */
+  bayi_etkin: boolean
   yetenekler: TasimaYetenek
 }
+
+/** Arşiv boyut tavanları (bayt). 0 = bilinmiyor → arayüz yüklemeyi/yolu kapalı tutar. */
+export type ArsivLimitleri = { yol_tavan: number; yukleme_tavan: number; parca: number }
 
 export type TasimaKaynaklari = {
   acik: boolean
   bayi_acik: boolean
   kaynaklar: TasimaKaynak[]
+  arsiv_limitleri: ArsivLimitleri
 }
 
 // Kod sunucuda VARCHAR(32) ve PUT /tasima/kaynaklar/{kod} yolunda kullanılır.
 const KOD_DESENI = /^[a-z0-9][a-z0-9_-]{0,31}$/
 
-const YETENEK_ADLARI = ['dosya', 'veritabani', 'dns', 'ssl', 'posta', 'sahipler'] as const
+const YETENEK_ADLARI = ['dosya', 'veritabani', 'dns', 'ssl', 'posta', 'sahipler', 'cron'] as const
 
 function nesneMi(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -73,8 +83,19 @@ function kaynakAyikla(ham: unknown): TasimaKaynak | null {
     etiket,
     olgunluk: ham.olgunluk === 'dogrulandi' ? 'dogrulandi' : 'deneysel',
     etkin: ham.etkin === true,
+    arsiv: ham.arsiv === true,
+    bayi_etkin: ham.bayi_etkin === true,
     yetenekler: yetenekAyikla(ham.yetenekler),
   }
+}
+
+function limitSayi(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0
+}
+
+export function arsivLimitleriAyikla(ham: unknown): ArsivLimitleri {
+  const l = nesneMi(ham) ? ham : {}
+  return { yol_tavan: limitSayi(l.yol_tavan), yukleme_tavan: limitSayi(l.yukleme_tavan), parca: limitSayi(l.parca) }
 }
 
 /** Ham yanıtı sözleşmeye indirger (bkz. dosya başı). */
@@ -91,7 +112,7 @@ export function tasimaKaynaklariAyikla(ham: unknown): TasimaKaynaklari {
       kaynaklar.push(kay)
     }
   }
-  return { acik, bayi_acik: g.bayi_acik === true, kaynaklar }
+  return { acik, bayi_acik: g.bayi_acik === true, kaynaklar, arsiv_limitleri: arsivLimitleriAyikla(g.arsiv_limitleri) }
 }
 
 async function tasimaKaynaklariGetir(): Promise<TasimaKaynaklari> {
