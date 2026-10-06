@@ -80,7 +80,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 
 // hesapAktarIc — HesapAktar'ın gövdesi; hatayı HAM döndürür (süzme çağıranda).
 func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kapsam Kapsam, log func(string, ...any)) (*AktarSonuc, error) {
-	ctx, iptal := context.WithTimeout(ctx, hesapTimeout)
+	ctx, iptal := context.WithTimeout(ctx, hesapSuresi(k))
 	defer iptal()
 
 	sonuc := &AktarSonuc{}

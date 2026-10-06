@@ -25,6 +25,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/tasima/arsiv"
@@ -42,6 +43,18 @@ var (
 	arsivButceFn  = (*Handlers).arsivButce
 	dbIceAktarici = (*Handlers).dbIceAktar
 )
+
+// arsivHesapTimeout — arşiv kaynaklı tek kalemin üst süresi: yüzlerce GiB'lık arşivde her alan
+// ve her döküm yeniden okuma demektir (canlı SSH için 3 sa yetmez).
+const arsivHesapTimeout = 12 * time.Hour
+
+// hesapSuresi — kalemin zaman aşımı (arşivde uzatılmış, canlı SSH'ta hesapTimeout).
+func hesapSuresi(k *Kaynak) time.Duration {
+	if k != nil && k.arsiv != nil {
+		return arsivHesapTimeout
+	}
+	return hesapTimeout
+}
 
 func arsivAlan(m *arsiv.Manifest, ad string) (arsiv.Alan, bool) {
 	for _, a := range m.Alanlar {

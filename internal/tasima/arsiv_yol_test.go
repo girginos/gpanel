@@ -246,6 +246,15 @@ func TestArsivHesaplari(t *testing.T) {
 	}
 }
 
+func TestHesapSuresi(t *testing.T) {
+	if hesapSuresi(&Kaynak{}) != hesapTimeout || hesapSuresi(nil) != hesapTimeout {
+		t.Error("canlı SSH kaynağı hesapTimeout kullanmalı")
+	}
+	if got := hesapSuresi(&Kaynak{arsiv: &arsivBaglam{}}); got != arsivHesapTimeout || got <= hesapTimeout {
+		t.Errorf("arşiv kalemi uzatılmış süre almalı: %v", got)
+	}
+}
+
 func TestArsivTuruUyar(t *testing.T) {
 	cp, da := &arsiv.Manifest{Tur: arsiv.TurCPanel}, &arsiv.Manifest{Tur: arsiv.TurDirectAdmin}
 	if arsivTuruUyar("arsiv-cpanel", cp) != nil || arsivTuruUyar("arsiv-directadmin", da) != nil {
