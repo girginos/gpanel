@@ -541,6 +541,22 @@ func cronKaynakT(t *testing.T) *Kaynak {
 	return kaynak
 }
 
+func cronMailtoKaynakT(t *testing.T) *Kaynak {
+	t.Helper()
+	k := "cpmove-u/"
+	kaynak, _ := arsivKaynakT(t, "arsiv-cpanel", []tUye{
+		{ad: k + "cp/u", veri: "USER=u\n"},
+		{ad: k + "userdata/main", veri: "main_domain: ornek.com\naddon_domains:\n  ek.net: ek.net.ornek.com\n"},
+		{ad: k + "userdata/ornek.com", veri: "documentroot: /home/u/public_html\n"},
+		{ad: k + "userdata/ek.net.ornek.com", veri: "documentroot: /home/u/ek\n"},
+		{ad: k + "homedir/public_html/i", veri: "x"}, {ad: k + "homedir/ek/i", veri: "x"},
+		{ad: k + "cron/u", veri: "MAILTO=yonetici@ornek.com\n0 2 * * * /home/u/public_html/a.sh\n0 3 * * * /home/u/ek/b.sh\n"},
+	})
+	m := kaynak.arsiv.M
+	kaynak.arsiv.CronAtama, kaynak.arsiv.CronRed = cronAta(m.Cron, cronBaglam{EskiKullanici: m.Kullanici, AnaAlan: m.AnaAlan, Alanlar: m.Alanlar})
+	return kaynak
+}
+
 // Kural: cron arşivden çevrilip hesabın deposuna (cron.Ekle) eklenir; yollar yeni ev/sk'ye yazılır;
 // MAILTO eşlenir; çevrilemeyen/tehlikeli satır NEDENİYLE raporlanır (sessiz atma yok); satırlar
 // ait olduğu alan adının hesabına gider; ortak redler İLK kalemin raporuna BİR kez yazılır.
@@ -601,6 +617,16 @@ func TestArsivCronAktar_RaporVeAlanBazli(t *testing.T) {
 	h.arsivCronAktar(k2, "ornek.com", "c_ana", s4, log)
 	if tum := strings.Join(s4.Uyarilar, "\n"); !strings.Contains(tum, "yazılamıyor") || !strings.Contains(tum, "Cron taşınamadı") {
 		t.Errorf("askı raporu:\n%s", tum)
+	}
+	// MAILTO notu: iki kalemde de üretilir ama rapora BİR kez yazılır.
+	k4 := cronMailtoKaynakT(t)
+	cronEkle = func(sk string, g []cron.Gorev) (cron.EkleSonuc, error) { return cron.EkleSonuc{Eklenen: len(g)}, nil }
+	r1, r2 := &AktarSonuc{}, &AktarSonuc{}
+	h.arsivCronAktar(k4, "ornek.com", "c_ana", r1, log)
+	h.arsivCronAktar(k4, "ek.net", "c_ek", r2, log)
+	sayac := strings.Count(strings.Join(r1.Uyarilar, "\n"), "MAILTO") + strings.Count(strings.Join(r2.Uyarilar, "\n"), "MAILTO")
+	if sayac != 1 {
+		t.Errorf("MAILTO notu bir kez beklenir, %d kez: %q %q", sayac, r1.Uyarilar, r2.Uyarilar)
 	}
 	// Yinelenen satırlar idempotent raporlanır.
 	k3 := cronKaynakT(t)
@@ -671,6 +697,18 @@ func TestArsivIsHazirla_KapsamParmakIziVeCron(t *testing.T) {
 		t.Errorf("disk: %v", err)
 	}
 	diskBosAlan = eskiD
+	// Arşiv AÇILIRKEN dosya değişirse (okuma sırasında) iş yine reddedilir.
+	eskiAc := arsivAc
+	arsivAc = func(ctx context.Context, yol string, s arsiv.Secenek) (*arsiv.Arsiv, *arsiv.Manifest, error) {
+		g := time.Now().Add(9 * time.Hour)
+		_ = os.Chtimes(yol, g, g)
+		return eskiAc(ctx, yol, s)
+	}
+	if err := h.arsivIsHazirla(ctx, Kapsam{}, k("arsiv-cpanel"), Ayarlar{}, hesap("ornek.com")); !errors.Is(err, errArsivDegisti) {
+		t.Errorf("okuma sırasında değişen dosya: %v", err)
+	}
+	arsivAc = eskiAc
+	_ = os.Chtimes(o.dosya, time.Unix(0, fi.ModTime().UnixNano()), time.Unix(0, fi.ModTime().UnixNano()))
 	// Dosya keşiften sonra değişti.
 	gelecek := time.Now().Add(2 * time.Hour)
 	_ = os.Chtimes(o.dosya, gelecek, gelecek)
