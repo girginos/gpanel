@@ -153,6 +153,9 @@ func main() {
 
 	// migrations
 	runMigrations(d)
+	if err := gizli.AnahtarUret(); err != nil { // temiz kurulumda db.key'i ilk açılışta üret (destek ajanı onsuz başlamaz)
+		log.Printf("gizli: db.key hazırlanamadı: %v", err)
+	}
 	gizli.ParolalariSifrele(d)          // mevcut duz-metin DB parolalarini at-rest sifrele (idempotent)
 	gizli.RedisParolalariSifrele(d)     // redis ACL parolalari icin ayni gecis (idempotent)
 	gizli.SaglikKontrol(d)              // anahtar gercekten cozuyor mu (sessiz bozulma uyarisi)

@@ -30,14 +30,12 @@ import (
 	"girginospanel/internal/sirdosya"
 )
 
-const (
-	anahtarYol = "/etc/girginospanel/db.key"
-	onEk       = "gos1:" // sifreli deger isareti (duz metinden ayirmak icin)
-)
+const onEk = "gos1:" // sifreli deger isareti (duz metinden ayirmak icin)
 
 var (
-	birKez  sync.Once
-	anahtar []byte
+	anahtarYol = "/etc/girginospanel/db.key" // testte gecici dosyaya cevrilir
+	birKez     sync.Once
+	anahtar    []byte
 )
 
 func anahtariYukle() {
@@ -153,6 +151,15 @@ func SifreliMi(deger string) bool { return strings.HasPrefix(deger, onEk) }
 func Sha256Hex(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
+}
+
+// AnahtarUret: db.key YOKSA üretir (panel açılışında bir kez çağrılır). Temiz kurulumda hiçbir
+// sır henüz saklanmadığı için anahtar tembelce hiç üretilmezdi; anahtarı ASLA üretmeyen
+// girginospanel-destek-ajan (AnahtarHazir) ise db.key yokken başlamayıp her birkaç saniyede
+// çöküp yeniden başlıyordu. Var olan geçerli anahtara dokunmaz.
+func AnahtarUret() error {
+	anahtariYukle()
+	return AnahtarHazir()
 }
 
 // AnahtarHazir: db.key okunabilir ve geçerli mi — ASLA ÜRETMEZ/YAZMAZ.
