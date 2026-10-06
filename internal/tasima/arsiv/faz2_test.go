@@ -156,6 +156,26 @@ func postaUyeler() []uyeT {
 	}
 }
 
+// Seçim bütçeye tam sığıyorsa (sınır değeri) çıkarılır.
+func TestCikarDizin_ButceSinirDegeri(t *testing.T) {
+	o := yeniOrtam(t)
+	hedef := filepath.Join(o.base, "vmail2")
+	_ = os.Mkdir(hedef, 0o755)
+	_ = os.Chown(hedef, o.uid, o.gid)
+	a, err := acT(t, gzUret(t, tarUret(t, postaUyeler()...)), Sinirlar{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const onek = "cpmove-u/homedir/mail/ornek.com"
+	bayt, _ := a.secim(onek)
+	if _, err := a.CikarDizin(context.Background(), onek, hedef, "nobody", DizinSecenek{Butce: bayt - 1}); !errors.Is(err, ErrKota) {
+		t.Fatalf("bütçe-1: %v", err)
+	}
+	if _, err := a.CikarDizin(context.Background(), onek, hedef, "nobody", DizinSecenek{Butce: bayt, BaglarYok: true}); err != nil {
+		t.Fatalf("tam bütçe geçmeli: %v", err)
+	}
+}
+
 func TestCikarDizin_PostaSuzgeciVeKimlik(t *testing.T) {
 	o := yeniOrtam(t)
 	hedef := filepath.Join(o.base, "vmail", "ornek.com")
@@ -239,6 +259,14 @@ func TestCikarDizin_GecersizHedefVeKullanici(t *testing.T) {
 	}
 	if _, err := a.CikarDizin(ctx, "../x", gercek, "nobody", DizinSecenek{Butce: ButceSinirsiz}); !errors.Is(err, ErrUyeAdi) {
 		t.Errorf("geçersiz önek: %v", err)
+	}
+	// Hedefte yeterli boş alan yoksa (seçim + disk payı > boş) hiçbir şey yazılmadan ErrDisk.
+	ad, err := acT(t, gzUret(t, tarUret(t, postaUyeler()...)), Sinirlar{DiskPayi: 1 << 62}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ad.CikarDizin(ctx, onek, gercek, "nobody", DizinSecenek{Butce: ButceSinirsiz}); !errors.Is(err, ErrDisk) {
+		t.Errorf("disk payı: ErrDisk beklendi, gelen %v", err)
 	}
 	// Bütçe seçimin boyutundan küçükse hiçbir şey yazılmadan ErrKota.
 	if _, err := a.CikarDizin(ctx, onek, gercek, "nobody", DizinSecenek{Butce: 1}); !errors.Is(err, ErrKota) {
