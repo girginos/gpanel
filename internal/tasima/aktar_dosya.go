@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"girginospanel/internal/selinuxetiket"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -241,7 +242,10 @@ func dizinAktar(ctx context.Context, k *Kaynak, ki kiraci.Kiraci, uid, gid int, 
 		"--remove-source-files", icerik+"/", hedef+"/"); err != nil {
 		return bayt, atlanan, fmt.Errorf("dosyalar hedefe yerlestirilemedi (rsync: %v)", err)
 	}
-	_ = kiraciAdim(ctx, sure, ki, "restorecon", "-R", hedef)
+	// 🔴 cp -l hardlink'i hazırlık alanının etiketini (user_home_t) hedefe taşır. Kiracı
+	// kimliğindeki restorecon sessizce başarısız olabiliyordu (yetki/hata yutuluyordu);
+	// etiketi KÖK kimliğiyle ve hata loglanarak düzelt (-RF, symlink'siz yol, yalnız hedef).
+	selinuxetiket.LoglaYol("tasima aktar", hedef)
 	return bayt, atlanan, nil
 }
 

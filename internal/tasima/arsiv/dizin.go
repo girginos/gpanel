@@ -3,6 +3,7 @@ package arsiv
 import (
 	"context"
 	"fmt"
+	"girginospanel/internal/selinuxetiket"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,5 +53,7 @@ func (a *Arsiv) CikarDizin(ctx context.Context, onek, hedef, kul string, s Dizin
 	if err := diskYeterli(hedef, bayt+a.s.DiskPayi, uye); err != nil {
 		return nil, err
 	}
-	return a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: kul, Ev: hedef}, hedef, s.Izin, s.BaglarYok)
+	r, err := a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: kul, Ev: hedef}, hedef, s.Izin, s.BaglarYok)
+	selinuxetiket.LoglaYol("arsiv cikar dizin", hedef)
+	return r, err
 }

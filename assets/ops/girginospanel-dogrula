@@ -696,6 +696,144 @@ else
   esac
 fi
 
+# ── SELinux deepening (2026-10-06): booleans · persistent rules · tenant labels · AVC ──
+# 🔴 Why: the check above only proved the tenant docroot RULE exists. Four more things
+# silently break an Enforcing server and none of them showed up here:
+#   - a boolean switched off (httpd_enable_homedirs/httpd_read_user_content off = EVERY site
+#     404; httpd_can_network_connect off = panel/PHP cannot reach DB/mail/APIs over TCP),
+#   - the other persistent fcontext rules missing (php-fpm socket dirs -> nginx->FPM 500),
+#   - FILES under public_html/tmp carrying the wrong label although the rule exists and the
+#     directory itself is right (cp -al / mv / rsync carry the SOURCE label: database.sqlite
+#     stays user_home_t -> Laravel/SQLite create/unlink denied under Enforcing),
+#   - real AVC denials in the last 24h (virt_qemu_ga_t = the hypervisor guest agent, not us).
+# SELinux Disabled -> skipped. Everything unmeasurable is reported as a warning, never "pass".
+if command -v getenforce >/dev/null 2>&1; then
+  _se=$(getenforce 2>/dev/null)
+  case "$_se" in
+    Enforcing|Permissive)
+      # (a) booleans
+      _bl="httpd_can_network_connect httpd_can_network_connect_db httpd_enable_homedirs httpd_read_user_content"
+      if command -v pure-ftpd >/dev/null 2>&1; then _bl="$_bl ftpd_full_access ftpd_connect_db ftpd_use_passive_mode"; fi
+      if ! command -v getsebool >/dev/null 2>&1; then
+        uyar "SELinux booleans" "no getsebool — COULD NOT MEASURE (not counted as passed)"
+      else
+        _bkapali=""; _bkritik=""; _bok=0
+        for _b in $_bl; do
+          _bv=$(getsebool "$_b" 2>/dev/null)
+          case "$_bv" in
+            *"--> on") _bok=$((_bok+1)) ;;
+            *"--> off")
+              case "$_b" in
+                httpd_enable_homedirs|httpd_read_user_content) _bkritik="$_bkritik $_b" ;;
+                *) _bkapali="$_bkapali $_b" ;;
+              esac ;;
+            *) : ;;   # boolean not in this policy (e.g. no ftpd_*): not a finding
+          esac
+        done
+        if [ -n "$_bkritik" ]; then
+          if [ "$_se" = "Enforcing" ]; then
+            dus "SELinux booleans" "OFF + Enforcing:$_bkritik — every tenant site returns 404. Fix: girginospanel-repair --only selinux_temel"
+          else
+            uyar "SELinux booleans" "OFF ($_se):$_bkritik — if switched to Enforcing every site 404s. Fix: girginospanel-repair --only selinux_temel"
+          fi
+        fi
+        if [ -n "$_bkapali" ]; then
+          uyar "SELinux booleans" "OFF:$_bkapali — panel/PHP network or DB access may fail. Fix: girginospanel-repair --only selinux_temel"
+        fi
+        [ -z "$_bkritik" ] && [ -z "$_bkapali" ] && gec "SELinux booleans" "$_bok on ($_se)"
+      fi
+
+      # (b) persistent fcontext rules (the tenant docroot rule is reported above)
+      if command -v semanage >/dev/null 2>&1; then
+        _fl=$(semanage fcontext -l 2>/dev/null)
+        if [ -z "$_fl" ]; then
+          uyar "SELinux fcontext rules" "semanage fcontext -l gave no output — COULD NOT MEASURE"
+        else
+          _fkritik=""; _feksik=""
+          case "$_fl" in *'/run/php-fpm-[^/]+(/.*)?'*) : ;; *) _fkritik="$_fkritik /run/php-fpm-[^/]+" ;; esac
+          for _fp in '/opt/phpmyadmin(/.*)?' '/var/lib/phpmyadmin(/.*)?' '/opt/girginospanel/frontend-dist(/.*)?' '/opt/girginospanel/pma-signon(/.*)?'; do
+            case "$_fl" in *"$_fp"*) : ;; *) _feksik="$_feksik ${_fp%%(*}" ;; esac
+          done
+          if [ -n "$_fkritik" ]; then
+            if [ "$_se" = "Enforcing" ]; then
+              dus "SELinux fcontext rules" "MISSING + Enforcing:$_fkritik — nginx->FPM returns 500 for every tenant. Fix: girginospanel-repair --only selinux_temel"
+            else
+              uyar "SELinux fcontext rules" "missing ($_se):$_fkritik — breaks when Enforcing. Fix: girginospanel-repair --only selinux_temel"
+            fi
+          fi
+          if [ -n "$_feksik" ]; then
+            uyar "SELinux fcontext rules" "missing:$_feksik — a full relabel would revert these paths. Fix: girginospanel-repair --only selinux_temel"
+          fi
+          [ -z "$_fkritik" ] && [ -z "$_feksik" ] && gec "SELinux fcontext rules" "5/5 persistent rules ($_se)"
+        fi
+      fi
+
+      # (c) wrong labels INSIDE tenant public_html/tmp (sampled, time-boxed: never slows the gate)
+      if ! command -v restorecon >/dev/null 2>&1; then
+        uyar "tenant file labels" "no restorecon — COULD NOT MEASURE"
+      else
+        _t0=$SECONDS; _tbud=40; _tdiz=0; _tsapma=0; _torn=""; _tkesik=0; _thesap=""
+        for _d in /home/c_*/public_html /home/c_*/tmp; do
+          [ -L "$_d" ] && continue
+          [ -d "$_d" ] || continue
+          if [ $((SECONDS - _t0)) -ge $_tbud ]; then _tkesik=1; break; fi
+          _tdiz=$((_tdiz+1))
+          # restorecon -n: DRY (no change). head caps the output; pipefail off inside the
+          # subshell because head closing the pipe is expected (rule 4 above).
+          # Only TYPE differences count: unconfined_u: vs system_u: (SELinux user field) is harmless
+          # (measured on 181: 18 such files, all with the correct type).
+          _tc=$( set +o pipefail; timeout 15 restorecon -nRFv "$_d" 2>/dev/null \
+                 | awk 'NF>=5 { split($(NF-2),a,":"); split($NF,b,":"); if (a[3]!=b[3]) print }' | head -n 200 )
+          if [ -n "$_tc" ]; then
+            _tn=$(printf '%s\n' "$_tc" | wc -l)
+            _tsapma=$((_tsapma+_tn))
+            _thesap="$_thesap ${_d#/home/}"
+            [ -z "$_torn" ] && _torn=$(printf '%s\n' "$_tc" | head -n 1)
+          fi
+        done
+        if [ "$_tsapma" -gt 0 ]; then
+          _tmesaj="$_tsapma+ file(s) with a non-default label in:${_thesap} (e.g. ${_torn:0:160}). Fix: girginospanel-repair --only docroot_selinux"
+          if [ "$_se" = "Enforcing" ]; then
+            dus "tenant file labels" "$_tmesaj — PHP cannot write them under Enforcing"
+          else
+            uyar "tenant file labels" "$_tmesaj ($_se — breaks when Enforcing)"
+          fi
+        elif [ $_tkesik -eq 1 ]; then
+          uyar "tenant file labels" "time budget (${_tbud}s) reached after $_tdiz dirs — rest NOT measured (not counted as passed)"
+        else
+          gec "tenant file labels" "$_tdiz dirs: all files at policy default"
+        fi
+      fi
+
+      # (d) AVC denials in the last 24h, excluding the hypervisor guest agent (virt_qemu_ga_t)
+      if ! command -v ausearch >/dev/null 2>&1; then
+        [ $KISA -eq 0 ] && [ $JSON -eq 0 ] && echo "  (SELinux AVC: skipped — no ausearch)"
+      else
+        # %x %X = the locale ausearch itself parses (LC_ALL=C: mm/dd/yy HH:MM:SS). Passing it
+        # as ONE quoted argument fails ("Hour, Minute, and Second are required" — measured on 181).
+        # -ts takes date and time as TWO arguments → the unquoted expansion is intentional.
+        _ats=$(date -d '24 hours ago' +'%x %X')
+        # shellcheck disable=SC2086
+        _av=$(ausearch -m avc,user_avc -ts $_ats 2>&1); _avrc=$?
+        if [ $_avrc -ne 0 ] && [ $_avrc -ne 1 ]; then
+          [ $KISA -eq 0 ] && [ $JSON -eq 0 ] && echo "  (SELinux AVC: skipped — ausearch unavailable/no permission, rc=$_avrc)"
+        else
+          # keep only denials, drop virt_qemu_ga_t; Enforcing -> enforced ones (permissive=0)
+          _avs=$(printf '%s\n' "$_av" | grep -E 'avc: +denied' | grep -v 'scontext=[^ ]*:virt_qemu_ga_t:')
+          if [ "$_se" = "Enforcing" ]; then _avs=$(printf '%s\n' "$_avs" | grep 'permissive=0'); fi
+          if [ -z "$_avs" ]; then
+            gec "SELinux AVC (24h)" "no denials (virt_qemu_ga_t excluded)"
+          else
+            _avn=$(printf '%s\n' "$_avs" | wc -l)
+            _avtop=$(printf '%s\n' "$_avs" | grep -oE 'comm="[^"]*"|scontext=[^ ]*:[a-z_]+_t:' | sort | uniq -c | sort -rn | head -n 3 | tr -s ' ' | tr '\n' ';')
+            uyar "SELinux AVC (24h)" "$_avn denial(s) ($_se), top: ${_avtop:0:200} — inspect: ausearch -m avc -ts recent | grep -v virt_qemu_ga_t"
+          fi
+        fi
+      fi ;;
+    *) : ;;   # Disabled / unknown: nothing to measure (the status line above covers unknown)
+  esac
+fi
+
 # ══════════════════════════════════════════════════════════════════════
 bas "Antivirus"
 # 🔴 The agent binary EXISTS but if it doesn't join the slice, the resource limit

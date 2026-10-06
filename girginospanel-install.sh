@@ -1104,10 +1104,17 @@ if [ ! -x /usr/local/bin/girginospanel-repair ]; then
   die "girginospanel-repair NOT in package — packaging error"
 elif ! command -v girginospanel-repair >/dev/null 2>&1; then
   die "girginospanel-repair not callable from PATH (PATH=$PATH)"
-elif girginospanel-repair --quiet >/dev/null 2>&1; then
-  ok "girginospanel-repair"
 else
-  warn "girginospanel-repair returned an error — manually: girginospanel-repair"
+  # 🔴 SELinux temel rutini (booleanlar + fcontext + port + tenant etiketleri) artık TEK
+  # yerde: repair `selinux_temel`/`docroot_selinux` bölümleri. update de AYNI kodu çağırır →
+  # kurulum ve güncelleme aynı garantiyi verir. Çıktıyı yutma: hata varsa göster.
+  _repout=$(girginospanel-repair --quiet 2>&1); _reprc=$?
+  if [ "$_reprc" -eq 0 ]; then
+    ok "girginospanel-repair (SELinux temel dahil)"
+  else
+    warn "girginospanel-repair returned an error — manually: girginospanel-repair"
+    printf '%s\n' "$_repout" | tail -15
+  fi
 fi
 
 # ============ 15) VERIFICATION ============

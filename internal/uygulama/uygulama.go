@@ -27,6 +27,7 @@ import (
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kiraci"
 	"girginospanel/internal/kota"
+	"girginospanel/internal/selinuxetiket"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -288,6 +289,9 @@ func Kur(ctx context.Context, db *sql.DB, a KurArgs,
 			return nil, fmt.Errorf("arsiv kok dizini duzlestirme: %w", err)
 		}
 	}
+
+	// Kurulan içeriğin SELinux etiketini politika varsayılanına döndür (kök, hedef alt ağaç).
+	selinuxetiket.LoglaYol("uygulama kur", hedef)
 
 	// DB — MVP: kullanıcı wizard'da manual girer. mysqlOlustur nil ise skip.
 	dbAdi := ""

@@ -781,16 +781,18 @@ fi
 # GEVSETMEK ister (chmod 711 /home/c_*, 755 public_html) oysa sertlestirilmis
 # model 710/750. Yalnizca kiraci izin bitlerine DOKUNMAYAN bolumler:
 #   nginx_cache      -> /var/cache/nginx ust dizin izni
+#   selinux_temel    -> booleanlar + kalici fcontext kurallari + 10080 portu + sabit yol
+#                       etiketleri (kurulumla AYNI rutin; eksik olani yazar, mod degistirmez)
 #   docroot_selinux  -> yalnizca SELinux ETIKETI degistirir (canli sunucuda
 #                       dogrulandi: 710/750 korundu, sadece etiket degisti)
 #   mail_sieve       -> dovecot-pigeonhole + sieve teslim + forward envelope-from
 #                       (kiraci izinlerine DOKUNMAZ: paket + dovecot config + restart)
 # ══════════════════════════════════════════════════════════════════════
 if command -v girginospanel-repair >/dev/null 2>&1; then
-  if girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve,backup_cron,sir_izin >/dev/null 2>&1; then
-    ok "hedefli onarim (nginx onbellek + docroot SELinux + mail sieve + gizli dosya izinleri)"
+  if girginospanel-repair --only nginx_cache,selinux_temel,docroot_selinux,mail_sieve,backup_cron,sir_izin >/dev/null 2>&1; then
+    ok "hedefli onarim (nginx onbellek + SELinux temel + docroot SELinux + mail sieve + gizli dosya izinleri)"
   else
-    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,docroot_selinux,mail_sieve,backup_cron,sir_izin"
+    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,selinux_temel,docroot_selinux,mail_sieve,backup_cron,sir_izin"
   fi
 else
   warn "girginospanel-repair yok — onbellek/SELinux onarimi atlandi"
