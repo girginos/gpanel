@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/hesaplar"
 )
 
@@ -81,7 +82,10 @@ func dbo_ortam(t *testing.T) (*sql.DB, *sql.DB, string) {
 	t.Cleanup(func() { _ = panel.Close() })
 	for _, q := range []string{
 		`CREATE TABLE domains (id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '') ENGINE=InnoDB`,
+			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '', plan_id BIGINT UNSIGNED NULL) ENGINE=InnoDB`,
+		// DB sayısı kapısı (kota.CheckDBEklenebilir) efektif limiti okur: plan ⊕ üst yazım
+		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, max_db INT NOT NULL DEFAULT 0) ENGINE=InnoDB`,
+		efektiflimit.TabloDDL,
 		// otomatik ad seçimi (hesaplar.AdSerbestMi) panel kaydına da bakar
 		`CREATE TABLE db_accounts (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 			domain_id BIGINT UNSIGNED NOT NULL, db_name VARCHAR(64) NOT NULL UNIQUE,
@@ -214,5 +218,32 @@ func TestUygulamaDBKur_OnekCakismasiVeGeriAlma(t *testing.T) {
 	ad, _, err = uygulamaDBKur(ctx, panel, KurArgs{Domain: dom, Tarif: tarif}, s.mysqlOlustur, s.mysqlDrop)
 	if err != nil || ad != "c_"+on+"_joomla1" {
 		t.Errorf("var olan varsayılan ad için yedek beklenir: ad=%q err=%v", ad, err)
+	}
+}
+
+// DB sayısı kapısı: uygulama sihirbazı hosting DB limitini (üst yazım dahil) aşamaz;
+// ret oluşturmadan ÖNCE olur (mysqlOlustur çağrılmaz).
+func TestUygulamaDBKur_DBLimitiKapisi(t *testing.T) {
+	panel, _, on := dbo_ortam(t)
+	ctx := context.Background()
+	tarif := &Tarif{Kod: "joomla", DBGerek: true}
+	dom := Domain{ID: 1, SK: "c_" + on, AlanAdi: on + ".test"}
+	for _, q := range []string{
+		`INSERT INTO service_plans (id, max_db) VALUES (1, 0)`, // plan sınırsız
+		`UPDATE domains SET plan_id=1 WHERE id=1`,
+		`INSERT INTO hosting_limit_ust (domain_id, max_db) VALUES (1, 1)`, // üst yazım: 1 DB
+		fmt.Sprintf(`INSERT INTO db_accounts (domain_id, db_name, db_user, db_pass_plain) VALUES (1,'c_%s_mevcut','u','x')`, on),
+	} {
+		if _, err := panel.Exec(q); err != nil {
+			t.Fatalf("hazırlık: %v\n%s", err, q)
+		}
+	}
+	s := &dboSahte{}
+	_, _, err := uygulamaDBKur(ctx, panel, KurArgs{Domain: dom, Tarif: tarif, DBAdi: "c_" + on + "_yeni"}, s.mysqlOlustur, s.mysqlDrop)
+	if err == nil || !strings.Contains(err.Error(), "plan limiti aşıldı") {
+		t.Fatalf("üst yazım limiti (1/1) dolu: uygulama DB'si reddedilmeliydi: %v", err)
+	}
+	if len(s.olustur) != 0 {
+		t.Errorf("limit reddinde DB oluşturma çağrılmamalı: %v", s.olustur)
 	}
 }
