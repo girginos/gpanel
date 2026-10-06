@@ -410,8 +410,8 @@ func TestYukleme_ParcaliDevamEdebilir(t *testing.T) {
 		t.Fatalf("parça 2: %d %s", kod, g)
 	}
 	// Tamam olan yüklemeye parça eklenemez.
-	if kod, _ := o.ham("kok", http.MethodPut, yol+"?konum="+strconv.Itoa(len(veri)), []byte("x")); kod != 413 && kod != 409 {
-		t.Errorf("tamamlanmış yükleme parça kabul etti: %d", kod)
+	if kod, _ := o.ham("kok", http.MethodPut, yol+"?konum="+strconv.Itoa(len(veri)), []byte("x")); kod != 413 {
+		t.Errorf("tamamlanmış (bitirilmemiş) yükleme fazla bayt kabul etti: %d", kod)
 	}
 	if kod, g := o.ist(t, "kok", http.MethodPost, yol+"/bitir", nil); kod != 200 || !strings.Contains(g, `"hazir"`) {
 		t.Fatalf("bitir: %d %s", kod, g)
@@ -420,8 +420,10 @@ func TestYukleme_ParcaliDevamEdebilir(t *testing.T) {
 	if !bytes.Equal(got, veri) {
 		t.Fatal("yüklenen dosya bayt bayt aynı değil")
 	}
-	if kod, _ := o.ham("kok", http.MethodPut, yol+"?konum=0", []byte("x")); kod != http.StatusConflict {
-		t.Errorf("hazır yükleme değişti: %d", kod)
+	for _, konum := range []int{0, len(veri)} {
+		if kod, g := o.ham("kok", http.MethodPut, yol+"?konum="+strconv.Itoa(konum), []byte("x")); kod != http.StatusConflict || !strings.Contains(g, "tamamlanmış") {
+			t.Errorf("hazır yükleme konum=%d: durum kapısından 409 beklendi: %d %s", konum, kod, g)
+		}
 	}
 	if kod, g := o.ist(t, "kok", http.MethodGet, "/tasima/arsiv/yuklemeler", nil); kod != 200 || !strings.Contains(g, `"durum":"hazir"`) || strings.Contains(g, "/tmp") {
 		t.Errorf("liste: %d %s", kod, g)
@@ -473,8 +475,12 @@ func TestYukleme_TavanVeKota(t *testing.T) {
 		"ad kontrol": {1000, "a\nb", 400},
 		"tam tavan":  {50 << 30, "tam.tar.gz", 201},
 	} {
-		if kod, g := yeni("bayi7", c.boyut, c.ad); kod != c.kod {
+		kod, g := yeni("bayi7", c.boyut, c.ad)
+		if kod != c.kod {
 			t.Errorf("%s: %d beklendi, gelen %d %s", ad, c.kod, kod, g)
+		}
+		if ad == "tavan+1" && !strings.Contains(g, "50 GiB") {
+			t.Errorf("tavan reddi tavan kapısından olmalı (kota değil): %s", g)
 		}
 	}
 	// Kapsam toplamı tavanı aşamaz: tam tavan yüklemesi varken yenisi 413 (bayi7); başka bayi etkilenmez.
