@@ -124,6 +124,7 @@ func (h *Handlers) isYukle(isID int64) (*Kaynak, Ayarlar, Kapsam, error) {
 	}
 	ay := kayit.Ayarlar
 	ay.SahipEsle = nil
+	k.arsivGirdi = kayit.Arsiv
 	// Sahip eşlemesi YALNIZ kök işinde (sunucunun Baslat'ta yazdığı kayıttan).
 	if !kp.Bayi() && len(kayit.SahipEsleK) > 0 {
 		ay.SahipEsle = map[string]sahipHedef{}
@@ -184,25 +185,53 @@ func (h *Handlers) isYurut(ctx context.Context, isID int64) {
 		h.isBitir(isID, "iptal", err.Error())
 		return
 	}
-	if err := k.Dogrula(); err != nil {
-		h.isBitir(isID, "hata", hataMetni(kp.Yonetici(), err).Error())
-		return
-	}
-	// Bayide hedef çalıştırma anında YENİDEN çözülüp denetlenir (DNS değişmiş olabilir).
-	if err := k.hedefHazirla(ctx, kp); err != nil {
-		neden := errHedefIzinsiz.Error()
-		if !errors.Is(err, errHedefIzinsiz) {
-			neden = hataMetni(kp.Yonetici(), err).Error()
+	sur, _ := surucuBul(k.Tip)
+	arsivIs := sur != nil && sur.Arsiv
+	if !arsivIs {
+		if err := k.Dogrula(); err != nil {
+			h.isBitir(isID, "hata", hataMetni(kp.Yonetici(), err).Error())
+			return
 		}
-		h.isBitir(isID, "hata", neden)
-		return
+		// Bayide hedef çalıştırma anında YENİDEN çözülüp denetlenir (DNS değişmiş olabilir).
+		if err := k.hedefHazirla(ctx, kp); err != nil {
+			neden := errHedefIzinsiz.Error()
+			if !errors.Is(err, errHedefIzinsiz) {
+				neden = hataMetni(kp.Yonetici(), err).Error()
+			}
+			h.isBitir(isID, "hata", neden)
+			return
+		}
 	}
 	hesaplar, err := h.isHesaplari(isID)
 	if err != nil || len(hesaplar) == 0 {
 		h.isBitir(isID, "hata", "taşınacak kalem bulunamadı")
 		return
 	}
+	if arsivIs {
+		// Arşiv kaynağı: ağ yok; dosya (yol/yükleme) kapsamla YENİDEN çözülür, parmak izi,
+		// disk önkontrolü ve envanter bu noktada yapılır (saatler sürebilir; ctx iptal eder).
+		if err := h.arsivIsHazirla(ctx, kp, k, ay, hesaplar); err != nil {
+			log.Printf("tasima: arsiv is %d hazirlanamadi (bayi=%d): %v", isID, kp.RID, err)
+			h.isBitir(isID, "hata", kisalt(hataMetni(kp.Yonetici(), err).Error(), 500))
+			return
+		}
+		defer func() { k.arsiv = nil }()
+		defer h.arsivIsSonu(isID, k)
+	}
 	h.calistir(ctx, isID, k, hesaplar, ay, kp)
+}
+
+// arsivIsSonu — arşiv işi bitti: tamamen başarılıysa yüklenen dosya silinir (disk + kota
+// geri verilir); hatalıysa yeniden denemek için 72 saat kalır. Süresi dolanlar temizlenir.
+func (h *Handlers) arsivIsSonu(isID int64, k *Kaynak) {
+	var durum string
+	var basarisiz int
+	var rid int64
+	if err := h.DB.QueryRow(`SELECT durum, basarisiz, sahip_rid FROM tasima_isleri WHERE id=?`, isID).Scan(&durum, &basarisiz, &rid); err == nil &&
+		durum == "tamam" && basarisiz == 0 && k.arsivGirdi != nil && k.arsivGirdi.YuklemeID > 0 {
+		h.yuklemeSil(context.Background(), rid, k.arsivGirdi.YuklemeID)
+	}
+	h.arsivYuklemeTemizle()
 }
 
 // calistir — kalemleri sırayla taşır. Bayi işinde günlük ve kalem notları

@@ -349,6 +349,16 @@ type baslatGirdi struct {
 type isAyarKayit struct {
 	Ayarlar
 	SahipEsleK map[string]sahipHedefJSON `json:"sahip_esle,omitempty"`
+	// Arsiv: arşiv kaynaklı işte dosya kaynağı (yalnız sunucu yazar; istemci gövdesinden gelmez).
+	Arsiv *isArsivKaynak `json:"arsiv,omitempty"`
+}
+
+// isArsivKaynak — işin arşiv dosyası: kök için yol, yükleme için kayıt kimliği; parmak izi
+// keşiften sonra dosyanın değişmediğini iş başlarken doğrular.
+type isArsivKaynak struct {
+	Yol       string         `json:"yol,omitempty"`
+	YuklemeID int64          `json:"yukleme_id,omitempty"`
+	ParmakIzi arsivParmakIzi `json:"parmak_izi"`
 }
 
 type sahipHedefJSON struct {
@@ -843,6 +853,7 @@ func (h *Handlers) AcilistaTemizle() {
 		}
 	}
 	h.kuyrukTemizle()
+	h.arsivYuklemeTemizle()
 	// Guvenlik: biten islerin kimlik bilgilerini de temizle.
 	_, _ = h.DB.Exec(
 		`UPDATE tasima_isleri SET kaynak_parola=NULL, kaynak_anahtar=NULL, kimlik_temiz=1

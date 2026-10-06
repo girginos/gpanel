@@ -43,6 +43,7 @@ func d3Kur(t *testing.T) *d3Ortam {
 	t.Helper()
 	db := g109Taban0109Oncesi(t)
 	g109GocUygula(t, db, g109Goc)
+	g109GocUygula(t, db, "0216_tasima_arsiv.sql")
 	for _, q := range []string{
 		`CREATE TABLE users (id BIGINT UNSIGNED PRIMARY KEY, username VARCHAR(64) NOT NULL DEFAULT '',
 			role VARCHAR(16) NOT NULL DEFAULT 'user', status VARCHAR(16) NOT NULL DEFAULT 'active',
@@ -223,7 +224,7 @@ func TestD3_KaynaklarRolFarkindalikli(t *testing.T) {
 	if y := oku("bayi7"); y.Acik || len(y.Kaynaklar) != 0 {
 		t.Fatalf("bayide varsayılan kapalı olmalı: %+v", y)
 	}
-	if y := oku("kok"); !y.Acik || y.BayiAcik || kodlar(y) != "plesk:true,gpanel:true,cpanel:false,directadmin:false" {
+	if y := oku("kok"); !y.Acik || y.BayiAcik || kodlar(y) != "plesk:true,gpanel:true,cpanel:false,directadmin:false,arsiv-cpanel:false,arsiv-directadmin:false" {
 		t.Fatalf("kök tüm kaynakları etkin bayrağıyla görmeli: %+v (%s)", y, kodlar(y))
 	}
 	o.bayiAc(t, true)

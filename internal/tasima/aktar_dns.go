@@ -174,6 +174,9 @@ func zoneKaydiGecerli(alanAdi, tip, ad, deger string) bool {
 // kaynakZoneOku — kaynagin DNS kayitlarini uzaktan okur (yalniz okuma; DB'ye ve
 // yerel zone'a dokunmaz). Okunamazsa bos doner.
 func kaynakZoneOku(ctx context.Context, k *Kaynak, alanAdi string) []zoneKayit {
+	if k.arsiv != nil {
+		return arsivZoneOku(k, alanAdi)
+	}
 	q := shQuote(alanAdi)
 	var kayitlar []zoneKayit
 	s, _ := surucuBul(k.Tip)

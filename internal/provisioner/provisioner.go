@@ -297,14 +297,30 @@ func SlugFromDomain(d string) string {
 
 // BenzersizKullanici: SlugFromDomain tabanini alir, sistem_kullanici/home
 // cakismasi varsa sonuna sayi ekler (c_girgin, c_girgin2, c_girgin3...).
+//
+// 🔴 SINIR: sayaç en çok maxSkSonek'e gider ve sonuç kiraci.GecerliSK'dan geçmelidir
+// (taban ≤ 26 + en çok 4 rakam ≤ 30 → "c_" + 30 sınırı aşılmaz). Tükenme ya da geçersiz sk "" döner;
+// çağıran (Provision) hesabı AÇMAZ. Arşiv taşıması dahil tüm hesap açma yolları bunu kullanır.
 func BenzersizKullanici(alanAdi string) string {
 	taban := SlugFromDomain(alanAdi)
 	u := taban
-	for i := 2; kullaniciKullanimda(u); i++ {
+	for i := 2; skKullanimda(u); i++ {
+		if i > maxSkSonek {
+			return ""
+		}
 		u = taban + strconv.Itoa(i)
+	}
+	if !kiraci.GecerliSK(u) {
+		return ""
 	}
 	return u
 }
+
+// maxSkSonek — sk ad çakışmasında denenen en büyük sayaç eki (c_girgin2 … c_girgin9999).
+const maxSkSonek = 9999
+
+// skKullanimda — kullanım sorgusu (testler değiştirir: sayaç sınırı gerçek sunucu olmadan sınanır).
+var skKullanimda = kullaniciKullanimda
 
 // kullaniciKullanimda: bu sistem_kullanici DB'de kayitli mi, /home altinda var mi VEYA
 // DB ad-alani ("<u>_…", "<c_'siz u>_…") zaten baskasinca kullaniliyor mu.
@@ -1251,6 +1267,10 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 	// eszamanli olusturma ayni slugu alip izolasyonu cokertir (TOCTOU).
 	provizyonKilit.Lock()
 	u := BenzersizKullanici(alanAdi) // c_girgin, cakisirsa c_girgin2
+	if u == "" {
+		provizyonKilit.Unlock()
+		return nil, fmt.Errorf("sistem kullanıcı adı üretilemedi (adlar tükendi ya da geçersiz)")
+	}
 	home := "/home/" + u
 	if !userExists(u) {
 		out, err := exec.Command("useradd", "-m", "-d", home, "-s", "/usr/sbin/nologin", u).CombinedOutput()

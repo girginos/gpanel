@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/tasima/arsiv"
 )
 
 // Bayiye/köke açıkça gösterilen ret nedenleri (sabit metin, iç ayrıntı yok).
@@ -64,6 +65,26 @@ func (h *Handlers) kaynakDurumlari(ctx context.Context) map[string]bool {
 	return out
 }
 
+// kaynakBayiDurumlari — kod → bayi_etkin (arşiv kaynaklarının bayi anahtarı). Satır yoksa ya da
+// okuma hatasında HER ZAMAN kapalı (kullanıcı kararı: bayiye açılma varsayılan KAPALI).
+func (h *Handlers) kaynakBayiDurumlari(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	rows, err := h.DB.QueryContext(ctx, `SELECT kod, bayi_etkin FROM tasima_kaynak_ayar`)
+	if err != nil {
+		log.Printf("tasima: bayi kaynak ayarlari okunamadi: %v", err)
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kod string
+		var etkin bool
+		if rows.Scan(&kod, &etkin) == nil {
+			out[kod] = etkin
+		}
+	}
+	return out
+}
+
 // kaynakKullanilabilir — bu kapsam bu kaynak türüyle taşıma başlatabilir/test
 // edebilir mi? Bayi: önce genel anahtar (errTasimaKapali), sonra kaynak anahtarı.
 func (h *Handlers) kaynakKullanilabilir(ctx context.Context, kp Kapsam, tip string) error {
@@ -73,7 +94,12 @@ func (h *Handlers) kaynakKullanilabilir(ctx context.Context, kp Kapsam, tip stri
 	if _, ok := surucuBul(tip); !ok {
 		return errKaynakKapali
 	}
+	s, _ := surucuBul(tip)
 	if !h.kaynakDurumlari(ctx)[tip] {
+		return errKaynakKapali
+	}
+	// Arşiv kaynakları bayide ayrıca kökün bayi anahtarını ister (varsayılan kapalı).
+	if s != nil && s.Arsiv && kp.Bayi() && !h.kaynakBayiDurumlari(ctx)[tip] {
 		return errKaynakKapali
 	}
 	return nil
@@ -86,6 +112,15 @@ type kaynakYanit struct {
 	Olgunluk   string  `json:"olgunluk"`
 	Etkin      bool    `json:"etkin"`
 	Yetenekler Yetenek `json:"yetenekler"`
+	// Arsiv: kaynak bir hesap arşividir (yol/yükleme akışı). BayiEtkin: kökün bayi anahtarı;
+	// yalnız kök yanıtında anlamlıdır (bayi yalnız kullanabildiği kaynakları görür).
+	Arsiv     bool `json:"arsiv"`
+	BayiEtkin bool `json:"bayi_etkin"`
+}
+
+// arsivLimitleri — arayüz sözleşmesi: yol 500 GiB, yükleme 50 GiB, parça 8 MiB.
+func arsivLimitleri() map[string]int64 {
+	return map[string]int64{"yol_tavan": arsiv.YolTavan, "yukleme_tavan": arsiv.YuklemeTavan, "parca": yuklemeParca}
 }
 
 // Kaynaklar — GET /tasima/kaynaklar.
@@ -100,6 +135,7 @@ func (h *Handlers) Kaynaklar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	durum := h.kaynakDurumlari(r.Context())
+	bayiDurum := h.kaynakBayiDurumlari(r.Context())
 	liste := []kaynakYanit{}
 	if kp.Bayi() {
 		if !h.bayiAcikMi(r.Context()) {
@@ -107,20 +143,21 @@ func (h *Handlers) Kaynaklar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, s := range kaynakSurucuSirali() {
-			if !durum[s.Kod] {
+			if !durum[s.Kod] || (s.Arsiv && !bayiDurum[s.Kod]) {
 				continue
 			}
 			y := s.Yetenekler
 			y.Sahipler = false
-			liste = append(liste, kaynakYanit{Kod: s.Kod, Etiket: s.Etiket, Olgunluk: s.Olgunluk, Etkin: true, Yetenekler: y})
+			liste = append(liste, kaynakYanit{Kod: s.Kod, Etiket: s.Etiket, Olgunluk: s.Olgunluk, Etkin: true, Yetenekler: y, Arsiv: s.Arsiv})
 		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"acik": true, "bayi_acik": false, "kaynaklar": liste})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"acik": true, "bayi_acik": false, "kaynaklar": liste, "arsiv_limitleri": arsivLimitleri()})
 		return
 	}
 	for _, s := range kaynakSurucuSirali() {
-		liste = append(liste, kaynakYanit{Kod: s.Kod, Etiket: s.Etiket, Olgunluk: s.Olgunluk, Etkin: durum[s.Kod], Yetenekler: s.Yetenekler})
+		liste = append(liste, kaynakYanit{Kod: s.Kod, Etiket: s.Etiket, Olgunluk: s.Olgunluk, Etkin: durum[s.Kod], Yetenekler: s.Yetenekler,
+			Arsiv: s.Arsiv, BayiEtkin: s.Arsiv && bayiDurum[s.Kod]})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"acik": true, "bayi_acik": h.bayiAcikMi(r.Context()), "kaynaklar": liste})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"acik": true, "bayi_acik": h.bayiAcikMi(r.Context()), "kaynaklar": liste, "arsiv_limitleri": arsivLimitleri()})
 }
 
 // AyarGuncelle — PUT /tasima/ayar {bayi_acik} (AdminOnly + kök kapsamı).
@@ -173,34 +210,55 @@ func (h *Handlers) KaynakGuncelle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kaynakKod := chi.URLParam(r, "kod")
-	if _, ok := surucuBul(kaynakKod); !ok {
+	sur, ok := surucuBul(kaynakKod)
+	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "kaynak bulunamadı")
 		return
 	}
 	var g struct {
-		Etkin *bool `json:"etkin"`
+		Etkin     *bool `json:"etkin"`
+		BayiEtkin *bool `json:"bayi_etkin"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&g); err != nil || g.Etkin == nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&g); err != nil || (g.Etkin == nil && g.BayiEtkin == nil) {
 		httpx.WriteError(w, http.StatusBadRequest, "gecersiz istek")
 		return
 	}
+	if g.BayiEtkin != nil && !sur.Arsiv {
+		httpx.WriteError(w, http.StatusBadRequest, "bayi anahtarı yalnız arşiv kaynaklarında vardır")
+		return
+	}
+	// Verilmeyen alan mevcut değerini korur (satır yoksa: etkin varsayılanı, bayi kapalı).
+	etkin := h.kaynakDurumlari(r.Context())[kaynakKod]
+	bayiEtkin := h.kaynakBayiDurumlari(r.Context())[kaynakKod]
+	if g.Etkin != nil {
+		etkin = *g.Etkin
+	}
+	if g.BayiEtkin != nil {
+		bayiEtkin = *g.BayiEtkin
+	}
 	if _, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO tasima_kaynak_ayar (kod, etkin, guncelleyen_uid) VALUES (?,?,NULLIF(?,0))
-		 ON DUPLICATE KEY UPDATE etkin=VALUES(etkin), guncelleyen_uid=VALUES(guncelleyen_uid)`,
-		kaynakKod, *g.Etkin, kp.UID); err != nil {
+		`INSERT INTO tasima_kaynak_ayar (kod, etkin, bayi_etkin, guncelleyen_uid) VALUES (?,?,?,NULLIF(?,0))
+		 ON DUPLICATE KEY UPDATE etkin=VALUES(etkin), bayi_etkin=VALUES(bayi_etkin), guncelleyen_uid=VALUES(guncelleyen_uid)`,
+		kaynakKod, etkin, bayiEtkin, kp.UID); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "ayar kaydedilemedi")
 		return
 	}
 	iptal := int64(0)
-	if !*g.Etkin {
+	switch {
+	case !etkin:
 		iptal = h.kaynakKuyrugunuIptalEt(r.Context(), kaynakKod)
+	case sur.Arsiv && !bayiEtkin:
+		iptal = h.bayiKuyrugunuIptalEt(r.Context(), kaynakKod, "yönetici bu kaynağı bayiler için kapattı")
 	}
 	deger := "kapali"
-	if *g.Etkin {
+	if etkin {
 		deger = "etkin"
 	}
+	if sur.Arsiv {
+		deger += "/bayi:" + map[bool]string{true: "acik", false: "kapali"}[bayiEtkin]
+	}
 	httpx.Denetim(h.DB, r, kp.UID, kp.Kul, "tasima_kaynak_ayar", kaynakKod, deger, 0, true)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "kod": kaynakKod, "etkin": *g.Etkin, "iptal_edilen": iptal})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "kod": kaynakKod, "etkin": etkin, "bayi_etkin": bayiEtkin, "iptal_edilen": iptal})
 }
 
 // bayiKuyrugunuIptalEt — bayilerin (sahip_rid>0) sıradaki işlerini iptal eder.

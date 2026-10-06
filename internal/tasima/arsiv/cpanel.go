@@ -27,7 +27,7 @@ var cpanelTasinmayacak = []string{
 	"e-posta yönlendiricileri, otomatik yanıtlayıcılar, posta listeleri, spam ayarları",
 	"alt alan adı yönlendirmeleri, .htaccess dışı sunucu ayarları (Apache/PHP sürümü, ModSecurity)",
 	"SSL sertifikaları (yeniden düzenlenir), uzak MySQL erişim konakları",
-	"cron satırları (yalnız bildirilir, otomatik kurulmaz)",
+	"cron satırlarından çevrilemeyenler (@reboot, güvensiz içerik vb.) taşıma raporunda nedenleriyle listelenir",
 	"kota/bant genişliği/plan, günlükler, ana hesabın sistem posta kutusu",
 	"sembolik bağlar kök dışına çıkıyorsa, aygıt/FIFO düğümleri, setuid/setgid bitleri",
 }
@@ -208,30 +208,34 @@ func (m *Manifest) postaEkle(alan string, passwd []byte, alanSet map[string]bool
 	}
 }
 
-var reCronEnv = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
-
-// cronOku — crontab satırları yalnız BİLGİ olarak (kabuk komutudur; otomatik kurulmaz).
+// cronOku — crontab satırlarını HAM olarak manifeste koyar (ortam satırları dahil, sırayla).
+// Çevirme/kurma faz 2'dedir (tasima/arsiv_cron.go); kabuk komutudur, burada yorumlanmaz.
+// Geçersiz karakterli ya da sınırı aşan satır SESSİZCE düşmez: uyarı sayısıyla raporlanır.
 func (m *Manifest) cronOku(b []byte) {
 	if len(b) == 0 {
 		return
 	}
+	atlanan, asan := 0, 0
 	for _, s := range strings.Split(string(b), "\n") {
 		s = strings.TrimSpace(strings.TrimRight(s, "\r"))
-		if s == "" || strings.HasPrefix(s, "#") || reCronEnv.MatchString(s) {
+		if s == "" || strings.HasPrefix(s, "#") {
 			continue
 		}
 		if !temizMetin(s) {
-			m.uyari("geçersiz karakterli cron satırı atlandı")
+			atlanan++
 			continue
 		}
 		if len(m.Cron) >= maxCron {
-			m.uyari("cron satırı sınırı aşıldı (%d)", maxCron)
-			return
+			asan++
+			continue
 		}
 		m.Cron = append(m.Cron, s)
 	}
-	if len(m.Cron) > 0 {
-		m.uyari("%d cron satırı var: otomatik kurulmaz, elle gözden geçirin", len(m.Cron))
+	if atlanan > 0 {
+		m.uyari("%d cron satırı geçersiz karakter/uzunluk nedeniyle okunamadı (taşınamadı)", atlanan)
+	}
+	if asan > 0 {
+		m.uyari("cron satırı sınırı (%d) aşıldı: %d satır taşınamadı", maxCron, asan)
 	}
 }
 

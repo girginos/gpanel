@@ -21,6 +21,18 @@ func (h *Handlers) Rotalar(r chi.Router) {
 	ar.Post("/tasima/test", h.Test)
 	ar.Post("/tasima/kesif", h.Kesif)
 	ar.Post("/tasima/baslat", h.Baslat)
+
+	// Arşiv kaynakları (cPanel/DirectAdmin yedek dosyası): rol AdminVeyaReseller; bayi için ek
+	// kapı handler içinde (arsivKapi: genel taşıma anahtarı + kaynak etkin + bayi_etkin).
+	ar.Post("/tasima/arsiv/yukle", h.YuklemeBaslat)
+	ar.Get("/tasima/arsiv/yuklemeler", h.YuklemeListe)
+	ar.Get("/tasima/arsiv/yukle/{id}", h.YuklemeDurum)
+	ar.Put("/tasima/arsiv/yukle/{id}", h.YuklemeParca)
+	ar.Post("/tasima/arsiv/yukle/{id}/bitir", h.YuklemeBitir)
+	ar.Delete("/tasima/arsiv/yukle/{id}", h.YuklemeSil)
+	ar.Post("/tasima/arsiv/kesif", h.ArsivKesif)
+	ar.Get("/tasima/arsiv/kesif/{id}", h.ArsivKesifDurum)
+	ar.Post("/tasima/arsiv/baslat", h.ArsivBaslat)
 	ar.Get("/tasima", h.Durum)
 	ar.Get("/tasima/oturumlar", h.OturumListe)
 	ar.Get("/tasima/oturum/{id}", h.OturumGetir)

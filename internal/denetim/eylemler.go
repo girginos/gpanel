@@ -150,6 +150,11 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"tasima_baslat":     {TR: "Taşıma başlatıldı", EN: "Migration started"},
 	"tasima_iptal":      {TR: "Taşıma iptal edildi", EN: "Migration cancelled"},
 	"tasima_oturum_sil": {TR: "Taşıma oturumu silindi", EN: "Migration session deleted"},
+	// Arşiv kaynakları (cPanel/DirectAdmin yedek dosyası).
+	"tasima_arsiv_kesif":       {TR: "Taşıma arşivi incelemeye alındı", EN: "Migration archive analysis started"},
+	"tasima_arsiv_yukle_basla": {TR: "Taşıma arşivi yüklemesi başladı", EN: "Migration archive upload started"},
+	"tasima_arsiv_yukle_bitti": {TR: "Taşıma arşivi yüklendi", EN: "Migration archive uploaded"},
+	"tasima_arsiv_yukle_sil":   {TR: "Taşıma arşivi yüklemesi silindi", EN: "Migration archive upload deleted"},
 
 	// Erişim politikası
 	"erisim.ayar":               {TR: "Erişim ayarı değişti", EN: "Access settings changed"},

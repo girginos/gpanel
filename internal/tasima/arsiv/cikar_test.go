@@ -52,7 +52,7 @@ func TestAkit_Suzgec(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	r := &Rapor{}
-	if err := a.akit(context.Background(), secimOnek, &buf, r); err != nil {
+	if err := a.akit(context.Background(), secimOnek, &buf, r, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	basliklar, icerik := akisOku(t, &buf)
@@ -102,7 +102,7 @@ func TestAkit_TumArsiv(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	r := &Rapor{}
-	if err := a.akit(context.Background(), "", &buf, r); err != nil {
+	if err := a.akit(context.Background(), "", &buf, r, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if r.Dosya != 1 || r.Sabit != 1 || r.Dizin != 0 || r.AtlananSayisi != 0 {
@@ -264,7 +264,7 @@ func TestAkit_BagZinciri(t *testing.T) {
 			}
 			var buf bytes.Buffer
 			r := &Rapor{}
-			if err := a.akit(context.Background(), secimOnek, &buf, r); err != nil {
+			if err := a.akit(context.Background(), secimOnek, &buf, r, nil, false); err != nil {
 				t.Fatal(err)
 			}
 			basliklar, _ := akisOku(t, &buf)
@@ -311,13 +311,13 @@ func TestSeyrekUye(t *testing.T) {
 				t.Fatal(err)
 			}
 			var sayan sayanYazici
-			if err := varsayilan.akit(context.Background(), secimOnek, &sayan, &Rapor{}); err != nil {
+			if err := varsayilan.akit(context.Background(), secimOnek, &sayan, &Rapor{}, nil, false); err != nil {
 				t.Fatal(err)
 			}
 			if sayan.n < mantiksal {
 				t.Fatalf("akış %d bayt, seyrek üye genişlemedi", sayan.n)
 			}
-			if err := a.akit(context.Background(), secimOnek, io.Discard, &Rapor{}); !errors.Is(err, ErrBomba) {
+			if err := a.akit(context.Background(), secimOnek, io.Discard, &Rapor{}, nil, false); !errors.Is(err, ErrBomba) {
 				t.Fatalf("akış: ErrBomba beklendi, gelen %v", err)
 			}
 			rc, err := a.DumpAc(context.Background(), ad, 1<<40)
@@ -366,7 +366,7 @@ func TestAkit_ArsivDegistiVeBomba(t *testing.T) {
 	// Bomba: oran sınırı akış sırasında (yazım yarıda) kesilir.
 	eski := a.s
 	a.s.BombaEsik, a.s.BombaOrani = 1<<20, 100
-	if err := a.akit(context.Background(), secimOnek, io.Discard, &Rapor{}); !errors.Is(err, ErrBomba) {
+	if err := a.akit(context.Background(), secimOnek, io.Discard, &Rapor{}, nil, false); !errors.Is(err, ErrBomba) {
 		t.Fatalf("ErrBomba beklendi, gelen %v", err)
 	}
 	a.s = eski
@@ -374,7 +374,7 @@ func TestAkit_ArsivDegistiVeBomba(t *testing.T) {
 	if err := os.WriteFile(yol, gzUret(t, tarUret(t, append(uyeler, uyeT{ad: secimOnek + "/sonradan.php", veri: "x"})...)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.akit(context.Background(), secimOnek, io.Discard, &Rapor{}); !errors.Is(err, ErrDegisti) {
+	if err := a.akit(context.Background(), secimOnek, io.Discard, &Rapor{}, nil, false); !errors.Is(err, ErrDegisti) {
 		t.Fatalf("ErrDegisti beklendi, gelen %v", err)
 	}
 }

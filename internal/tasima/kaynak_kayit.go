@@ -28,6 +28,9 @@ type Yetenek struct {
 	SSL        bool `json:"ssl"`
 	Posta      bool `json:"posta"`
 	Sahipler   bool `json:"sahipler"`
+	// Cron: kaynaktaki zamanlanmış görevler hedef hesabın panel cron deposuna taşınır
+	// (yalnız arşiv kaynakları; canlı SSH kaynaklarında false).
+	Cron bool `json:"cron"`
 }
 
 // Olgunluk değerleri.
@@ -45,6 +48,11 @@ type kaynakSurucu struct {
 	Sira            int // listeleme sırası (küçük önce)
 	VarsayilanEtkin bool
 	Yetenekler      Yetenek
+
+	// Arsiv: kaynak bir SSH sunucusu değil, sunucudaki/yüklenmiş HESAP ARŞİVİ (arsiv_kaynak.go).
+	// Arşiv kaynakları ayrı kapatılır (kod başına anahtar) ve bayide ek olarak bayi_etkin
+	// anahtarı (varsayılan KAPALI) ister; Dogrula/hedefHazirla (ağ) çalışmaz.
+	Arsiv bool
 
 	// kesif — kaynaktaki siteleri listeler (uzak çıktı DÜŞMANDIR: ayrıştırıcı süzer).
 	kesif func(ctx context.Context, k *Kaynak) ([]Hesap, error)

@@ -80,7 +80,7 @@ func (h *Handlers) HesapAktar(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarl
 
 // hesapAktarIc — HesapAktar'ın gövdesi; hatayı HAM döndürür (süzme çağıranda).
 func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Ayarlar, kapsam Kapsam, log func(string, ...any)) (*AktarSonuc, error) {
-	ctx, iptal := context.WithTimeout(ctx, hesapTimeout)
+	ctx, iptal := context.WithTimeout(ctx, hesapSuresi(k))
 	defer iptal()
 
 	sonuc := &AktarSonuc{}
@@ -267,8 +267,14 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 	}()
 
 	// --- 2. Dosyalar -------------------------------------------------------
-	if err := h.dosyalariAktar(ctx, k, hs, ay, sk, webRoot, alanAdi, sonuc, log); err != nil {
-		return nil, err
+	var dosyaHata error
+	if k.arsiv != nil {
+		dosyaHata = h.arsivDosyalariAktar(ctx, k, hs, ay, kapsam, sk, webRoot, alanAdi, sonuc, log)
+	} else {
+		dosyaHata = h.dosyalariAktar(ctx, k, hs, ay, sk, webRoot, alanAdi, sonuc, log)
+	}
+	if dosyaHata != nil {
+		return nil, dosyaHata
 	}
 	// 🔴 BAYİ DİSK HAVUZU (fiili): taşınan dosyalar bayinin toplam disk hakkını
 	// aşıyorsa yeni açılan site geri alınır (kalem 'atlandi').
@@ -383,6 +389,11 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 		}
 	}
 
+	// --- 7. Cron (yalnız arşiv kaynakları) ---------------------------------
+	if ay.Cron && k.arsiv != nil {
+		h.arsivCronAktar(k, alanAdi, sk, sonuc, log)
+	}
+
 	if yeniOlusturuldu {
 		if _, err := h.DB.ExecContext(ctx, `UPDATE domains SET durum='aktif' WHERE id=?`, sonuc.DomainID); err != nil {
 			sonuc.Uyarilar = append(sonuc.Uyarilar, "domain 'aktif' işaretlenemedi (elle etkinleştirin): "+err.Error())
@@ -396,6 +407,10 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 // Başarılı: (certPath, keyPath, gercekCA, nil). Kaynakta cert yoksa: ("","",false,nil)
 // → çağıran Let's Encrypt'e düşer. Doğrulama/kurulum hatası: err döner → yine LE.
 func (h *Handlers) sslAktar(ctx context.Context, k *Kaynak, hs Hesap, alanAdi, sk, php string) (string, string, bool, error) {
+	// Arşivde kullanılabilir sertifika taşınmaz (yeniden düzenlenir): doğrudan Let's Encrypt yolu.
+	if k.arsiv != nil {
+		return "", "", false, nil
+	}
 	// Kaynağa özel depo önce (cPanel apache_tls, DA kullanıcı dizini — Apache
 	// tabanlı kaynaklarda nginx vhost'u yoktur); boşsa ortak nginx taraması.
 	var certPEM, keyPEM string

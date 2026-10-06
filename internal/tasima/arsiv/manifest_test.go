@@ -104,7 +104,8 @@ func TestOku_CPanel(t *testing.T) {
 	if len(m.DNS) != 1 || m.DNS[0].Alan != "ornek.com" || m.DNS[0].Satir != 4 {
 		t.Fatalf("dns: %+v", m.DNS)
 	}
-	if len(m.Cron) != 1 || !uyariVar(m, "cron") {
+	// Ham satırlar, ortam satırı (MAILTO) dahil, sırayla; "elle gözden geçirin" uyarısı artık yok.
+	if len(m.Cron) != 2 || m.Cron[0] != "MAILTO=x" || !strings.HasPrefix(m.Cron[1], "*/5 ") || uyariVar(m, "otomatik kurulmaz") {
 		t.Fatalf("cron: %+v", m.Cron)
 	}
 	if m.DosyaSayisi != 4 || m.ToplamBayt != int64(len("<?php echo 1;")+4+5+len("info:"+testHash+":1:2::/home/u/mail:\n")) || len(m.Tasinmayacak) == 0 {
