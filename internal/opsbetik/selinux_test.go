@@ -83,7 +83,7 @@ const tumFcontext = `/opt/phpmyadmin(/.*)? all files system_u:object_r:httpd_sys
 /var/lib/phpmyadmin(/.*)? all files system_u:object_r:httpd_sys_rw_content_t:s0
 /opt/girginospanel/frontend-dist(/.*)? all files system_u:object_r:httpd_sys_content_t:s0
 /opt/girginospanel/pma-signon(/.*)? all files system_u:object_r:httpd_sys_content_t:s0
-/run/php-fpm-[^/]+(/.*)? all files system_u:object_r:httpd_var_run_t:s0
+/run/php-fpm-[^/]+(/.*)? all files system_u:object_r:httpd_mevcutYollarrun_t:s0
 /home/c_[^/]+/(public_html|tmp)(/.*)? all files system_u:object_r:httpd_user_rw_content_t:s0
 `
 
@@ -414,5 +414,59 @@ func TestDogrula_SELinuxKapaliHicOlcmez(t *testing.T) {
 	out := o.dogrulaKos(t)
 	if !strings.Contains(out, "kritik=0 uyari=0 gecen=0") {
 		t.Fatalf("Disabled iken hiçbir ölçüm yapılmamalı:\n%s", out)
+	}
+}
+
+func TestDogrula_TenantEtiketiPermissiveUyari(t *testing.T) {
+	if m, _ := filepath.Glob("/home/c_*/public_html"); len(m) == 0 {
+		if m2, _ := filepath.Glob("/home/c_*/tmp"); len(m2) == 0 {
+			t.Skip("/home/c_* kiracı dizini yok")
+		}
+	}
+	o := selKur(t)
+	o.dosya(t, "restorecon_out", "Would relabel /home/c_x/public_html/a from system_u:object_r:user_home_t:s0 to system_u:object_r:httpd_user_rw_content_t:s0\n")
+	o.dogrulaAraclari(t, "Permissive")
+	out := o.dogrulaKos(t)
+	if dg(out, "tenant file labels") != "uyar" || !strings.Contains(out, "kritik=0") {
+		t.Fatalf("Permissive'de yanlış etiket yalnız UYARI olmalı:\n%s", out)
+	}
+}
+
+// Kullanıcı alanı farkı (unconfined_u ↔ system_u) repair'de de bulgu/düzeltme SAYILMAZ.
+func TestDocrootSelinux_YalnizKullaniciAlaniFarkiSayilmaz(t *testing.T) {
+	o := selKur(t)
+	ph := filepath.Join(o.ev, "c_x", "public_html")
+	if err := os.MkdirAll(ph, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o.dosya(t, "ls_label", "system_u:object_r:httpd_user_rw_content_t:s0")
+	o.dosya(t, "restorecon_out", "Relabeled "+ph+"/a.js from unconfined_u:object_r:httpd_user_rw_content_t:s0 to system_u:object_r:httpd_user_rw_content_t:s0\n")
+	out, _ := o.kos(t, 1, 1, 0, "sec_docroot_selinux")
+	if strings.Contains(out, "alt ağaçta") {
+		t.Fatalf("yalnız kullanıcı alanı farkı düzeltme sayıldı:\n%s", out)
+	}
+}
+
+// Sabit sistem yolları kurulumun eski davranışıyla (-F'siz restorecon -R) etiketlenir;
+// -F bu yollarda yüzlerce zararsız kullanıcı-alanı "düzeltmesi" üretir.
+func TestSelinuxTemel_SabitYollardaFYok(t *testing.T) {
+	var mevcutYollar []string
+	for _, p := range []string{"/opt/phpmyadmin", "/var/lib/phpmyadmin", "/opt/girginospanel/frontend-dist", "/opt/girginospanel/pma-signon", "/opt/girginospanel/bin", "/var/named", "/etc/named"} {
+		if fi, err := os.Lstat(p); err == nil && fi.IsDir() {
+			mevcutYollar = append(mevcutYollar, p)
+		}
+	}
+	if len(mevcutYollar) == 0 {
+		t.Skip("sabit yollardan hiçbiri bu makinede yok")
+	}
+	o := selKur(t)
+	_, lg := o.kos(t, 1, 1, 0, "sec_selinux_temel")
+	for _, p := range mevcutYollar {
+		if !strings.Contains(lg, "restorecon -Rv "+p+"\n") {
+			t.Errorf("%s için -F'siz restorecon -Rv bekleniyordu:\n%s", p, lg)
+		}
+		if strings.Contains(lg, "-RFv "+p+"\n") {
+			t.Errorf("%s sabit yolunda -F kullanılmamalı", p)
+		}
 	}
 }
