@@ -82,7 +82,11 @@ type Manifest struct {
 	DBKullanicilari []string      `json:"db_kullanicilari"` // yalnız adlar; parola/özet taşınmaz
 	Posta           []PostaHesabi `json:"posta"`
 	DNS             []DNSBolge    `json:"dns"`
-	Cron            []string      `json:"cron,omitempty"` // elle inceleme için; OTOMATİK kurulmaz
+	// Cron: HAM crontab satırları (boş ve yorum satırları hariç; MAILTO/SHELL/PATH gibi
+	// ORTAM satırları sırayla dahil). Faz 2'de tasima/arsiv_cron.go hedef hesaba çevirir.
+	Cron []string `json:"cron,omitempty"`
+	// Kok: cPanel yedeğinin tek üst dizini ("cpmove-u"); DirectAdmin'de boş.
+	Kok string `json:"-"`
 
 	UyeSayisi   int   `json:"uye_sayisi"`
 	DosyaSayisi int   `json:"dosya_sayisi"` // site dosyası (ev/belge ağacı) düzenli dosya sayısı
@@ -107,7 +111,7 @@ const (
 	maxUyari = 200
 	maxAlan  = 5000
 	maxPosta = 20000
-	maxCron  = 200
+	maxCron  = 500
 )
 
 // uyari — arşivden gelen metin %q ile ve kısaltılarak girer.
@@ -200,9 +204,17 @@ func ustVeriMi(ad string) bool {
 
 // Oku — yedeği güvenle okuyup manifestini döndürür.
 func Oku(ctx context.Context, yol string, o Secenek) (*Manifest, error) {
+	_, m, err := AcHesap(ctx, yol, o)
+	return m, err
+}
+
+// AcHesap — Oku'nun açık arşiv tutamağını da döndüren hâli: faz 2 taşıma işi aynı
+// tutamakla Cikar/DumpAc/UstVeri çağırır (arşivi her kalem için yeniden envanterlemek
+// yüzlerce GiB'lık yedekte katlanılmaz bir maliyet olurdu).
+func AcHesap(ctx context.Context, yol string, o Secenek) (*Arsiv, *Manifest, error) {
 	a, err := Ac(ctx, yol, o.Sinirlar, ustVeriMi)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if o.DumpSinir <= 0 {
 		o.DumpSinir = 32 << 30
@@ -210,11 +222,12 @@ func Oku(ctx context.Context, yol string, o Secenek) (*Manifest, error) {
 	m := &Manifest{UyeSayisi: len(a.Uyeler)}
 	cpKok, daVar, err := turBul(a)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	switch {
 	case cpKok != "":
 		m.Tur = TurCPanel
+		m.Kok = cpKok
 		m.Tasinmayacak = cpanelTasinmayacak
 		err = cpanelOku(ctx, a, cpKok, o, m)
 	case daVar:
@@ -223,7 +236,7 @@ func Oku(ctx context.Context, yol string, o Secenek) (*Manifest, error) {
 		err = directadminOku(ctx, a, o, m)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if m.Aygitlar > 0 {
 		m.uyari("%d aygıt/FIFO düğümü çıkarmada atlanacak", m.Aygitlar)
@@ -232,7 +245,7 @@ func Oku(ctx context.Context, yol string, o Secenek) (*Manifest, error) {
 		m.uyari("%d sabit bağ yalnız arşivde daha önce yazılmış dosyaya işaret ediyorsa çıkarılır", m.SabitBaglar)
 	}
 	m.sirala()
-	return m, nil
+	return a, m, nil
 }
 
 // turBul — cPanel: tam bir "<kök>/userdata/main" üyesi; DA: "backup/user.conf".

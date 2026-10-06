@@ -324,6 +324,9 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	if !reDBAd.MatchString(kaynakDB) || !reDBAd.MatchString(hedefDB) {
 		return fmt.Errorf("gecersiz veritabani adi")
 	}
+	if k.arsiv != nil {
+		return h.arsivDBAktar(ctx, k, kaynakDB, hedefDB, log)
+	}
 	tmp, err := os.CreateTemp("/var/tmp", "gosp_tasima_*.sql.gz")
 	if err != nil {
 		return err
@@ -368,6 +371,24 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 		return fmt.Errorf("dump bos dondu")
 	}
 
+	f, err := os.Open(tmpAd)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("dump okunamadi (gzip): %w", err)
+	}
+	defer gz.Close()
+	return h.dbIceAktar(ctx, io.LimitReader(gz, maxAcilimBayt), hedefDB)
+}
+
+// dbIceAktar — düz SQL dökümünü KISITLI geçici MySQL kullanıcısıyla hedef veritabanına
+// içe aktarır (canlı SSH dökümü ve arşiv dökümü ORTAK yol). Döküm süzgeçten (dumpFiltre:
+// DEFINER sökme, istemci komutu reddi, bitiş damgası) geçer; `mysql --sandbox` varsa
+// kullanılır (bayide zorunlu: veritabanlariniAktar). Boyut sınırını çağıran verir.
+func (h *Handlers) dbIceAktar(ctx context.Context, kaynak io.Reader, hedefDB string) error {
 	impKul, impPw, err := h.geciciImportKullanicisi(ctx, hedefDB)
 	if err != nil {
 		return fmt.Errorf("import kullanicisi: %w", err)
@@ -380,17 +401,6 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	}
 	defer os.Remove(cnfAd)
 
-	f, err := os.Open(tmpAd)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("dump okunamadi (gzip): %w", err)
-	}
-	defer gz.Close()
-
 	// 🔴 KISITLI İÇE AKTARMA İSTEMCİSİ: --sandbox dosya sistemine erişen istemci
 	// komutlarını, --binary-mode piped girdide TÜM istemci komutlarını (\!, system,
 	// source, \u) devre dışı bırakır, --local-infile=0 LOAD DATA LOCAL'i kapatır.
@@ -398,7 +408,7 @@ func (h *Handlers) dbAktar(ctx context.Context, k *Kaynak, kaynakDB, hedefDB str
 	// (dumpFiltre) ikinci kat savunmadır.
 	imp := exec.CommandContext(ctx, "mysql", importArgs(cnfAd, hedefDB)...)
 	filtre := &dumpFiltre{}
-	imp.Stdin = filtre.Sar(io.LimitReader(gz, maxAcilimBayt))
+	imp.Stdin = filtre.Sar(kaynak)
 	var ieb strings.Builder
 	imp.Stderr = &ieb
 	runHatasi := imp.Run()

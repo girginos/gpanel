@@ -92,7 +92,13 @@ func (a *Arsiv) Cikar(ctx context.Context, onek string, h Hedef) (*Rapor, error)
 		hedefYol += "/" + kok
 	}
 	// SK EvDizini'de doğrulandı; Kul testte ayrıcalıksız kimliğe çevrilebilir.
-	cmd, err := kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home}.Komut(ctx, "tar", "-x",
+	return a.cikarCalistir(ctx, onek, kiraci.Kiraci{Kul: evalti.OSKullanici(h.SK), Ev: home}, hedefYol, nil)
+}
+
+// cikarCalistir: süzülmüş akışı ki kimliğinde `tar -x -C hedefYol`a besler (Cikar ve
+// CikarDizin ortak gövdesi). Hedefin hazırlığı ve denetimi çağıranındır.
+func (a *Arsiv) cikarCalistir(ctx context.Context, onek string, ki kiraci.Kiraci, hedefYol string, izin func(rel string) bool) (*Rapor, error) {
+	cmd, err := ki.Komut(ctx, "tar", "-x",
 		"--no-same-owner", "--no-same-permissions", "-f", "-", "-C", hedefYol)
 	if err != nil {
 		return nil, err
@@ -107,7 +113,7 @@ func (a *Arsiv) Cikar(ctx context.Context, onek string, h Hedef) (*Rapor, error)
 		return nil, fmt.Errorf("%w: çıkarıcı başlatılamadı", ErrCikarma)
 	}
 	r := &Rapor{}
-	akErr := a.akit(ctx, onek, girdi, r)
+	akErr := a.akit(ctx, onek, girdi, r, izin)
 	_ = girdi.Close() // yarıda kesilen akışta tar eksik girdiyle hata verip çıkar
 	werr := cmd.Wait()
 	r.TarCikti = string(kuyruk.b)
@@ -186,7 +192,7 @@ func (k *kuyrukYazici) Write(p []byte) (int, error) {
 
 // akit: arşivi baştan okur (üyeler envanterle birebir aynı olmalı) ve onek altındaki
 // üyeleri süzüp w'ye YENİ bir tar akışı olarak yazar. Denetim ve yazım aynı geçiştedir.
-func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor) error {
+func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor, izin func(rel string) bool) error {
 	g, err := a.gecisAc(ctx, a.Uyeler)
 	if err != nil {
 		return err
@@ -195,7 +201,7 @@ func (a *Arsiv) akit(ctx context.Context, onek string, w io.Writer, r *Rapor) er
 	iy := &izliYazici{w: w}
 	bw := bufio.NewWriterSize(iy, 256<<10)
 	tw := tar.NewWriter(bw)
-	s := &suzgec{onek: onek, baglar: bagAgaciKur(a.Uyeler, onek), dosya: map[string]bool{}, r: r}
+	s := &suzgec{onek: onek, baglar: bagAgaciKur(a.Uyeler, onek), dosya: map[string]bool{}, r: r, izin: izin}
 	yazmaHatasi := func(err error) error {
 		if iy.err != nil {
 			return fmt.Errorf("%w (%v)", ErrCikarma, iy.err)
@@ -243,6 +249,9 @@ type suzgec struct {
 	baglar *bagAgaci       // seçimdeki TÜM symlink'ler (envanterden; sıradan bağımsız)
 	dosya  map[string]bool // yazılan düzenli dosyalar (hardlink hedefi olabilir)
 	r      *Rapor
+	// izin: nil değilse yalnız izin(rel)=true üyeler yazılır (posta: yalnız bilinen kutular,
+	// dovecot iç dosyaları hariç). false → "seçim dışı" olarak atlanır ve raporlanır.
+	izin func(rel string) bool
 }
 
 // karar: üye yazılacaksa çıkarıcıya gidecek temiz başlık, değilse nil (atlananlar
@@ -253,6 +262,10 @@ func (s *suzgec) karar(u Uye, hdr *tar.Header) *tar.Header {
 	rel, ok := altinda(u.Ad, s.onek)
 	if !ok || rel == "" {
 		return nil // seçim dışı ya da seçimin kök dizininin kendisi
+	}
+	if s.izin != nil && !s.izin(rel) {
+		s.r.atla(rel, "izin verilmeyen yol (kutu/ad süzgeci)")
+		return nil
 	}
 	if s.baglar.bagAltinda(rel) {
 		s.r.atla(rel, "bağ üzerinden geçen yol")

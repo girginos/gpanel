@@ -25,7 +25,7 @@ var daTasinmayacak = []string{
 	"DNS bölgeleri ve alt alan adı listesi (yedek biçimi doğrulanmadı; ana alan varsayılanı oluşturulur)",
 	"e-posta yönlendiricileri, otomatik yanıtlayıcılar, posta listeleri, spam ayarları",
 	"SSL sertifikaları (yeniden düzenlenir), FTP alt hesapları, kota/plan/bayi bilgisi",
-	"cron satırları (yalnız bildirilir, otomatik kurulmaz)",
+	"cron satırlarından çevrilemeyenler (@reboot, güvensiz içerik vb.) taşıma raporunda nedenleriyle listelenir",
 	"sembolik bağlar kök dışına çıkıyorsa, aygıt/FIFO düğümleri, setuid/setgid bitleri",
 }
 

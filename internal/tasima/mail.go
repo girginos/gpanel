@@ -267,6 +267,9 @@ func dizinVeyaYok(yol string) error {
 func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, hs0 Hesap, log func(string, ...any)) (int, []string, error) {
 	var uyarilar []string
 	alanAdi := hs0.AlanAdi
+	if k.arsiv != nil {
+		return h.arsivMailAktar(ctx, k, hs0, log)
+	}
 
 	// Kutu keşfi kaynak sürücüsünden (Plesk, cPanel, DirectAdmin). Posta yeteneği
 	// olmayan kaynak (ör. gPanel) adımı atlatır — kaynağa komut GİTMEZ.
@@ -282,45 +285,9 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, hs0 Hesap, log func
 		return 0, []string{"Posta: kaynakta kutu yok — taşınmadı"}, nil
 	}
 
-	// Hedef domain satırı: gPanel kimliği (limit senkronu), sahibi (eklenti
-	// kimliği) ve planın kutu başına kotası — kaynaktan/istekten DEĞİL satırdan.
-	var domainID, resellerID int64
-	var kotaMB int
-	if err := h.DB.QueryRowContext(ctx,
-		`SELECT d.id, d.reseller_id, `+efektiflimit.IfadeVarsayilan("mail_kutu_kota_mb", 0)+`
-		   FROM domains d`+efektiflimit.Join+`WHERE d.alan_adi=?`,
-		alanAdi).Scan(&domainID, &resellerID, &kotaMB); err != nil {
-		return 0, nil, fmt.Errorf("hedef domain okunamadı: %w", err)
-	}
-	kim := mailKimlikSahibe(resellerID, alanAdi)
-
-	// Mail domainini gPanel'de GARANTI et — ZATEN VARSA dokunma (idempotent).
-	// 🔴 Mail eklentisi domainEkle duplicate'te 409 DEGIL 500 doner; koda guvenme,
-	// once VARLIGA bak (GET /domainler), yoksa ekle, sonra tekrar dogrula. Onceden
-	// mevcut domain (ornek: islam-tr.org zaten kayitli) tum posta adimini "taşınamadı"
-	// yapiyordu; keşif kutulari BULMUS olsa bile.
-	mid, err := mailDomainID(ctx, kim, alanAdi)
+	mh, err := h.mailHedefHazirla(ctx, alanAdi)
 	if err != nil {
-		return 0, nil, fmt.Errorf("mail eklentisine ulaşılamadı (kurulu/etkin mi?): %w", err)
-	}
-	if mid == 0 {
-		kod, govde, err := mailEklentiPOST(ctx, kim, "/domainler", map[string]string{"ad": alanAdi})
-		if err != nil {
-			return 0, nil, fmt.Errorf("mail eklentisine ulaşılamadı (kurulu/etkin mi?): %w", err)
-		}
-		if mid, err = mailDomainID(ctx, kim, alanAdi); err != nil || mid == 0 {
-			return 0, nil, fmt.Errorf("mail domaini eklenemedi (%s)", eklentiHata(kod, govde))
-		}
-	}
-
-	// 🔴 Kutu AÇMADAN plan limitleri eklentiye: kutu sayısı sınırı (max_email) ve
-	// kutu başına kota eklentide uygulanır. Yeni mail domaininde limit yoktu →
-	// kaynak kaç kutu verirse sınırsız kotayla açılıyordu.
-	domains.MailKutuLimitSenkron(ctx, h.DB, domainID, alanAdi)
-
-	mevcut, err := mailKutulari(ctx, kim, mid)
-	if err != nil {
-		return 0, nil, fmt.Errorf("mevcut posta kutuları okunamadı: %w", err)
+		return 0, nil, err
 	}
 
 	sayi := 0
@@ -337,24 +304,8 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, hs0 Hesap, log func
 			continue
 		}
 
-		if !mevcut[email] {
-			parola := hs.Parola
-			if len(parola) < 6 {
-				parola = rastgeleParola(16)
-				uyarilar = append(uyarilar, "Posta: "+email+" kaynak parolası alınamadı — yeni parola üretildi")
-			}
-			// Kota PLANDAN (0 = sınırsız); kaynak belirlemez.
-			kod, govde, err := mailEklentiPOST(ctx, kim, "/hesaplar", map[string]any{
-				"email": email, "parola": parola, "quota_mb": kotaMB,
-			})
-			if err != nil {
-				uyarilar = append(uyarilar, "Posta: "+email+" oluşturulamadı (bağlantı)")
-				continue
-			}
-			if kod != http.StatusCreated {
-				uyarilar = append(uyarilar, "Posta: "+email+" oluşturulamadı ("+eklentiHata(kod, govde)+")")
-				continue
-			}
+		if !h.mailKutuOlustur(ctx, mh, email, hs.Parola, &uyarilar) {
+			continue
 		}
 
 		// Maildir verisini taşı: kaynak düzeni (Plesk qmail, cPanel ~/mail, DA
@@ -383,6 +334,85 @@ func (h *Handlers) mailAktar(ctx context.Context, k *Kaynak, hs0 Hesap, log func
 		log("Posta: %s taşındı", email)
 	}
 	return sayi, uyarilar, nil
+}
+
+// mailHedef — hedef domainin posta tarafı (eklenti kimliği, plan kotası, var olan kutular).
+type mailHedef struct {
+	kim    mailKimlik
+	kotaMB int
+	mid    int
+	mevcut map[string]bool
+}
+
+// mailHedefHazirla — hedef domain satırını okur, mail domainini eklentide GARANTİ eder ve
+// plan limitlerini eklentiye senkronlar (canlı SSH ve arşiv taşıması ORTAK; kutu açmadan önce).
+func (h *Handlers) mailHedefHazirla(ctx context.Context, alanAdi string) (*mailHedef, error) {
+	// Hedef domain satırı: gPanel kimliği (limit senkronu), sahibi (eklenti
+	// kimliği) ve planın kutu başına kotası — kaynaktan/istekten DEĞİL satırdan.
+	var domainID, resellerID int64
+	var kotaMB int
+	if err := h.DB.QueryRowContext(ctx,
+		`SELECT d.id, d.reseller_id, `+efektiflimit.IfadeVarsayilan("mail_kutu_kota_mb", 0)+`
+		   FROM domains d`+efektiflimit.Join+`WHERE d.alan_adi=?`,
+		alanAdi).Scan(&domainID, &resellerID, &kotaMB); err != nil {
+		return nil, fmt.Errorf("hedef domain okunamadı: %w", err)
+	}
+	kim := mailKimlikSahibe(resellerID, alanAdi)
+
+	// Mail domainini gPanel'de GARANTI et — ZATEN VARSA dokunma (idempotent).
+	// 🔴 Mail eklentisi domainEkle duplicate'te 409 DEGIL 500 doner; koda guvenme,
+	// once VARLIGA bak (GET /domainler), yoksa ekle, sonra tekrar dogrula. Onceden
+	// mevcut domain (ornek: islam-tr.org zaten kayitli) tum posta adimini "taşınamadı"
+	// yapiyordu; keşif kutulari BULMUS olsa bile.
+	mid, err := mailDomainID(ctx, kim, alanAdi)
+	if err != nil {
+		return nil, fmt.Errorf("mail eklentisine ulaşılamadı (kurulu/etkin mi?): %w", err)
+	}
+	if mid == 0 {
+		kod, govde, err := mailEklentiPOST(ctx, kim, "/domainler", map[string]string{"ad": alanAdi})
+		if err != nil {
+			return nil, fmt.Errorf("mail eklentisine ulaşılamadı (kurulu/etkin mi?): %w", err)
+		}
+		if mid, err = mailDomainID(ctx, kim, alanAdi); err != nil || mid == 0 {
+			return nil, fmt.Errorf("mail domaini eklenemedi (%s)", eklentiHata(kod, govde))
+		}
+	}
+
+	// 🔴 Kutu AÇMADAN plan limitleri eklentiye: kutu sayısı sınırı (max_email) ve
+	// kutu başına kota eklentide uygulanır. Yeni mail domaininde limit yoktu →
+	// kaynak kaç kutu verirse sınırsız kotayla açılıyordu.
+	domains.MailKutuLimitSenkron(ctx, h.DB, domainID, alanAdi)
+
+	mevcut, err := mailKutulari(ctx, kim, mid)
+	if err != nil {
+		return nil, fmt.Errorf("mevcut posta kutuları okunamadı: %w", err)
+	}
+	return &mailHedef{kim: kim, kotaMB: kotaMB, mid: mid, mevcut: mevcut}, nil
+}
+
+// mailKutuOlustur — kutu eklentide yoksa açar (parola kısaysa/boşsa yeni üretilir; uyarı
+// bırakılır). false = kutu açılamadı (uyarı eklendi; çağıran atlar).
+func (h *Handlers) mailKutuOlustur(ctx context.Context, mh *mailHedef, email, parola string, uyarilar *[]string) bool {
+	if mh.mevcut[email] {
+		return true
+	}
+	if len(parola) < 6 {
+		parola = rastgeleParola(16)
+		*uyarilar = append(*uyarilar, "Posta: "+email+" kaynak parolası alınamadı — yeni parola üretildi")
+	}
+	// Kota PLANDAN (0 = sınırsız); kaynak belirlemez.
+	kod, govde, err := mailEklentiPOST(ctx, mh.kim, "/hesaplar", map[string]any{
+		"email": email, "parola": parola, "quota_mb": mh.kotaMB,
+	})
+	if err != nil {
+		*uyarilar = append(*uyarilar, "Posta: "+email+" oluşturulamadı (bağlantı)")
+		return false
+	}
+	if kod != http.StatusCreated {
+		*uyarilar = append(*uyarilar, "Posta: "+email+" oluşturulamadı ("+eklentiHata(kod, govde)+")")
+		return false
+	}
+	return true
 }
 
 // pleskMailKesfet — kaynak Plesk'ten domainin GERÇEK kutularını + düz parolalarını alır.

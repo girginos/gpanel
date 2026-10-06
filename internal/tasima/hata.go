@@ -5,6 +5,7 @@ import (
 
 	"girginospanel/internal/domains"
 	"girginospanel/internal/plans"
+	"girginospanel/internal/tasima/arsiv"
 )
 
 // Kapsam — bir taşıma işinin YÜRÜTME kapsamı. İşin sahibi (sahip_rid) sütunundan
@@ -50,6 +51,10 @@ var bayiyeAcikHatalar = []error{
 	errKaynakKapali,
 	plans.ErrPlanKapsamDisi,
 	plans.ErrOzelPlanBaskaHosting,
+	// Arşiv kaynakları: sabit metinler, sayı/yol/ad içermez (SQL reddinde kural kodu da yok).
+	errArsivYolBay, errArsivYok, errArsivBoyut, errArsivDisk, errArsivKota, errArsivYukleme,
+	arsiv.ErrKota, arsiv.ErrDisk, arsiv.ErrSQL, arsiv.ErrBicim, arsiv.ErrSinir, arsiv.ErrBomba,
+	arsiv.ErrUstVeri, arsiv.ErrDegisti, arsiv.ErrTur, arsiv.ErrHesap, errArsivDegisti,
 }
 
 // errBayiPlanGerekli — bayi işinde plan çözülemedi (istenmedi, varsayılan katalog

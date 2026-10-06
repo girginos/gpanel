@@ -46,6 +46,13 @@ type Kaynak struct {
 	// testler kaydedici sahte takar (ağa çıkılmaz).
 	kabuk uzakKabuk
 
+	// arsiv — arşiv kaynaklarında (arsiv-cpanel/arsiv-directadmin) açık hesap arşivi; SSH
+	// alanları (Host/Port/Parola) kullanılmaz. nil → canlı SSH kaynağı (arsiv_kaynak.go).
+	arsiv *arsivBaglam
+	// arsivGirdi — iş satırından okunan arşiv kaynağı (yol/yükleme + parmak izi); isYurut
+	// arsivIsHazirla ile açık arşive (arsiv) çevirir.
+	arsivGirdi *isArsivKaynak
+
 	// Kapsam (hedef.go hedefHazirla doldurur):
 	bayi       bool   // bayi işi: hata metinlerinde panel yolu gösterilmez
 	baglanIP   string // bayide doğrulanmış bağlantı IP'si (boş → Host)
@@ -59,6 +66,7 @@ type Ayarlar struct {
 	DNS        bool   `json:"dns"`
 	SSL        bool   `json:"ssl"`
 	Posta      bool   `json:"posta"`  // kutular + mail verisi (Plesk maildir)
+	Cron       bool   `json:"cron"`   // arşiv kaynakları: zamanlanmış görevler panel cron deposuna taşınır
 	Ustune     bool   `json:"ustune"` // hedefte domain varsa uzerine yaz
 	HedefPHP   string `json:"hedef_php"`
 	PlanID     int64  `json:"plan_id"`

@@ -1472,6 +1472,10 @@ func semaDogrula(d *sql.DB) {
 		{"tasima_isleri", "baslatan_uid"},
 		{"tasima_kalemleri", "hesap_json"},
 		{"tasima_kaynak_ayar", "kod"},
+		// 0216: arşiv kaynakları — bayi anahtarı (varsayılan kapalı), işin yüklemesi ve yükleme kaydı.
+		{"tasima_kaynak_ayar", "bayi_etkin"},
+		{"tasima_isleri", "arsiv_yukleme_id"},
+		{"tasima_yuklemeleri", "sahip_rid"},
 		// 0113: yedek uzak hedefleri, uzak kopya kuyruğu ve age anahtarları —
 		// yoksa uzak hedef/kopya/şifreleme yolları çalışmaz. Üretilmiş kolonlar
 		// (hedef_anahtar, etkin_tekil) tekillik kısıtlarının da kanıtıdır.
