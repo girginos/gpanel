@@ -195,7 +195,7 @@ test('yonetici sekmesi: XSS — panel_id alani kacislanir', function () {
     icermez(implode('', $f), '<script>');
 });
 
-test('sozlesme: modulun cagirdigi tum uclar izin.go Rotalar altin dosyasinda (SSO haric: ayri ajan)', function () {
+test('sozlesme: modulun cagirdigi tum uclar izin.go Rotalar altin dosyasinda (SSO dahil)', function () {
     $golden = dirname(__DIR__, 3) . '/cmd/server/testdata/api_anahtar_uclari.golden';
     if (!is_file($golden)) {
         echo "        (golden yok, atlandi)\n";
@@ -237,9 +237,6 @@ test('sozlesme: modulun cagirdigi tum uclar izin.go Rotalar altin dosyasinda (SS
     }
     // FakePanel.rotalar ile altin dosya birebir ayni grup/erisim
     foreach (FakePanel::$rotalar as $k => [$g, $e]) {
-        if ($k === 'POST /domains/{id}/sso') {
-            continue;
-        }
         dogru(isset($satirlar[$k]), "altin dosyada yok: $k");
         esit($g . ':' . $e, $satirlar[$k], $k);
     }
