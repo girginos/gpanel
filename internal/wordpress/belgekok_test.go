@@ -197,6 +197,10 @@ func TestBelgeKok_LaravelSilinmis_ArtisanYok_ServisDizinVar_Duzeltilir(t *testin
 	if kod != 200 || !bk_coz(t, govde).Duzeltildi || o.webRoot(t, 1) != o.base {
 		t.Fatalf("%d %s web_root=%q", kod, govde, o.webRoot(t, 1))
 	}
+	// Düzeltme sonrası servis kökü public_html: site adresi /blog (bayat kök public olsaydı yol kaybolurdu).
+	if y := bk_coz(t, govde); y.SiteURL != "https://"+wh_ana1+"/blog" || !o.komutIcerir("--url=https://"+wh_ana1+"/blog ") {
+		t.Fatalf("site adresi düzeltilmiş kökten kurulmalı: %+v %v", y, o.komutlar())
+	}
 }
 
 // (c) Canlı Laravel (artisan var, web_root=public mevcut) + alt dizine kurulum → 409,
