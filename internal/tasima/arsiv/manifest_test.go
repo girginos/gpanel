@@ -245,6 +245,9 @@ func TestOku_BelgeKokuKacisi(t *testing.T) {
 			t.Fatalf("'..' içeren belge kökü: %+v", a)
 		}
 	}
+	if !uyariVar(m, "geçersiz belge kökü") {
+		t.Fatalf("'..' belge kökü açıkça reddedilmeli: %v", m.Uyarilar)
+	}
 }
 
 func TestOku_YAMLCapaVeAkisStiliReddedilir(t *testing.T) {

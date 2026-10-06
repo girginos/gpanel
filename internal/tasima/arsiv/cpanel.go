@@ -329,9 +329,7 @@ func cpanelMainOku(b []byte) (cpMain, error) {
 			bolum = ""
 			switch k {
 			case "main_domain":
-				if kotu(v) {
-					return r, fmt.Errorf("%w: desteklenmeyen YAML (main_domain)", ErrHesap)
-				}
+				// Çapa/takma ad içeren değer alan adı doğrulamasından geçemez (AlanAdiGecerli).
 				r.ana = duz(v)
 			case "addon_domains", "sub_domains", "parked_domains":
 				v = strings.TrimSpace(v)
