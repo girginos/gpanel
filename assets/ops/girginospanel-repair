@@ -5,7 +5,7 @@
 #
 # Kullanım:
 #   girginospanel-repair [--dry-run] [--deep] [--only <bölümler>] [--quiet]
-#   bölümler (virgülle): phpmyadmin,domains,htpasswd,binary,clamav,frontend,signon,firewall  (varsayılan: hepsi)
+#   bölümler (virgülle): phpmyadmin,selinux_temel,docroot_selinux,domains,htpasswd,binary,clamav,frontend,signon,firewall  (varsayılan: hepsi)
 #   --dry-run : değişiklikleri UYGULAMADAN neyin düzeltileceğini göster
 #   --deep    : domain ev dizinlerinde RECURSIVE sahiplik onarımı (yavaş, büyük siteler)
 #
@@ -37,7 +37,7 @@ if [ "${1:-}" = "restore" ]; then
   echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
 fi
 
-DRY=0; DEEP=0; QUIET=0; ONLY="env_izin,sir_izin,phpmyadmin,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache,backup_cron"
+DRY=0; DEEP=0; QUIET=0; ONLY="env_izin,sir_izin,phpmyadmin,selinux_temel,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache,backup_cron"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -391,9 +391,126 @@ sec_domains() {
   done
 }
 
+# ---- SELinux TEMEL — kurulum + update'in ORTAK, idempotent garantisi ----
+# 🔴 Kurulum booleanları/fcontext'leri/port etiketini yazıyordu; update HİÇBİRİNİ yazmıyordu
+# (yalnız panel açılışındaki Go heal'i 2 boolean + php-fpm kuralını koruyordu). Politika
+# sıfırlanmış / elle bozulmuş / eski kurulumda eksik kalmış sunucu Enforcing'de sessizce
+# kırılıyordu. Bu bölüm HEPSİNİ tek yerde toplar; install adım 14 (çıplak repair) ve update
+# (`--only selinux_temel,...`) AYNI kodu çağırır. SELinux Disabled → sessiz geçer. Mod
+# değiştirmez (setenforce / /etc/selinux/config'e DOKUNMAZ).
+#
+# Her `semanage fcontext -a` / `setsebool -P` TÜM politikayı yeniden derler (~12 sn) →
+# yalnız eksik olan yazılır; boolean'lar tek `setsebool -P a=1 b=1` çağrısında toplanır.
+SELINUX_BOOLEANLAR="httpd_can_network_connect httpd_can_network_connect_db httpd_enable_homedirs httpd_read_user_content"
+SELINUX_FTP_BOOLEANLAR="ftpd_full_access ftpd_connect_db ftpd_use_passive_mode"
+SELINUX_FCONTEXT='httpd_sys_content_t|/opt/phpmyadmin(/.*)?
+httpd_sys_rw_content_t|/var/lib/phpmyadmin(/.*)?
+httpd_sys_content_t|/opt/girginospanel/frontend-dist(/.*)?
+httpd_sys_content_t|/opt/girginospanel/pma-signon(/.*)?
+httpd_var_run_t|/run/php-fpm-[^/]+(/.*)?
+httpd_user_rw_content_t|/home/c_[^/]+/(public_html|tmp)(/.*)?'
+
+# etiket_duzelt DIR [F|N]: alt ağacı politika varsayılanına döndürür; düzeltilen (dry-run:
+# düzeltilecek) dosya sayısını basar. Tek geçiş; 300 sn üst sınır.
+#   F (varsayılan) → -F: customizable tipler (httpd_sys_content_t vb. başka yerden gelmiş) de
+#                    sıfırlanır — kiracı belge kökü için ŞART.
+#   N              → -F'siz (sistem yolları: kurulumun eski `restorecon -R` davranışı).
+# 🔴 SAYIM yalnız TİP farkını sayar: `unconfined_u:` ↔ `system_u:` kullanıcı alanı farkı
+# (181'de 5162 dosya) zararsızdır; sayılsaydı her koşuda sahte "düzeltme" raporlanırdı.
+etiket_duzelt() {
+  local d=$1 fl=RFv n
+  [ "${2:-F}" = N ] && fl=Rv
+  [ $DRY -eq 1 ] && fl="n$fl"
+  n=$(timeout 300 restorecon -"$fl" "$d" 2>/dev/null \
+      | awk 'NF>=5 { split($(NF-2),a,":"); split($NF,b,":"); if (a[3]!=b[3]) c++ } END { print c+0 }')
+  echo "${n:-0}"
+}
+
+sec_selinux_temel() {
+  want selinux_temel || return 0
+  head_ "SELinux temel (booleanlar + fcontext + port + etiketler)"
+  if [ $SEL -ne 1 ]; then ok "SELinux kapalı — bu bölüm gereksiz"; return 0; fi
+
+  # -- booleanlar (tek setsebool -P çağrısı) --
+  if ! command -v getsebool >/dev/null 2>&1 || ! command -v setsebool >/dev/null 2>&1; then
+    warn "getsebool/setsebool yok (policycoreutils) — booleanlar denetlenemedi"
+  else
+    local liste="$SELINUX_BOOLEANLAR" b cur eksik=""
+    # FTP booleanları yalnız pure-ftpd kuruluysa (ftp-setup'ın yazdığı küme).
+    if command -v pure-ftpd >/dev/null 2>&1 || rpm -q pure-ftpd >/dev/null 2>&1; then
+      liste="$liste $SELINUX_FTP_BOOLEANLAR"
+    fi
+    for b in $liste; do
+      cur=$(getsebool "$b" 2>/dev/null)
+      case "$cur" in
+        *"--> on") ok "boolean $b=on" ;;
+        *"--> off") eksik="$eksik $b=1"; act "boolean $b kapalı → açılacak (kalıcı)" ;;
+        *) warn "boolean $b politikada yok / okunamadı — atlandı" ;;
+      esac
+    done
+    if [ -n "$eksik" ] && [ $DRY -eq 0 ]; then
+      # shellcheck disable=SC2086
+      if setsebool -P $eksik >/dev/null 2>&1; then
+        ok "setsebool -P$eksik"
+      else
+        err "setsebool -P$eksik BAŞARISIZ — httpd ağ/home erişimi kırık olabilir"
+      fi
+    fi
+  fi
+
+  # -- fcontext kuralları --
+  if [ $HAVE_SEMANAGE -ne 1 ]; then
+    warn "semanage yok (policycoreutils-python-utils) — kalıcı fcontext kuralları yazılamıyor (restorecon geçici etiketlere döner)"
+  else
+    local lst spec tip satir
+    lst=$(semanage fcontext -l 2>/dev/null)   # önce yakala (pipefail+grep -q SIGPIPE tuzağı)
+    while IFS='|' read -r tip spec; do
+      [ -n "$spec" ] || continue
+      case "$lst" in
+        *"$spec"*) ok "fcontext $tip  $spec" ;;
+        *)
+          act "semanage fcontext +$tip  $spec  (kalıcı kural)"
+          if [ $DRY -eq 0 ]; then
+            semanage fcontext -a -t "$tip" "$spec" 2>/dev/null \
+              || semanage fcontext -m -t "$tip" "$spec" 2>/dev/null \
+              || err "fcontext yazılamadı: $spec"
+          fi ;;
+      esac
+    done <<<"$SELINUX_FCONTEXT"
+
+    # -- Apache backend portu (kurulumda httpd varsa 127.0.0.1:10080) --
+    if [ -f "${GOSP_REPAIR_HTTPD_CONF:-/etc/httpd/conf/httpd.conf}" ]; then   # (env: test kancası)
+      local pl; pl=$(semanage port -l 2>/dev/null)
+      satir=""
+      while IFS= read -r l; do
+        case "$l" in "http_port_t "*tcp*) satir=$l ;; esac
+      done <<<"$pl"
+      if [[ "$satir" =~ (^|[[:space:],])10080($|[[:space:],]) ]]; then
+        ok "port 10080 http_port_t (Apache backend)"
+      else
+        act "semanage port +http_port_t tcp 10080 (Apache backend)"
+        if [ $DRY -eq 0 ]; then
+          semanage port -a -t http_port_t -p tcp 10080 2>/dev/null \
+            || semanage port -m -t http_port_t -p tcp 10080 2>/dev/null \
+            || err "port 10080 http_port_t yazılamadı — Apache backend başlamaz"
+        fi
+      fi
+    fi
+  fi
+
+  # -- sabit yolların etiketi (kural yazıldıktan SONRA) --
+  local p n
+  for p in /opt/phpmyadmin /var/lib/phpmyadmin /opt/girginospanel/frontend-dist /opt/girginospanel/pma-signon /opt/girginospanel/bin /var/named /etc/named; do
+    [ -d "$p" ] || continue
+    [ -L "$p" ] && { warn "symlink — atlandı: $p"; continue; }
+    n=$(etiket_duzelt "$p" N)
+    if [ "${n:-0}" -gt 0 ]; then act "restorecon $p  ($n bağlam)"; else ok "etiket $p"; fi
+  done
+}
+
 sec_docroot_selinux() {
   want docroot_selinux || return 0
-  head_ "kiracı belge kökü SELinux (WordPress yazma)"
+  head_ "kiracı belge kökü SELinux (WordPress/Laravel yazma)"
   if [ $SEL -ne 1 ]; then ok "SELinux kapalı — bu bölüm gereksiz"; return 0; fi
 
   # 🔴 RHEL/AlmaLinux'un varsayılan kuralı:
@@ -402,39 +519,66 @@ sec_docroot_selinux() {
   # bilgileri" formu açar; eklenti/tema/güncelleme kurulamaz. Belirti
   # sinsidir: AVC kaydı bile düşmez (is_writable → access() denetimleri
   # dontaudit'li), log'a bakan sebebi bulamaz.
-  local n=0 duzeltilen=0
+  #
+  # 🔴 ALT AĞAÇ DA DENETLENİR (2026-10-06, 181): eskiden yalnız dizinin KENDİ etiketine
+  # bakılıp "doğru" ise `continue` ediliyordu. `cp -al`/`mv`/`rsync` ile gelen dosyalar
+  # kaynak etiketini (user_home_t) taşır; üst dizin doğru olsa bile içerik yanlış kalıyor,
+  # Enforcing'de database.sqlite create/unlink reddi alıyordu. Artık her koşuda alt ağaç
+  # restorecon -RF'ten geçer (yalnız yanlış olanı değiştirir, doğru olana yazmaz).
+  local n=0 duzeltilen=0 sapma=0
   # public_html + tmp: ikisi de PHP tarafindan YAZILIR olmali.
   # tmp varsayilan olarak user_tmp_t etiketlidir ve httpd domaini
   # oraya yazamaz -> WordPress eklenti indiremez ("Permission denied").
-  for d in /home/c_*/public_html /home/c_*/tmp; do
+  # GOSP_REPAIR_EV_KOKU: yalnız test kancası (varsayılan /home); üretimde ayarlanmaz.
+  local evk="${GOSP_REPAIR_EV_KOKU:-/home}"
+  for d in "$evk"/c_*/public_html "$evk"/c_*/tmp; do
     # Kiracı bu adı symlink yapabilir: fcontext kuralı/restorecon hedefi olarak
     # kiracının gösterdiği yolu kullanma.
     [ -L "$d" ] && { warn "symlink — atlandı: $d"; continue; }
     [ -d "$d" ] || continue
     n=$((n+1))
     local mevcut; mevcut=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
-    case "$mevcut" in
-      *httpd_user_rw_content_t*) continue ;;   # zaten doğru
-    esac
-    act "SELinux yazılabilir etiket  $d  (şu an: ${mevcut##*:object_r:})"
-    if [ $DRY -eq 0 ]; then
-      if [ $HAVE_SEMANAGE -eq 1 ]; then
-        semanage fcontext -a -t httpd_user_rw_content_t "${d}(/.*)?" 2>/dev/null \
-          || semanage fcontext -m -t httpd_user_rw_content_t "${d}(/.*)?" 2>/dev/null || true
+    local ustdogru=0
+    case "$mevcut" in *httpd_user_rw_content_t*) ustdogru=1 ;; esac
+
+    if [ $ustdogru -eq 0 ]; then
+      act "SELinux yazılabilir etiket  $d  (şu an: ${mevcut##*:object_r:})"
+      if [ $DRY -eq 0 ]; then
+        # Politika bu yolu ZATEN yazılabilir tipe çözüyorsa (genel kural: selinux_temel /
+        # wp-onkosul) kiracıya özel kural GEREKSİZ — her `semanage -a` ~12 sn politika derler.
+        local mp; mp=$(matchpathcon -n "$d" 2>/dev/null)
+        case "$mp" in
+          *httpd_user_rw_content_t*) : ;;
+          *)
+            if [ $HAVE_SEMANAGE -eq 1 ]; then
+              semanage fcontext -a -t httpd_user_rw_content_t "${d}(/.*)?" 2>/dev/null \
+                || semanage fcontext -m -t httpd_user_rw_content_t "${d}(/.*)?" 2>/dev/null || true
+            else
+              # semanage yok: kalıcı kural yazılamaz → geçici chcon (restorecon bunu geri alır).
+              warn "semanage yok — $d için GEÇİCİ chcon (policycoreutils-python-utils kurun)"
+              chcon -R -t httpd_user_rw_content_t "$d" 2>/dev/null || true
+            fi ;;
+        esac
       fi
-      # 🔴 -F ŞART: kural yeni eklendiğinde `restorecon -R` mevcut etiketi
-      # değiştirmeyebiliyor (canlıda birebir yaşandı).
-      restorecon -RF "$d" >/dev/null 2>&1 || true
+    fi
+    # 🔴 -F ŞART: kural yeni eklendiğinde `restorecon -R` mevcut etiketi
+    # değiştirmeyebiliyor (canlıda birebir yaşandı). Alt ağaç dahil, tek geçiş.
+    local kac; kac=$(etiket_duzelt "$d")
+    if [ "${kac:-0}" -gt 0 ]; then
+      [ $ustdogru -eq 1 ] && act "alt ağaçta $kac dosya yanlış etiketliydi  $d"
+      sapma=$((sapma+kac))
+    fi
+    if [ $DRY -eq 0 ]; then
       local sonra; sonra=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
       case "$sonra" in
-        *httpd_user_rw_content_t*) duzeltilen=$((duzeltilen+1)) ;;
+        *httpd_user_rw_content_t*) [ $ustdogru -eq 0 ] && duzeltilen=$((duzeltilen+1)) ;;
         *) err "etiket değişmedi: $d (şu an ${sonra##*:object_r:})" ;;
       esac
     fi
   done
   if [ "$n" -eq 0 ]; then ok "kiracı dizini yok"
-  elif [ $DRY -eq 1 ]; then say "  → (dry) $n dizin taranacak (belge kökü + tmp)"
-  else ok "$n dizinden $duzeltilen tanesi yazılabilir etikete geçirildi"; fi
+  elif [ $DRY -eq 1 ]; then say "  → (dry) $n dizin tarandı; $sapma dosya düzeltilecek"
+  else ok "$n dizin: $duzeltilen üst dizin + $sapma dosya yazılabilir etikete geçirildi"; fi
 }
 
 sec_nginx_cache() {
@@ -713,6 +857,7 @@ sec_env_izin
 sec_sir_izin
 sec_eklenti_runtime
 sec_phpmyadmin
+sec_selinux_temel
 sec_docroot_selinux
 sec_migrations
 sec_domains
