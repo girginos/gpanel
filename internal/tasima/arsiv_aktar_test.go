@@ -895,6 +895,15 @@ func TestArsivIsYurut_AcilisTemizlikVeRet(t *testing.T) {
 	if d, h := durum(isID); d != "hata" || !strings.Contains(h, "değişti") || len(gor) != 0 {
 		t.Errorf("değişen dosya: %s %q kalem=%d", d, h, len(gor))
 	}
+	// 3b) Arşivde olmayan alan (satır elle bozuldu): bayiye GENEL metin (ayrıntı yok), kök işi 'hata'.
+	o.exec(t, `UPDATE tasima_isleri SET durum='tamam' WHERE sahip_rid=7`)
+	gor = nil
+	isID, _ = hazirla()
+	o.exec(t, `UPDATE tasima_kalemleri SET alan_adi='yok.test' WHERE is_id=? AND alan_adi='ek.net'`, isID)
+	calistir(isID)
+	if d, h := durum(isID); d != "hata" || h != tasimaHataGenel || len(gor) != 0 {
+		t.Errorf("bayi için bilinmeyen hata genel metin olmalı: %s %q kalem=%d", d, h, len(gor))
+	}
 	// 4) Kök kaynağı kapattı → sıradaki iş başlamadan iptal.
 	o.exec(t, `UPDATE tasima_isleri SET durum='tamam' WHERE sahip_rid=7`)
 	isID, _ = hazirla()
@@ -1010,5 +1019,22 @@ func TestArsivMailAktar_DirectAdminIcIceMaildir(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(kok, "ornek.com", yok)); err == nil {
 			t.Errorf("%s çıkmamalıydı", yok)
 		}
+	}
+}
+
+// Kural: açılışta (AcilistaTemizle) süresi dolan yüklemeler silinir.
+func TestArsivYuklemeTemizle_AcilistaCalisir(t *testing.T) {
+	o := arsivKur(t)
+	eskiG := acilisDagitGecikme
+	acilisDagitGecikme = 0
+	t.Cleanup(func() { acilisDagitGecikme = eskiG })
+	res := o.exec(t, `INSERT INTO tasima_yuklemeleri (sahip_rid, ad, boyut, alinan, durum) VALUES (7, 'x', 600, 600, 'hazir')`)
+	id, _ := res.LastInsertId()
+	o.exec(t, `UPDATE tasima_yuklemeleri SET guncelleme=(NOW() - INTERVAL 100 HOUR) WHERE id=?`, id)
+	_ = os.MkdirAll(filepath.Dir(yuklemeYolu(7, id)), 0o700)
+	_ = os.WriteFile(yuklemeYolu(7, id), []byte("x"), 0o600)
+	o.h.AcilistaTemizle()
+	if _, err := os.Lstat(yuklemeYolu(7, id)); err == nil {
+		t.Error("açılışta süresi dolan yükleme silinmedi")
 	}
 }
