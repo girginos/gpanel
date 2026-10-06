@@ -791,6 +791,32 @@ func TestArsivBaslat_KokKurallari(t *testing.T) {
 	if kod, _ := baslat(g); kod != 400 {
 		t.Errorf("oturumda olmayan site: %d", kod)
 	}
+	g = temel()
+	g["secilen"] = []map[string]any{}
+	if kod, _ := baslat(g); kod != 400 {
+		t.Errorf("boş seçim: %d", kod)
+	}
+	g = temel()
+	çok := make([]map[string]any, 501)
+	for i := range çok {
+		çok[i] = map[string]any{"alan_adi": fmt.Sprintf("s%d.example", i)}
+	}
+	g["secilen"] = çok
+	if kod, _ := baslat(g); kod != 400 {
+		t.Errorf("501 site: %d", kod)
+	}
+	g = temel()
+	g["tip"] = "plesk"
+	if kod, _ := baslat(g); kod != 400 {
+		t.Errorf("canlı SSH kaynağı arşiv ucundan başlatılamaz: %d", kod)
+	}
+	g = temel()
+	g["tip"] = "arsiv-cpanel"
+	o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"etkin": false})
+	if kod, _ := baslat(g); kod != 400 {
+		t.Errorf("kapalı kaynak: %d", kod)
+	}
+	o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"etkin": true})
 	eski := diskBosAlan
 	diskBosAlan = func(string) (int64, error) { return 10, nil }
 	if kod, _ := baslat(temel()); kod != http.StatusInsufficientStorage {
