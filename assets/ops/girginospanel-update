@@ -899,6 +899,13 @@ if [ "$HEALTHY" = 1 ]; then
   echo "$RELHASH" > "$MARKER" 2>/dev/null || true   # bu release'i uygulandı olarak işaretle
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
   ok "panel ACTIVE + /healthz OK (${SAGLIK_GECEN:-?} sn)"
+  # SELinux modu bildirimi: kurallar/etiketler HER modda yazılır (selinux_temel); burada yalnız mod
+  # raporlanır, ASLA değiştirilmez.
+  case "$(getenforce 2>/dev/null || echo Disabled)" in
+    Enforcing)  ok "SELinux: Enforcing (etiketler ve kurallar yerinde)" ;;
+    Permissive) warn "SELinux: Permissive — kurallar hazır ama hiçbir şey engellenmiyor; üretim için Enforcing önerilir: setenforce 1 (kalıcı: /etc/selinux/config SELINUX=enforcing)" ;;
+    *)          warn "SELinux: Disabled — kurallar yazıldı ama etkisiz; açmak için /etc/selinux/config SELINUX=enforcing + touch /.autorelabel && reboot (tam yeniden etiketleme)" ;;
+  esac
   ok "kaynak limitleri planlardan uygulanıyor + mevcut siteler per-tenant PHP-FPM izolasyonuna GÜVENLE (self-check + auto-rollback) geçiriliyor (arka planda)"
 
   # 11a) TELEGRAM DESTEK AJANI — panelden AYRI hizmet. SIRA BİLİNÇLİ: yalnız panel yeni ikiliyle

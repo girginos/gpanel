@@ -1192,5 +1192,15 @@ echo -e "   (panel admin login verifies the server root password against the /et
 if [ "$(findmnt -no FSTYPE / 2>/dev/null)" = "xfs" ] && ! findmnt -no OPTIONS / 2>/dev/null | grep -qwE 'usrquota|uquota|quota'; then
   echo -e "   ${c_y}Disk quota: rootflags=uquota written to GRUB — becomes active after a ONE-TIME reboot.${c_0}"
 fi
+# SELinux mode notice. Labels / fcontext rules / booleans are ALWAYS written (persistent, harmless in
+# any mode, and required the day someone switches to Enforcing); this only REPORTS the mode and
+# never changes it.
+case "$(getenforce 2>/dev/null || echo Disabled)" in
+  Enforcing)  echo -e "   ${c_g}SELinux: Enforcing${c_0} — labels, port labels and booleans are in place." ;;
+  Permissive) echo -e "   ${c_y}SELinux: Permissive${c_0} — rules are written and ready; nothing is blocked yet."
+              echo -e "     For production use Enforcing:  setenforce 1   (persistent: SELINUX=enforcing in /etc/selinux/config)" ;;
+  *)          echo -e "   ${c_y}SELinux: Disabled${c_0} — rules are written but INACTIVE. Enabling later needs a full relabel:"
+              echo -e "     set SELINUX=enforcing in /etc/selinux/config, then  touch /.autorelabel && reboot" ;;
+esac
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 
