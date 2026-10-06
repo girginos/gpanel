@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/kiraci"
+	"girginospanel/internal/kota"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -388,6 +389,11 @@ func uygulamaDBKur(ctx context.Context, db *sql.DB, a KurArgs,
 		if dbSifre == "" {
 			return "", nil, errors.New("guvenli parola uretilemedi (entropi okunamadi) — kurulum durduruldu")
 		}
+	}
+	// 🔴 DB SAYISI KAPISI: uygulama sihirbazı da hosting DB limitine (plan ⊕ üst yazım)
+	// tabidir; eskiden bu yol kota.CheckDBEklenebilir'i HİÇ çağırmıyordu.
+	if err := kota.CheckDBEklenebilir(ctx, db, a.Domain.ID); err != nil {
+		return "", nil, err
 	}
 	// 🔴 domainID SART: db_accounts.domain_id -> domains(id) FK'si var (0 gecilirse
 	// INSERT duser; MySQLCreateDB o durumda MariaDB tarafini kendisi geri alir).

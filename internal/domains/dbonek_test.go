@@ -37,6 +37,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-sql-driver/mysql"
 
+	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/middleware"
 )
@@ -126,7 +127,10 @@ func dbo_ortam(t *testing.T) *dboOrtam {
 		`CREATE TABLE domains (id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
 			alan_adi VARCHAR(253) NOT NULL DEFAULT '', sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '',
 			is_demo TINYINT NOT NULL DEFAULT 0, customer_id BIGINT UNSIGNED NULL,
-			reseller_id BIGINT NOT NULL DEFAULT 0) ENGINE=InnoDB`,
+			reseller_id BIGINT NOT NULL DEFAULT 0, plan_id BIGINT UNSIGNED NULL) ENGINE=InnoDB`,
+		// DB sayısı kapısı (kota.CheckDBEklenebilir): efektif limit = plan ⊕ üst yazım
+		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, max_db INT NOT NULL DEFAULT 0) ENGINE=InnoDB`,
+		efektiflimit.TabloDDL,
 		`CREATE TABLE db_accounts (
 			id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 			domain_id BIGINT UNSIGNED NOT NULL,

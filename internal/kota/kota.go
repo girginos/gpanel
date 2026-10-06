@@ -4,7 +4,10 @@ package kota
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+
+	"girginospanel/internal/efektiflimit"
 )
 
 type LimitHatasi struct {
@@ -40,8 +43,40 @@ func CheckDomainEklenebilir(ctx context.Context, db *sql.DB, customerID *int64) 
 	return nil
 }
 
-// CheckDBEklenebilir: domain'in customer plan.max_db
+// CheckDBEklenebilir: domain'e yeni veritabanı eklenebilir mi?
+//
+// 🔴 Kapı EFEKTİF limiti (hosting planı ⊕ hostinge özel üst yazım, efektiflimit —
+// tek kaynak) bu hostingin kendi veritabanı sayısına karşı denetler; 0/NULL =
+// sınırsız. Eskiden yalnız customers.plan_id → service_plans.max_db'ye bakılıyordu:
+// canlıda customers tablosu BOŞ ve hosting planı domains.plan_id'de olduğundan kapı
+// fiilen hiç uygulanmıyor, üst yazım (hosting_limit_ust.max_db) hiç okunmuyordu.
+// Eski müşteri-modeli denetimi (hesap genelinde toplam) ek olarak korunur.
 func CheckDBEklenebilir(ctx context.Context, db *sql.DB, domainID int64) error {
+	var maks int
+	err := db.QueryRowContext(ctx,
+		`SELECT `+efektiflimit.IfadeVarsayilan("max_db", 0)+` FROM domains d`+efektiflimit.Join+`WHERE d.id=?`,
+		domainID).Scan(&maks)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // domain yok: çağıran zaten 404/yan etkisiz yola düşer
+	}
+	if err != nil {
+		return &LimitHatasi{Mesaj: "plan limitleri okunamadı"}
+	}
+	if maks > 0 {
+		var mevcut int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM db_accounts WHERE domain_id=?`, domainID).Scan(&mevcut); err != nil {
+			return &LimitHatasi{Mesaj: "veritabanı sayısı okunamadı"}
+		}
+		if mevcut >= maks {
+			return &LimitHatasi{Mesaj: fmt.Sprintf("plan limiti aşıldı: max %d veritabanı", maks)}
+		}
+	}
+	return musteriDBKotasi(ctx, db, domainID)
+}
+
+// musteriDBKotasi: eski müşteri modeli — customers.plan_id planının max_db'si, müşterinin
+// TÜM hostinglerindeki toplam veritabanına karşı.
+func musteriDBKotasi(ctx context.Context, db *sql.DB, domainID int64) error {
 	var customerID *int64
 	if err := db.QueryRowContext(ctx, `SELECT customer_id FROM domains WHERE id=?`, domainID).Scan(&customerID); err != nil {
 		return nil
