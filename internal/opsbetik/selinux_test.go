@@ -68,7 +68,8 @@ func (o *selOrtam) kos(t *testing.T, sel, semanage, dry int, bolumler ...string)
 	cmd := exec.Command("bash", "-c", betik, "bash", betikYolu(t))
 	cmd.Env = append(os.Environ(), "GOSP_REPAIR_KUTUPHANE=1", "LC_ALL=C",
 		"PATH="+o.bin+":"+os.Getenv("PATH"), "ST="+o.st, "LOG="+o.log,
-		"GOSP_REPAIR_EV_KOKU="+o.ev, "GOSP_REPAIR_HTTPD_CONF="+filepath.Join(o.dir, "httpd.conf"))
+		"GOSP_REPAIR_EV_KOKU="+o.ev, "GOSP_REPAIR_HTTPD_CONF="+filepath.Join(o.dir, "httpd.conf"),
+		"GOSP_REPAIR_WAF_MODUL="+filepath.Join(o.dir, "waf.so"), "GOSP_REPAIR_WAF_DAMGA="+filepath.Join(o.dir, "waf.damga"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("betik hatası (%v): %s", err, out)
@@ -262,7 +263,8 @@ func (o *selOrtam) dogrulaKos(t *testing.T) string {
 	betik := "set -uo pipefail; export LC_ALL=C; KISA=0; JSON=0\n" + s[ust:ustSon] + "\n" + s[bas:son] +
 		"\necho \"SONUC kritik=$KRITIK uyari=$UYARI gecen=$GECEN\"\n"
 	cmd := exec.Command("bash", "-c", betik)
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "PATH="+o.bin+":"+os.Getenv("PATH"), "ST="+o.st, "LOG="+o.log)
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "PATH="+o.bin+":"+os.Getenv("PATH"), "ST="+o.st, "LOG="+o.log,
+		"GOSP_REPAIR_WAF_MODUL="+filepath.Join(o.dir, "waf.so"), "GOSP_REPAIR_WAF_DAMGA="+filepath.Join(o.dir, "waf.damga"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("dogrula bloğu hatası (%v): %s", err, out)
