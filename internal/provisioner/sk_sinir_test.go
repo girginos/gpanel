@@ -19,7 +19,11 @@ func TestBenzersizKullanici_SayacSiniriVeGecerlilik(t *testing.T) {
 	if u := BenzersizKullanici("ornek.com"); u != "c_ornek" {
 		t.Fatalf("boşta: %q", u)
 	}
-	dolu["c_ornek"], dolu["c_ornek2"], dolu["c_ornek3"] = true, true, true
+	dolu["c_ornek"] = true
+	if u := BenzersizKullanici("ornek.com"); u != "c_ornek2" {
+		t.Fatalf("yalnız taban doluyken 2 beklenir: %q", u)
+	}
+	dolu["c_ornek2"], dolu["c_ornek3"] = true, true
 	if u := BenzersizKullanici("ornek.com"); u != "c_ornek4" {
 		t.Fatalf("2,3 doluyken 4 beklenir: %q", u)
 	}
