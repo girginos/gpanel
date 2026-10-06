@@ -26,6 +26,7 @@ import (
 
 	"girginospanel/internal/bildirim"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/sinirlidosya"
 )
 
 var (
@@ -58,7 +59,7 @@ type wpKimlik struct{ ad, kul, pw, host, pre, yol string }
 
 // wpConfigOku — wp-config.php'den DB kimliği + tablo öneki.
 func wpConfigOku(yol string) (wpKimlik, bool) {
-	b, err := os.ReadFile(yol)
+	b, err := sinirlidosya.Oku(yol, 1<<20)
 	if err != nil {
 		return wpKimlik{}, false
 	}

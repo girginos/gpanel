@@ -37,6 +37,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"girginospanel/internal/efektiflimit"
+	"girginospanel/internal/sinirlidosya"
 )
 
 const (
@@ -1990,7 +1991,7 @@ func tenantDocRoot(db *sql.DB, sk string, domainID int64) string {
 // Debug modunda pool'daki php_admin_value[auto_prepend_file] app'in .user.ini prepend'ini
 // EZER; shim icinde geri zincirlemek icin bu deger okunur.
 func readUserIniAutoPrepend(docroot string) string {
-	b, err := os.ReadFile(filepath.Join(docroot, ".user.ini"))
+	b, err := sinirlidosya.Oku(filepath.Join(docroot, ".user.ini"), 64<<10)
 	if err != nil {
 		return ""
 	}
