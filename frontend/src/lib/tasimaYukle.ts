@@ -135,7 +135,8 @@ export type ArsivOzet = {
   arsiv_bayt: number; uye_sayisi: number; dosya_sayisi: number; toplam_bayt: number
   db_sayisi: number; posta_sayisi: number; cron_sayisi: number; dns_sayisi: number
 }
-export type ArsivOnkontrol = { arsiv_bayt: number; gerekli_bos_bayt: number }
+/** yeterli: sunucu bildirmediyse null (bilinmiyor). */
+export type ArsivOnkontrol = { arsiv_bayt: number; gerekli_bos_bayt: number; yeterli: boolean | null }
 export type ArsivKesifBilgi = { ozet: ArsivOzet; onkontrol: ArsivOnkontrol; uyarilar: string[]; tasinmayacak: string[] }
 
 function metinListe(v: unknown): string[] {
@@ -154,7 +155,7 @@ export function kesifBilgiAyikla(ham: unknown): ArsivKesifBilgi {
   const arsivBayt = sayi(k.arsiv_bayt) || ozet.arsiv_bayt
   return {
     ozet,
-    onkontrol: { arsiv_bayt: arsivBayt, gerekli_bos_bayt: sayi(k.gerekli_bos_bayt) || gerekliBosAlan(arsivBayt) },
+    onkontrol: { arsiv_bayt: arsivBayt, gerekli_bos_bayt: sayi(k.gerekli_bos_bayt) || gerekliBosAlan(arsivBayt), yeterli: typeof k.yeterli === 'boolean' ? k.yeterli : null },
     uyarilar: metinListe(g.uyarilar),
     tasinmayacak: metinListe(g.tasinmayacak),
   }

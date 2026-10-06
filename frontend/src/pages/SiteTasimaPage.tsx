@@ -191,6 +191,7 @@ const STASIMA_EN: Record<string, string> = {
   "Kutu parolaları taşınmaz, yeni parola belirlenir.": "Mailbox passwords are not migrated; new passwords are set.",
   "Arşivde SSL sertifikası bulunmaz; taşıma sonrası Let's Encrypt ile alınır.": "Archives contain no SSL certificate; one is issued via Let's Encrypt after migration.",
   "arşiv": "archive",
+  "Arşiv inceleme oturumunun süresi doldu; yeniden keşfedin.": "The archive inspection session expired; discover again.",
   "Bayiler de kullanabilsin": "Resellers can use it too",
   "Açıkken bayiler bu arşiv kaynağını dosya yükleyerek kullanabilir (varsayılan kapalı).": "When on, resellers can use this archive source by uploading files (off by default).",
   "Kaynak kapalıyken kullanılamaz.": "Unavailable while the source is off.",
@@ -306,6 +307,7 @@ function Stepper({ adim, git, erisim }: { adim: number; git: (n: number) => void
 // Kaynak bağlantı bilgileri sayfa yenilenince kaybolmasın diye saklanır.
 // 🔴 GÜVENLİK: parola/özel anahtar ASLA saklanmaz (localStorage XSS ile okunur).
 const KAYNAK_KEY = 'gosp_tasima_kaynak'
+const ARSIV_KESIF_KEY = 'gosp_tasima_arsiv_kesif' // süren arşiv keşfinin oturum id'si (sır değil)
 const OTURUM_KEY = 'gosp_tasima_oturum' // son keşif oturumu id'si (sır değil)
 
 type Oturum = { id: number; tip: string; host: string; port: number; kullanici: string; site_sayisi: number; kimlik_sakli: boolean; son_kullanim: string }
@@ -379,7 +381,10 @@ export default function SiteTasimaPage() {
   const [ayarYuk, setAyarYuk] = useState('')
   // --- arşiv kaynağı (cPanel/DirectAdmin yedeği) ---
   const [cron, setCron] = useState(true)
-  const [arsivGirdi, setArsivGirdi] = useState<ArsivGirdi>({})
+  const [kesifOturum, setKesifOturum] = useState<number | null>(() => {
+    try { const v = Number(localStorage.getItem(ARSIV_KESIF_KEY)); return Number.isInteger(v) && v > 0 ? v : null } catch { return null }
+  })
+  const [kesifGecen, setKesifGecen] = useState<number | null>(null)
   const [arsivBilgi, setArsivBilgi] = useState<ArsivKesifBilgi | null>(null)
   const logRef = useRef<HTMLPreElement>(null)
   const basladiRef = useRef<number | null>(null) // ETA için başlangıç ms
@@ -447,6 +452,14 @@ export default function SiteTasimaPage() {
     setHata(null)
     try {
       const { data } = await api.get<{ id: number; tip: string; host: string; port: number; kullanici: string; hesaplar: Hesap[]; secim: string[]; kimlik_sakli: boolean }>(`${TASIMA_TABAN}/oturum/${id}`)
+      if (data.tip.startsWith('arsiv-')) {
+        // Arşiv oturumu: uyarı/özet bu uçta yok; sonuç keşif ucundan geri yüklenir.
+        setTip(data.tip)
+        const { data: k } = await api.get<{ durum?: string; hata?: string; hesaplar?: Hesap[] }>(`${TASIMA_TABAN}/arsiv/kesif/${id}`)
+        if (k.durum === 'hazir') { arsivSonucUygula(k, id); return }
+        if (k.durum === 'kesif') { try { localStorage.setItem(ARSIV_KESIF_KEY, String(id)) } catch { /* */ } setKesifOturum(id); return }
+        throw Object.assign(new Error('kesif'), { response: { data: { hata: k.hata || '' } } })
+      }
       setTip(data.tip); setHost(data.host); setPort(data.port); setKullanici(data.kullanici)
       const list = data.hesaplar || []
       setHesaplar(list)
@@ -543,28 +556,78 @@ export default function SiteTasimaPage() {
     } finally { setKesifYuk(false) }
   }
 
-  // Arşiv kaynağı: dosya yolu (yalnız kök) ya da tamamlanmış yükleme kimliği ile keşif.
+  // Arşiv keşfi ASENKRON: POST 202 {oturum_id} döner; sonuç GET /arsiv/kesif/{id} ile 2 sn'de bir
+  // yoklanır. oturum_id localStorage'ta tutulur → sayfa yenilense de yoklama sürer.
+  function arsivSonucUygula(data: { hesaplar?: Hesap[] }, id: number) {
+    const list = data.hesaplar || []
+    setArsivBilgi(kesifBilgiAyikla(data))
+    setHesaplar(list)
+    const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = varsayilanSecim(h) }); setSecili(s)
+    setOturumID(id)
+    try { localStorage.setItem(OTURUM_KEY, String(id)) } catch { /* */ }
+    oturumlarYukle()
+    if (!list.length) { const m = cevir("Arşivde taşınabilir site bulunamadı."); setHata(m); toast.hata(m) }
+    else setAdim(2)
+  }
+
   async function arsivKesfet(girdi: ArsivGirdi) {
-    setKesifYuk(true); setHata(null); setHesaplar(null); setArsivBilgi(null)
+    setKesifYuk(true); setHata(null); setHesaplar(null); setArsivBilgi(null); setKesifGecen(0)
     try {
-      const { data } = await api.post<{ hesaplar: Hesap[]; oturum_id: number }>(`${TASIMA_TABAN}/arsiv/kesif`, {
+      const { data } = await api.post<{ oturum_id: number }>(`${TASIMA_TABAN}/arsiv/kesif`, {
         tip, ...(yonetici && girdi.yol ? { yol: girdi.yol } : {}), ...(girdi.yukleme_id ? { yukleme_id: girdi.yukleme_id } : {}),
       })
-      const list = data.hesaplar || []
-      setArsivGirdi(yonetici && girdi.yol ? { yol: girdi.yol } : { yukleme_id: girdi.yukleme_id })
-      setArsivBilgi(kesifBilgiAyikla(data))
-      setHesaplar(list)
-      const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = varsayilanSecim(h) }); setSecili(s)
-      setOturumID(data.oturum_id || null)
-      if (data.oturum_id) { try { localStorage.setItem(OTURUM_KEY, String(data.oturum_id)) } catch { /* */ } }
-      oturumlarYukle()
-      if (!list.length) { setHata(cevir("Arşivde taşınabilir site bulunamadı.")); toast.hata(cevir("Arşivde taşınabilir site bulunamadı.")) }
-      else setAdim(2)
+      const id = Number(data.oturum_id) || 0
+      if (!id) throw new Error('oturum')
+      try { localStorage.setItem(ARSIV_KESIF_KEY, String(id)) } catch { /* */ }
+      setKesifOturum(id)
     } catch (e) {
       const m = apiHata(e, cevir("Arşiv keşfi başarısız"))
       setHata(m); toast.hata(cevir("İşlem başarısız"), m)
-    } finally { setKesifYuk(false) }
+      setKesifYuk(false); setKesifGecen(null)
+    }
   }
+
+  // Yoklama: 'kesif' → sürer, 'hazir' → sonuç ekranı, 'hata' → mesaj, 404 → oturum süresi doldu.
+  useEffect(() => {
+    if (!kesifOturum) return
+    let dur = false
+    let t = 0
+    const bitir = () => {
+      try { localStorage.removeItem(ARSIV_KESIF_KEY) } catch { /* */ }
+      setKesifOturum(null); setKesifYuk(false); setKesifGecen(null)
+    }
+    const tik = async () => {
+      try {
+        const { data } = await api.get<{ durum?: string; gecen_sn?: number; hata?: string; hesaplar?: Hesap[] }>(`${TASIMA_TABAN}/arsiv/kesif/${kesifOturum}`)
+        if (dur) return
+        if (data.durum === 'hazir') { bitir(); arsivSonucUygula(data, kesifOturum); return }
+        if (data.durum === 'hata') {
+          bitir()
+          const m = (typeof data.hata === 'string' && data.hata) || cevir("Arşiv keşfi başarısız")
+          setHata(m); toast.hata(cevir("İşlem başarısız"), m); return
+        }
+        setKesifYuk(true)
+        setKesifGecen(typeof data.gecen_sn === 'number' && data.gecen_sn >= 0 ? data.gecen_sn : g => (g ?? 0) + 2)
+      } catch (e) {
+        if (dur) return
+        const durum = (e as { response?: { status?: number } })?.response?.status
+        if (durum === 404) {
+          bitir()
+          const m = cevir("Arşiv inceleme oturumunun süresi doldu; yeniden keşfedin.")
+          setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+        } else if (durum && durum >= 400 && durum < 500 && durum !== 408 && durum !== 429) {
+          bitir()
+          const m = apiHata(e, cevir("Arşiv keşfi başarısız"))
+          setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+        } /* ağ/5xx: geçici, yoklama sürer */
+      }
+    }
+    setKesifYuk(true)
+    void tik()
+    t = window.setInterval(() => { void tik() }, 2000)
+    return () => { dur = true; window.clearInterval(t) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kesifOturum])
 
   async function baslat() {
     const secilenler = (hesaplar || []).filter(h => secili[h.alan_adi] && secilebilir(h))
@@ -579,8 +642,8 @@ export default function SiteTasimaPage() {
       const govde = arsivMi
         ? {
           // Arşiv: ssl gönderilmez (arşivde sertifika yok); sahipler taşınmaz.
-          tip, ...(yonetici && arsivGirdi.yol ? { yol: arsivGirdi.yol } : {}), ...(arsivGirdi.yukleme_id ? { yukleme_id: arsivGirdi.yukleme_id } : {}),
-          oturum_id: oturumID || 0,
+          // Kaynak dosya sunucuda oturumdan çözülür: yol/yukleme_id gönderilmez.
+          tip, oturum_id: oturumID || 0,
           mod: secilenler.length === 1 ? 'tekil' : 'toplu',
           ayarlar: { ...ortakAyar, cron: cron && cronVar, sahipleri_tasi: false },
           secilen: secilenler,
@@ -741,7 +804,7 @@ export default function SiteTasimaPage() {
               )}
             </Kart>
           )}
-          {arsivMi && <ArsivGirdiKart yonetici={yonetici} limitler={arsivLimitleri} kesifYuk={kesifYuk} onKesfet={g => void arsivKesfet(g)} />}
+          {arsivMi && <ArsivGirdiKart yonetici={yonetici} limitler={arsivLimitleri} kesifYuk={kesifYuk} kesifGecen={kesifGecen} onKesfet={g => void arsivKesfet(g)} />}
           {!arsivMi && <Kart>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Kaynak sunucu bilgileri")}</h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">

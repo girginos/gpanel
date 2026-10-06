@@ -32,6 +32,8 @@ const ARSIV_EN: Record<string, string> = {
   "Yol sunucuda root sahipli, izin verilen bir dizinde ve symlink olmayan düzenli bir dosya olmalıdır. En fazla {0}.": "The path must be a regular, non-symlink file owned by root in an allowed directory. At most {0}.",
   "Arşivi keşfet": "Discover archive",
   "Arşiv taranıyor…": "Scanning archive…",
+  "Arşiv inceleniyor… ({0} geçti). Büyük arşivlerde dakikalar sürebilir; sayfayı yenileyebilirsiniz.": "Inspecting archive… ({0} elapsed). Large archives can take minutes; you may refresh the page.",
+  "Taşıma için hedefte yeterli boş alan görünmüyor.": "The target does not appear to have enough free space for the migration.",
   "Yükleme boyutu en fazla {0} olabilir. Büyük dosyalar parçalı yüklenir; kesilirse kaldığı yerden devam eder.": "Uploads can be at most {0}. Large files are uploaded in chunks and resume where they stopped.",
   "Yükleme limiti bilinmiyor; yükleme şu an kullanılamıyor.": "The upload limit is unknown; uploading is unavailable right now.",
   "Dosya seç": "Choose file",
@@ -102,10 +104,12 @@ type Aktif = {
   hiz: number; deneme: number; mesaj: string
 }
 
-export function ArsivGirdiKart({ yonetici, limitler, kesifYuk, onKesfet }: {
+export function ArsivGirdiKart({ yonetici, limitler, kesifYuk, kesifGecen, onKesfet }: {
   yonetici: boolean
   limitler: ArsivLimitleri
   kesifYuk: boolean
+  /** Süren keşfin geçen süresi (sn); null = keşif yok. */
+  kesifGecen?: number | null
   onKesfet: (g: ArsivGirdi) => void
 }) {
   const toast = useToast()
@@ -278,6 +282,12 @@ export function ArsivGirdiKart({ yonetici, limitler, kesifYuk, onKesfet }: {
       <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Arşiv kaynağı")}</h2>
       <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{cevir("Taşınacak yedek arşivini sunucudaki yoldan ya da yükleyerek seçin.")}</p>
 
+      {kesifYuk && kesifGecen != null && (
+        <UyariKutusu ton="bilgi" kucuk className="mt-4">
+          {cevirT(cevir("Arşiv inceleniyor… ({0} geçti). Büyük arşivlerde dakikalar sürebilir; sayfayı yenileyebilirsiniz."), sureKisa(Math.max(1, kesifGecen)))}
+        </UyariKutusu>
+      )}
+
       {yonetici && (
         <div className="mt-4 flex gap-1.5" role="tablist">
           <button type="button" role="tab" aria-selected={sekme === 'yol'} className={sekmeCls('yol')} onClick={() => setSekme('yol')}>{cevir("Sunucudaki dosya yolu")}</button>
@@ -417,6 +427,9 @@ export function ArsivOzetKart({ bilgi }: { bilgi: ArsivKesifBilgi }) {
       <UyariKutusu ton="bilgi" kucuk className="mt-4" baslik={cevir("Ön kontrol")}>
         {cevirT(cevir("Taşıma için gereken boş alan ≈ {0} (arşivin yaklaşık 2,5 katı)."), baytBicim(bilgi.onkontrol.gerekli_bos_bayt))}
       </UyariKutusu>
+      {bilgi.onkontrol.yeterli === false && (
+        <UyariKutusu ton="uyari" kucuk className="mt-3">{cevir("Taşıma için hedefte yeterli boş alan görünmüyor.")}</UyariKutusu>
+      )}
       {(bilgi.uyarilar.length > 0 || bilgi.tasinmayacak.length > 0) && (
         <div className="mt-4 space-y-2">
           {bilgi.uyarilar.length > 0 && <KatlanirListe baslik={cevir("Uyarılar")} ogeler={bilgi.uyarilar} />}
