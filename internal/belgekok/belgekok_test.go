@@ -284,7 +284,9 @@ func TestGeriAl(t *testing.T) {
 	}
 	// IDOR: yanlış sk → satır bulunamaz, değişmez
 	e.set(t, 2, "/b/public_html/public")
-	if _, err = GeriAl(ctx, e.db, 2, "c_a", e.base, "/b/public_html"); err == nil || e.wr(t, 2) != "/b/public_html/public" {
-		t.Fatal("yabancı hesap satırı değişmemeli")
+	// Hata TÜRÜ önemli: GeriAl'in kendi sahip kapısı (sql.ErrNoRows) devrede olmalı; yalnız
+	// Duzelt'in ikinci kapısına ya da taban doğrulamasına güvenilmez.
+	if _, err = GeriAl(ctx, e.db, 2, "c_a", e.base, "/b/public_html"); !errors.Is(err, sql.ErrNoRows) || e.wr(t, 2) != "/b/public_html/public" {
+		t.Fatalf("yabancı hesap satırı değişmemeli ve sahip kapısı ErrNoRows vermeli: %v", err)
 	}
 }
