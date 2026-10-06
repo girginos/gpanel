@@ -30,6 +30,7 @@ import (
 	"girginospanel/internal/kiraci"
 	"girginospanel/internal/kota"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/sinirlidosya"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -807,7 +808,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	defer iptal()
 	if sreq.DBSil {
 		dbSonuc = "wp-config.php okunamadı — veritabanı adı bulunamadı"
-		if b, err := os.ReadFile(filepath.Join(dir, "wp-config.php")); err == nil {
+		if b, err := sinirlidosya.Oku(filepath.Join(dir, "wp-config.php"), 1<<20); err == nil {
 			dbSonuc = "wp-config.php içinde DB_NAME bulunamadı"
 			if m := reDBName.FindSubmatch(b); len(m) == 2 {
 				dbName := string(m[1])

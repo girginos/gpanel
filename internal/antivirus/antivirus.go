@@ -22,6 +22,7 @@ import (
 
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/sinirlidosya"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -501,7 +502,7 @@ func runScanEski(ctx context.Context, root string) (int, []Bulgu) {
 		if taranan > 50000 {
 			return errCap
 		}
-		b, e := os.ReadFile(p)
+		b, e := sinirlidosya.Oku(p, 3*1024*1024)
 		if e != nil {
 			return nil
 		}
