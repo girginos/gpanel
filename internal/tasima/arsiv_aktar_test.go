@@ -159,8 +159,13 @@ func TestArsivDosyalariAktar_KiraciKimliginde(t *testing.T) {
 		t.Error("ek alan belge kökü çıkmadı")
 	}
 	// Dosyalar kapalıysa hiçbir şey yazılmaz; arşivde olmayan alan hata.
-	if err := h.arsivDosyalariAktar(context.Background(), kaynak, Hesap{AlanAdi: "ornek.com"}, Ayarlar{}, Kapsam{}, yrSK, webRoot, "ornek.com", &AktarSonuc{}, log); err != nil {
+	bosKok := filepath.Join(o.ev, "bos_kok")
+	o.dizin(t, bosKok)
+	if err := h.arsivDosyalariAktar(context.Background(), kaynak, Hesap{AlanAdi: "ornek.com"}, Ayarlar{}, Kapsam{}, yrSK, bosKok, "ornek.com", &AktarSonuc{}, log); err != nil {
 		t.Errorf("dosyalar kapalı: %v", err)
+	}
+	if g, _ := os.ReadDir(bosKok); len(g) != 0 {
+		t.Errorf("dosyalar kapalıyken hedefe yazıldı: %v", g)
 	}
 	if err := h.arsivDosyalariAktar(context.Background(), kaynak, Hesap{AlanAdi: "yok.com"}, Ayarlar{Dosyalar: true}, Kapsam{}, yrSK, webRoot, "yok.com", &AktarSonuc{}, log); err == nil {
 		t.Error("arşivde olmayan alan adı kabul edildi")
@@ -508,7 +513,7 @@ func TestArsivMailAktar_VmailKimligiVeSuzgec(t *testing.T) {
 		t.Errorf("açılan kutular: %v", posts)
 	}
 	tum := strings.Join(uyar, "\n")
-	if !strings.Contains(tum, "parola") || !strings.Contains(tum, "geçersiz kutu adı") && !strings.Contains(tum, "atlandı") {
+	if !strings.Contains(tum, "kutu parolaları arşivde bulunmuyor") {
 		t.Errorf("uyarılar: %q", tum)
 	}
 	if strings.Contains(tum, kok) || strings.Contains(tum, tHash) {
@@ -534,7 +539,7 @@ func cronKaynakT(t *testing.T) *Kaynak {
 		{ad: k + "userdata/ek.net.ornek.com", veri: "documentroot: /home/u/ek\n"},
 		{ad: k + "homedir/public_html/i", veri: "x"}, {ad: k + "homedir/ek/i", veri: "x"},
 		{ad: k + "cron/u", veri: "MAILTO=\"\"\n*/5 * * * * php /home/u/public_html/cron.php\n@reboot /home/u/public_html/boot.sh\n" +
-			"0 1 * * * /home/u/ek/script.sh\n* * * * * sudo ls\n0 0 * * * cat /home/baska/x\n"},
+			"0 1 * * * /home/u/ek/script.sh\n* * * * * sudo ls\n0 0 * * * cat /home/baska/x\n0 4 * * * cp /home/u/public_html/a /home/u/ek/b\n"},
 	})
 	m := kaynak.arsiv.M
 	kaynak.arsiv.CronAtama, kaynak.arsiv.CronRed = cronAta(m.Cron, cronBaglam{EskiKullanici: m.Kullanici, AnaAlan: m.AnaAlan, Alanlar: m.Alanlar})
@@ -586,7 +591,7 @@ func TestArsivCronAktar_RaporVeAlanBazli(t *testing.T) {
 		t.Errorf("çevrilen görev: %+v", g)
 	}
 	tum := strings.Join(s1.Uyarilar, "\n")
-	for _, beklenen := range []string{"Cron: 1 satır taşındı", "@reboot", "sudo", "/home/baska"} {
+	for _, beklenen := range []string{"Cron: 1 satır taşındı", "@reboot", "sudo", "/home/baska", "birden çok alan"} {
 		if !strings.Contains(tum, beklenen) {
 			t.Errorf("rapor %q içermeli:\n%s", beklenen, tum)
 		}
@@ -601,7 +606,7 @@ func TestArsivCronAktar_RaporVeAlanBazli(t *testing.T) {
 		t.Fatalf("ek alan çağrısı: %+v", cagrilar)
 	}
 	tum2 := strings.Join(s2.Uyarilar, "\n")
-	if !strings.Contains(tum2, "Cron: 1 satır taşındı") || strings.Contains(tum2, "sudo") || strings.Contains(tum2, "@reboot") {
+	if !strings.Contains(tum2, "Cron: 1 satır taşındı") || strings.Contains(tum2, "sudo") || strings.Contains(tum2, "@reboot") || strings.Contains(tum2, "birden çok alan") {
 		t.Errorf("ikinci kalem raporu:\n%s", tum2)
 	}
 	// Satırı olmayan alan: çağrı yok, uyarı yok.
@@ -712,9 +717,14 @@ func TestArsivIsHazirla_KapsamParmakIziVeCron(t *testing.T) {
 	// Dosya keşiften sonra değişti.
 	gelecek := time.Now().Add(2 * time.Hour)
 	_ = os.Chtimes(o.dosya, gelecek, gelecek)
+	arsivAc = func(context.Context, string, arsiv.Secenek) (*arsiv.Arsiv, *arsiv.Manifest, error) {
+		t.Error("dosya değişmişken arşiv AÇILMAMALI (saatler süren okuma boşa gider)")
+		return nil, nil, errors.New("açılmamalıydı")
+	}
 	if err := h.arsivIsHazirla(ctx, Kapsam{}, k("arsiv-cpanel"), Ayarlar{}, hesap("ornek.com")); !errors.Is(err, errArsivDegisti) {
 		t.Errorf("parmak izi: %v", err)
 	}
+	arsivAc = eskiAc
 	// Cron: seçilmeyen alana düşen satırlar ortak redlere eklenir (ek.net'e ait satırlı arşiv).
 	ek := filepath.Join(o.kok, "ek.tar.gz")
 	m := "cpmove-u/"
