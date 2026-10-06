@@ -165,7 +165,7 @@ func TestCronCevir_YolYeniden(t *testing.T) {
 	}
 	for _, k := range []string{
 		"php ~/x.php", "php $HOME/x.php", "php /home/c_yeni/x.php", "ls /home/$USER/x", "ls /home/${USER}/x",
-		"ls /var/www/home/baska/x", "ls /srv/home/abc/x",
+		"ls /var/www/home/baska/x", "ls /srv/home/abc/x", "ls /srv//home/baska/x",
 	} {
 		g, red, _ := tCevir("0 1 * * * " + k)
 		if len(red) != 0 || len(g) != 1 {
