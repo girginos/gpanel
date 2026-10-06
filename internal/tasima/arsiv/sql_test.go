@@ -96,6 +96,7 @@ func TestSQL_Reddedilenler(t *testing.T) {
 		{"sql-kipi-ansi", "SET sql_mode='ANSI';\n", KuralSQLKipi},
 		{"sql-kipi-birleşik-dizgi", "SET sql_mode='NO_BACK' 'SLASH_ESCAPES';\n", KuralSQLKipi},
 		{"sql-kipi-işlev", "SET sql_mode=CONCAT('NO_BACK','SLASH_ESCAPES');\n", KuralSQLKipi},
+		{"sql-kipi-işlev-dizgisiz", "SET sql_mode=CHAR(78,79,95,66,65,67,75,83,76,65,83,72,95,69,83,67,65,80,69,83);\n", KuralSQLKipi},
 		{"sql-kipi-onaltılık", "SET sql_mode=0x4e4f5f4241434b534c4153485f45534341504553;\n", KuralSQLKipi},
 		{"sql-kipi-onaltılık-x", "SET sql_mode=x'4e4f';\n", KuralSQLKipi},
 		{"sql-kipi-alt-sorgu", "SET @@sql_mode=(SELECT 1);\n", KuralSQLKipi},
