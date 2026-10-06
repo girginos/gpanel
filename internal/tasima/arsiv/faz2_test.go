@@ -26,6 +26,9 @@ func TestProfiller_Tavanlar(t *testing.T) {
 	if yuk.Sinirlar.UyeSayisi >= yol.Sinirlar.UyeSayisi || yuk.Sinirlar.AdBayt > yol.Sinirlar.AdBayt || yuk.DumpSinir > yol.DumpSinir {
 		t.Fatalf("yükleme profili yolunkinden gevşek olamaz: %+v / %+v", yuk, yol)
 	}
+	if yol.DumpSinir != 64<<30 || yuk.DumpSinir != 32<<30 {
+		t.Errorf("döküm sınırları: yol=%d yükleme=%d", yol.DumpSinir, yuk.DumpSinir)
+	}
 	// 🔴 Bomba koruması profillerde AÇIK kalır: sıfır = varsayılan (500×, 512 MiB eşik), üst veri 4 MiB.
 	for ad, s := range map[string]Sinirlar{"yol": yol.Sinirlar.tamamla(), "yukleme": yuk.Sinirlar.tamamla()} {
 		if s.BombaOrani != 500 || s.BombaEsik != 512<<20 || s.UstVeriBayt != maxUstVeri || s.BagSayisi != varsayilanBagSayi {
