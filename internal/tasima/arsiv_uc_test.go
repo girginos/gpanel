@@ -766,8 +766,8 @@ func TestArsivBaslat_KokKurallari(t *testing.T) {
 	// Ret yolları (hiçbiri iş açmaz).
 	g := temel()
 	delete(g, "oturum_id")
-	if kod, _ := baslat(g); kod != 400 {
-		t.Errorf("oturum_id'siz: %d", kod)
+	if kod, gv := baslat(g); kod != 400 || !strings.Contains(gv, "oturum_id zorunlu") {
+		t.Errorf("oturum_id'siz: %d %s", kod, gv)
 	}
 	g = temel()
 	g["oturum_id"] = 999999
@@ -793,8 +793,8 @@ func TestArsivBaslat_KokKurallari(t *testing.T) {
 	}
 	g = temel()
 	g["secilen"] = []map[string]any{}
-	if kod, _ := baslat(g); kod != 400 {
-		t.Errorf("boş seçim: %d", kod)
+	if kod, gv := baslat(g); kod != 400 || !strings.Contains(gv, "secilmedi") {
+		t.Errorf("boş seçim: %d %s", kod, gv)
 	}
 	g = temel()
 	çok := make([]map[string]any, 501)
@@ -802,8 +802,8 @@ func TestArsivBaslat_KokKurallari(t *testing.T) {
 		çok[i] = map[string]any{"alan_adi": fmt.Sprintf("s%d.example", i)}
 	}
 	g["secilen"] = çok
-	if kod, _ := baslat(g); kod != 400 {
-		t.Errorf("501 site: %d", kod)
+	if kod, gv := baslat(g); kod != 400 || !strings.Contains(gv, "en fazla 500") {
+		t.Errorf("501 site: %d %s", kod, gv)
 	}
 	g = temel()
 	g["tip"] = "plesk"
