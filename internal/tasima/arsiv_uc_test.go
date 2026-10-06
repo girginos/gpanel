@@ -8,6 +8,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -671,6 +672,19 @@ func TestArsivKesif_AkisVeKapsam(t *testing.T) {
 	if _, y := o.kesfet(t, "kok", map[string]any{"tip": "arsiv-directadmin", "yol": o.dosya}); y["durum"] != "hata" || !strings.Contains(fmt.Sprint(y["hata"]), "cPanel") {
 		t.Errorf("yanlış tür: %+v", y)
 	}
+	// Okuma SIRASINDA dosya değişirse (parmak izi) sonuç güvenilmez → 'hata'.
+	eskiAc := arsivAc
+	arsivAc = func(ctx context.Context, yol string, s arsiv.Secenek) (*arsiv.Arsiv, *arsiv.Manifest, error) {
+		g := time.Now().Add(5 * time.Hour)
+		_ = os.Chtimes(yol, g, g)
+		return eskiAc(ctx, yol, s)
+	}
+	_, yd := o.kesfet(t, "kok", map[string]any{"tip": "arsiv-cpanel", "yol": o.dosya})
+	arsivAc = eskiAc
+	if yd["durum"] != "hata" || !strings.Contains(fmt.Sprint(yd["hata"]), "değişti") {
+		t.Errorf("okuma sırasında değişen dosya: %+v", yd)
+	}
+	_ = os.Chtimes(o.dosya, time.Now(), time.Now())
 	// Bozuk dosya (tar.gz değil).
 	bozuk := filepath.Join(o.kok, "bozuk.tar.gz")
 	_ = os.WriteFile(bozuk, bytes.Repeat([]byte("Z"), 4096), 0o644)
