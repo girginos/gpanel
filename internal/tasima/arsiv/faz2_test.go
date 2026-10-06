@@ -152,6 +152,7 @@ func postaUyeler() []uyeT {
 		{ad: p + "info/sieve/aktif.sieve", veri: "redirect"},
 		dizin(p + "evil/"), {ad: p + "evil/cur/x", veri: "baska-kutu"},
 		{ad: p + "info/baglanti", tur: tar.TypeSymlink, hedef: "../evil"},
+		{ad: p + "info/sabit", tur: tar.TypeLink, hedef: p + "info/cur/1:2,S"},
 		{ad: p + "info/suid", veri: "x", mod: 0o6755},
 	}
 }
@@ -206,7 +207,7 @@ func TestCikarDizin_PostaSuzgeciVeKimlik(t *testing.T) {
 			t.Errorf("%s verilen kullanıcıya ait değil (uid %d)", rel, st.Uid)
 		}
 	}
-	for _, yok := range []string{"info/dovecot-uidlist", "info/sieve", "evil", "info/baglanti"} {
+	for _, yok := range []string{"info/dovecot-uidlist", "info/sieve", "evil", "info/baglanti", "info/sabit"} {
 		if _, err := os.Lstat(filepath.Join(hedef, yok)); err == nil {
 			t.Errorf("süzülmesi gereken %q yazıldı", yok)
 		}
