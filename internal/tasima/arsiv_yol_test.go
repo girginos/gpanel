@@ -101,6 +101,9 @@ func TestArsivYolDogrula(t *testing.T) {
 	if _, err := arsivYolDogrula(o.dizin+"/../yedek/cpmove-u.tar.gz", kokler, 1<<20); err == nil || !strings.Contains(err.Error(), "temiz") {
 		t.Errorf("temiz olmayan yol 'temiz' kapısından reddedilmeli: %v", err)
 	}
+	if _, err := arsivYolDogrula(o.kok, kokler, 1<<20); err == nil || !strings.Contains(err.Error(), "izinli dizin kökü altında değil") {
+		t.Errorf("kökün kendisi 'kök altında değil' kapısından reddedilmeli: %v", err)
+	}
 	// Üst dizin zincirinde (izinli kökün ÜSTÜNDE) sembolik bağ: kökün kendisi gerçek dizin görünse de ret.
 	gercekUst := t.TempDir()
 	_ = os.Chmod(gercekUst, 0o755)
