@@ -49,6 +49,7 @@ POST /api/v1/domains/{id}/dns/toplu-durum  dns:yaz
 POST /api/v1/domains/{id}/dns/toplu-sil  dns:yaz
 POST /api/v1/domains/{id}/ssl/dns-yenile  ssl:yaz
 POST /api/v1/domains/{id}/ssl/issue  ssl:yaz
+POST /api/v1/domains/{id}/sso  sso:yaz
 POST /api/v1/plans  plan:yaz
 POST /api/v1/reseller-plans  bayi:yaz
 POST /api/v1/resellers  bayi:yaz

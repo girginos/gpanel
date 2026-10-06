@@ -96,7 +96,7 @@ func TestAnahtarIzinTablosuEnvanterde(t *testing.T) {
 }
 
 // kimlikRe: adı jeton/oturum/kimlik/kimlik bilgisi çağrıştıran rotalar.
-var kimlikRe = regexp.MustCompile(`(?i)(login|giris|adina|oturum|token|parola|password|2fa|totp|api-anahtar|/me$|/me/|anahtar|secret|sifre|kimlik|pma|redeem|session|eklenti/\{ad\}/\*)`)
+var kimlikRe = regexp.MustCompile(`(?i)(login|giris|adina|oturum|token|parola|password|2fa|totp|api-anahtar|/me$|/me/|anahtar|secret|sifre|kimlik|pma|redeem|session|/sso|eklenti/\{ad\}/\*)`)
 
 func TestKimlikUclariSiniflandirildi(t *testing.T) {
 	env := rotaEnvanteri(t)

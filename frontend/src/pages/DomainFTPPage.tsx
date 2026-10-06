@@ -15,6 +15,8 @@ import EmptyState from '@/components/EmptyState'
 import FtpKlasorSecici from '@/components/FtpKlasorSecici'
 import { useToast } from '@/components/Toast'
 import { parolaUret, panoyaKopyala } from '@/lib/parola'
+import SsoParolaNotu from '@/components/SsoParolaNotu'
+import { ssoOturum } from '@/store/auth'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string; ftp_host: string; ftp_user: string }
 type EkHesap = { kullanici: string; ek: string; dizin: string; izin: string; durum: 'aktif' | 'askida'; etkin: boolean; olusturma: string }
@@ -369,10 +371,12 @@ export default function DomainFTPPage() {
 
           <div className="mt-5 border-t border-slate-200 pt-5 dark:border-dark-600">
             <h3 className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">{cevir("Parola sıfırlama")}</h3>
+            {ssoOturum() ? <SsoParolaNotu /> : <>
             <ParolaAlani deger={ozelPw} onDeger={setOzelPw} goster={anaGoster} onGoster={setAnaGoster} onKopya={kopyala} yer={cevir("Yeni FTP parolası girin")} />
             <div className="mt-3 flex justify-end">
               <Button onClick={anaParolaSifirla} yukleniyor={anaIsleniyor} disabled={!ozelPw} color="primary" ikon={I.disket}>{cevir("Parolayı ayarla")}</Button>
             </div>
+            </>}
             <p className="mt-3 text-xs text-slate-500 dark:text-dark-300">{cevir("FTP bağlantısı şifrelenmez; şifrelemek için SFTP (port 22) kullanın.")}</p>
           </div>
         </section>

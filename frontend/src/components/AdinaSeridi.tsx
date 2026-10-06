@@ -14,14 +14,15 @@ export default function AdinaSeridi() {
   const [askida, setAskida] = useState(false)
   const did = b?.domainID
   useEffect(() => {
-    if (!did) return
+    if (!did || b?.sso) return
     let iptal = false
     api.get<{ askida?: boolean }>(`/domains/${did}`)
       .then((r) => { if (!iptal) setAskida(!!r.data?.askida) })
       .catch(() => { /* şerit için kritik değil */ })
     return () => { iptal = true }
-  }, [did])
-  if (!b) return null
+  }, [did, b?.sso])
+  // SSO (WHMCS tek tık giriş): giren gerçek müşteridir → bayi/impersonation şeridi YOK.
+  if (!b || b.sso) return null
   return (
     <div role="status" aria-live="polite"
       className="border-b border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-500/40 dark:bg-amber-950 dark:text-amber-100">

@@ -43,6 +43,7 @@ function kullanimOrnekleri(taban: string, kimlik: string): { baslik: string; kod
     { baslik: 'Hosting hesaplarını listele', kod: `curl -s ${taban}/domains \\\n  ${h}` },
     { baslik: 'Hostingin ana FTP parolasını değiştir (FTP parolası izni)', kod: put('/domains/{id}/ftp/password') },
     { baslik: 'FTP hesabının parolasını değiştir (FTP parolası izni)', kod: put('/domains/{id}/ftp-accounts/{kullanici}/password') },
+    { baslik: 'Müşteriyi panele girdir — tek kullanımlık bağlantı (sso izni)', kod: `curl -s -X POST ${taban}/domains/{id}/sso \\\n  ${h}` },
     { baslik: 'Veritabanı kullanıcısının parolasını değiştir (DB parolası izni)', kod: put('/domains/{id}/databases/users/{kullanici}/password') },
   ]
 }
@@ -274,7 +275,7 @@ export default function ApiAnahtarlariPage() {
           {cevir('Parola uçlarında gövde boş bırakılırsa ("password" gönderilmezse) sunucu güçlü bir parola üretir ve yanıtta yalnız bir kez döndürür. FTP ve veritabanı parolaları birbirinden bağımsızdır; biri değişince öteki değişmez.')}
         </p>
         <UyariKutusu ton="bilgi" kucuk className="mt-4">
-          {cevir('Anahtar giriş, parola/2FA değişikliği, müşteri adına oturum, phpMyAdmin oturumu ve anahtar yönetimi gibi oturum açan ya da kimlik değiştiren uçlara hiçbir izinle erişemez.')}
+          {cevir('Anahtar giriş, parola/2FA değişikliği, phpMyAdmin oturumu ve anahtar yönetimi gibi oturum açan ya da kimlik değiştiren uçlara hiçbir izinle erişemez. Tek istisna: "Müşteri paneline tek tık giriş" izni (60 sn geçerli, tek kullanımlık bağlantı; müşteri parolası değiştirilemez).')}
           {' '}{cevir('Bayi parolası sıfırlandığında ya da bayi silindiğinde o bayinin tüm anahtarları iptal edilir. Bayi askıya alındığında anahtarları iptal edilmez, askıda kalır; bayi askıdan alınınca yeniden çalışır.')}
         </UyariKutusu>
       </section>
