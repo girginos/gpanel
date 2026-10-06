@@ -18,7 +18,7 @@ type Durum = { arac_var: boolean; calisiyor: boolean; durum: string }
 type LogYanit = { log: string; calisiyor: boolean; durum: string }
 type SurumDurum = {
   acik: boolean; mevcut: string; son: string; guncelleme_var: boolean
-  duyuru: string; kritik: boolean; son_kontrol?: string; hata: string
+  kurulu_yeni?: boolean; duyuru: string; kritik: boolean; son_kontrol?: string; hata: string
 }
 
 // Log metninden bitiş sonucunu çıkarır: 'tamam' | 'hata' | null (henüz bitmedi).
@@ -29,7 +29,7 @@ const CMP_EN: Record<string, string> = {
   "güncelleme başlatılamadı": "update could not be started",
   "Panel Güncellemesi": "Panel Update",
   "Sunucu": "Server",
-  "Paneli GitHub'daki son sürüme günceller. Veriler (env, veritabanı, siteler) korunur; yeni sürüm sağlıklı başlamazsa otomatik geri alınır.": "Updates the panel to the latest version on GitHub. Data (env, database, sites) is preserved; if the new version does not start healthy it is automatically rolled back.",
+  "Paneli yayınlanmış son sürüme günceller. Veriler (env, veritabanı, siteler) korunur; yeni sürüm sağlıklı başlamazsa otomatik geri alınır.": "Updates the panel to the latest published version. Data (env, database, sites) is preserved; if the new version does not start healthy it is automatically rolled back.",
   " Güncelleme aracı sunucuda yok — ilk çalıştırmada otomatik indirilecek.": " The update tool is not on the server — it will be downloaded automatically on first run.",
   "Kritik güvenlik güncellemesi": "Critical security update",
   "Yeni sürüm mevcut": "New version available",
@@ -47,6 +47,8 @@ const CMP_EN: Record<string, string> = {
   "Başlatılıyor…": "Starting…",
   "Evet, güncelle": "Yes, update",
   "Vazgeç": "Cancel",
+  "Kurulu sürüm ({kurulu}) yayındaki sürümden ({yayin}) yeni — güncelleme gerekmiyor": "Installed version ({kurulu}) is newer than the published version ({yayin}) — no update needed",
+  "Kurulu sürüm yayındakinden yeni; güncelleme geri dönüş kapısınca reddedilebilir. Yine de denensin mi?": "The installed version is newer than the published one; the update may be refused by the downgrade guard. Try anyway?",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -154,7 +156,7 @@ export default function PanelGuncelleme() {
             <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">{cevir("Sunucu")}</span>
           </div>
           <div className="text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-            {cevir("Paneli GitHub'daki son sürüme günceller. Veriler (env, veritabanı, siteler) korunur; yeni sürüm sağlıklı başlamazsa otomatik geri alınır.")}
+            {cevir("Paneli yayınlanmış son sürüme günceller. Veriler (env, veritabanı, siteler) korunur; yeni sürüm sağlıklı başlamazsa otomatik geri alınır.")}
             {durum && !durum.arac_var && cevir(" Güncelleme aracı sunucuda yok — ilk çalıştırmada otomatik indirilecek.")}
           </div>
 
@@ -165,7 +167,10 @@ export default function PanelGuncelleme() {
               {surum.duyuru && <span className="text-xs">{surum.duyuru}</span>}
             </UyariKutusu>
           )}
-          {surum && surum.acik && !surum.guncelleme_var && surum.son && (
+          {surum && surum.acik && surum.kurulu_yeni && (
+            <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300"><Ikon d={I.bilgi} className="size-3.5 shrink-0" />{cevir("Kurulu sürüm ({kurulu}) yayındaki sürümden ({yayin}) yeni — güncelleme gerekmiyor").replace('{kurulu}', surum.mevcut).replace('{yayin}', surum.son)}</div>
+          )}
+          {surum && surum.acik && !surum.guncelleme_var && !surum.kurulu_yeni && surum.son && (
             <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300"><Ikon d={I.onay} className="size-3.5 shrink-0" />{cevir("Panel güncel")} ({surum.mevcut})</div>
           )}
           {surum && !surum.acik && (
@@ -206,7 +211,7 @@ export default function PanelGuncelleme() {
               </Button>
             ) : (
               <>
-                <span className="text-xs text-slate-600 dark:text-slate-300">{cevir("Panel güncellenecek ve servis yeniden başlayacak. Onaylıyor musunuz?")}</span>
+                <span className="text-xs text-slate-600 dark:text-slate-300">{surum?.kurulu_yeni ? cevir("Kurulu sürüm yayındakinden yeni; güncelleme geri dönüş kapısınca reddedilebilir. Yine de denensin mi?") : cevir("Panel güncellenecek ve servis yeniden başlayacak. Onaylıyor musunuz?")}</span>
                 <Button color="primary" boyut="sm" ikon={I.onay} onClick={baslat} yukleniyor={baslatiliyor}>
                   {baslatiliyor ? cevir("Başlatılıyor…") : cevir("Evet, güncelle")}
                 </Button>
