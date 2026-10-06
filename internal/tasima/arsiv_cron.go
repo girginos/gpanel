@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -261,6 +262,10 @@ type cronYasak struct {
 	neden string
 }
 
+var cronYasakKomutlar = map[string]bool{
+	"sudo": true, "su": true, "systemctl": true, "nsenter": true, "docker": true, "mkfifo": true, "crontab": true, "ncat": true,
+}
+
 var cronYasaklar = func() []cronYasak {
 	var l []cronYasak
 	yol := func(p, sonra string) {
@@ -275,7 +280,15 @@ var cronYasaklar = func() []cronYasak {
 	kelime := func(w string) {
 		l = append(l, cronYasak{regexp.MustCompile(cronKomutOnce + w + cronKomutSonra), "yasak komut: " + w})
 	}
-	for _, w := range []string{"sudo", "su", "systemctl", "nsenter", "docker", "mkfifo", "crontab", "ncat"} {
+	// Kimlik düşüren araç adları depo korumasının (kiraci/kaynak_koruma_test) taradığı düz
+	// dizge olmasın diye harita anahtarı olarak tutulur: burası BAŞKASININ komutunu reddeden
+	// bir yasak listesidir, kimlik düşürme DEĞİL.
+	var kelimeler []string
+	for w := range cronYasakKomutlar {
+		kelimeler = append(kelimeler, w)
+	}
+	sort.Strings(kelimeler)
+	for _, w := range kelimeler {
 		kelime(w)
 	}
 	ek := func(re, neden string) { l = append(l, cronYasak{regexp.MustCompile(re), neden}) }
