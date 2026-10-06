@@ -392,3 +392,30 @@ func TestSSO_AdresCozulemezse503_KodUretilmez(t *testing.T) {
 	}
 	_ = fmt.Sprint
 }
+
+// Giris yanıtı SSO bayrağını taşır (ön yüz şeridi/dönüş düğmesini buna göre gizler);
+// bayinin olağan "panele gir" akışında false kalır.
+func TestSSO_GirisYanitiBayragiTasir(t *testing.T) {
+	db, h := ssoKurulum(t)
+	k := ssoAnahtar(t, db, bayiA, apianahtar.RolBayi, "W", "sso:yaz")
+	kod, _ := ssoKod(t, ssoIstek(t, h, "/api/v1/domains/42/sso", k, ""))
+	b, _ := json.Marshal(map[string]string{"kod": kod})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/musteri/adina-giris", bytes.NewReader(b)))
+	var y struct {
+		SSO bool `json:"sso"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &y)
+	if rec.Code != 200 || !y.SSO {
+		t.Fatalf("SSO girişi yanıtında sso=true beklenir: %d %s", rec.Code, rec.Body.String())
+	}
+	// Olağan adına-oturum (bayi): sso=false.
+	adh := adRouter(db)
+	_, k2 := kodAl(t, adh, bayiTok(t, bayiA), domA)
+	rec = adIstek(t, adh, http.MethodPost, "/musteri/adina-giris", "", map[string]string{"kod": k2})
+	y.SSO = true
+	_ = json.Unmarshal(rec.Body.Bytes(), &y)
+	if rec.Code != 200 || y.SSO {
+		t.Fatalf("olağan adına-oturumda sso=false beklenir: %d %s", rec.Code, rec.Body.String())
+	}
+}

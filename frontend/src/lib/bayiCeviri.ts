@@ -111,6 +111,8 @@ export const BAYI_EN: Record<string, string> = {
   'Hesap askıda': 'Account suspended',
   'Bayi paneline dön': 'Back to reseller panel',
   'Yönetim paneline dön': 'Back to admin panel',
+  'Giriş sayfasına git': 'Go to the sign-in page',
+  'Parolanızı müşteri alanınızdan değiştirin': 'Change your password from your client area',
 }
 
 export const bayiCevir = (dil: string) => (tr: string): string => (dil === 'en' ? (BAYI_EN[tr] || ORTAK_EN[tr] || tr) : tr)

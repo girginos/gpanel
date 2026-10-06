@@ -64,6 +64,11 @@ export function adinaCik(): void {
     } catch { /* yoksay */ }
   }
   useAuth.getState().cikis()
+  if (b?.sso) {
+    // WHMCS tek tık girişi: olağan müşteri çıkışı — müşteri giriş sayfasına.
+    window.location.assign('/cp/giris')
+    return
+  }
   if (b?.sekme) {
     // Script'in açtığı sekme kapatılabilir; tarayıcı izin vermezse bayi paneline gidilir.
     window.close()

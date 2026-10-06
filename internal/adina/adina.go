@@ -271,6 +271,7 @@ func (h *Handlers) Giris(w http.ResponseWriter, r *http.Request) {
 		"domain_id": k.domainID,
 		"alan_adi":  k.alanAdi,
 		"kullanici": k.kullanici,
+		"sso":       k.sso,
 		"adina": map[string]any{
 			"aktor": k.aktorAd,
 			"rol":   k.aktorRol,

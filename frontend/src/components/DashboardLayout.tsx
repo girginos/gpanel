@@ -22,7 +22,7 @@ import AdinaSeridi from './AdinaSeridi'
 import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
 import { musteriMi, rolAnaSayfa, useRol } from '@/lib/rol'
-import { adinaBilgi } from '@/store/auth'
+import { adinaBilgi, ssoOturum } from '@/store/auth'
 import { aracCevir, yolunAraci } from '@/components/musteri-ana/araclar'
 
 type NavItem = { to: string; etiket: string; ikon: string ; sayac?: string; rozet?: string }
@@ -187,7 +187,8 @@ export default function DashboardLayout() {
   const isMusteri = musteriMi(rol)
   const isReseller = rol === 'reseller'
   // Müşteri ADINA oturum (bayi/yönetici "panele gir"; sekmeye özel, bkz. store/auth).
-  const adinaOturum = isMusteri && adinaBilgi() !== null
+  // SSO (WHMCS) oturumunda şerit YOK: giren gerçek müşteri.
+  const adinaOturum = isMusteri && adinaBilgi() !== null && !ssoOturum()
   // Müşteride kenar çubuğu (ve mobil çekmecesi) çizilmez: araçlar ana sayfada.
   const kenarCubugu = !isMusteri
   // Logo hedefi rolün ana sayfası (müşteri → kendi ana sayfası).

@@ -13,6 +13,8 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, Badge, Card } from '@/components/ui'
 import Modal from '@/components/Modal'
+import SsoParolaNotu from '@/components/SsoParolaNotu'
+import { ssoOturum } from '@/store/auth'
 
 
 const CONN_EN: Record<string, string> = {
@@ -226,7 +228,15 @@ function Sat({ e, d, mono, onKopya, kopya }: { e: string; d: string; mono?: bool
   )
 }
 
-function Parola({ e, onAc }: { e: string; id: string; tip: string; onAc: () => void }) {
+function Parola({ e, tip, onAc }: { e: string; id: string; tip: string; onAc: () => void }) {
+  // SSO (WHMCS) oturumunda FTP parolası bu panelden değişmez: form yerine açıklama.
+  if (tip === 'ftp' && ssoOturum()) {
+    return (
+      <div className="py-1.5 border-b border-slate-100 dark:border-dark-600 last:border-0">
+        <SsoParolaNotu />
+      </div>
+    )
+  }
   return (
     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-dark-600 last:border-0">
       <dt className="text-slate-500 dark:text-slate-500 text-xs uppercase tracking-wider">{e}</dt>

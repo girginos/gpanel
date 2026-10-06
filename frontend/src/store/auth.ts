@@ -47,6 +47,10 @@ export type AdinaBilgi = {
   don: string
   // Yeni sekmede açıldıysa "dön" sekmeyi kapatır (bayi paneli opener sekmede açık kalır).
   sekme?: boolean
+  // sso: oturum API anahtarıyla (WHMCS müşteri tek tık girişi) açıldı — giren GERÇEK
+  // müşteridir: adına-oturum şeridi/"dön" düğmesi yok, çıkış olağan müşteri çıkışıdır,
+  // parola formu yerine açıklama gösterilir (sunucu kuralı: kimlik işlemi 403).
+  sso?: boolean
 }
 
 function adinaModu(): boolean {
@@ -69,6 +73,11 @@ export function adinaBilgi(): AdinaBilgi | null {
   }
 }
 
+// ssoOturum: bu sekmenin oturumu API anahtarıyla başlatılmış müşteri girişi mi?
+export function ssoOturum(): boolean {
+  return adinaBilgi()?.sso === true
+}
+
 // Süresi dolmuş/kapatılmış adına-oturumdan kalan dönüş adresi (tek kullanımlık).
 export function adinaDonusAl(): string | null {
   try {
@@ -84,7 +93,8 @@ function adinaTemizle(donusuSakla: boolean) {
   try {
     const b = adinaBilgi()
     for (const k of [KEY_TOKEN, KEY_USER, KEY_EXP, KEY_MUSTERI, KEY_MUSTERI_DOM, KEY_MUSTERI_ALAN, KEY_ADINA]) sessionStorage.removeItem(k)
-    if (donusuSakla && b?.don) sessionStorage.setItem(KEY_ADINA_DON, b.don)
+    // SSO oturumunun "dönülecek bayi paneli" YOKTUR: süre dolunca müşteri giriş formuna gider.
+    if (donusuSakla && b?.don && !b.sso) sessionStorage.setItem(KEY_ADINA_DON, b.don)
     else sessionStorage.removeItem(KEY_ADINA_DON)
   } catch { /* yoksay */ }
 }
@@ -193,6 +203,8 @@ export const useAuth = create<AuthState>((set, get) => ({
     // sessionStorage'a gider (localStorage'daki bayi oturumu korunur).
     try { sessionStorage.setItem(KEY_ADINA, JSON.stringify(bilgi)); sessionStorage.removeItem(KEY_ADINA_DON) } catch { /* yoksay */ }
     get().girisMusteri(token, bitis, domainID, alanAdi, kullaniciAdi)
+    // SSO: oturum düşünce müşteri formuna (/cp/giris) gidilsin (son-oturum izi; token DEĞİL).
+    if (bilgi.sso) { try { localStorage.setItem(KEY_SON_OTURUM, 'musteri') } catch { /* yoksay */ } }
   },
   cikis: () => {
     // Adına-oturum: yalnız bu sekmenin sessionStorage kopyası silinir; bayi oturumuna
