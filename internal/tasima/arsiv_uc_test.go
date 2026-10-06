@@ -323,10 +323,16 @@ func TestArsivKapi_BayiVarsayilanKapaliVeKokAnahtari(t *testing.T) {
 	if kod, _ := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/yukle", map[string]any{"ad": "c.tar.gz", "boyut": 1000}); kod != 403 {
 		t.Errorf("bayi_etkin kapandı ama bayi hâlâ yükleyebiliyor: %d", kod)
 	}
-	// Kaynak (etkin) kapanınca bayi_etkin açık olsa da kimse kullanamaz.
+	// Kaynak (etkin) kapanınca bayi_etkin açık olsa da kimse kullanamaz; sıradaki TÜM işleri iptal.
 	o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"bayi_etkin": true})
-	if kod, _ := o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"etkin": false}); kod != 200 {
-		t.Fatal("kapatılamadı")
+	o.exec(t, `UPDATE tasima_isleri SET durum='kuyrukta' WHERE kaynak_tip='arsiv-cpanel'`)
+	if kod, g := o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"etkin": false}); kod != 200 || !strings.Contains(g, `"iptal_edilen":2`) {
+		t.Fatalf("kapatılamadı: %d %s", kod, g)
+	}
+	var kalan int
+	_ = o.db.QueryRow(`SELECT COUNT(*) FROM tasima_isleri WHERE kaynak_tip='arsiv-cpanel' AND durum='kuyrukta'`).Scan(&kalan)
+	if kalan != 0 {
+		t.Errorf("kaynak kapanınca sıradaki iş kaldı: %d", kalan)
 	}
 	for _, kim := range []string{"kok", "bayi7"} {
 		if kod, _ := o.ist(t, kim, http.MethodPost, "/tasima/arsiv/yukle", map[string]any{"ad": "d.tar.gz", "boyut": 1000}); kod != 403 {
@@ -973,4 +979,96 @@ func TestArsivBaslat_BayiZorlamalari(t *testing.T) {
 	}
 	_ = io.Discard
 	_ = arsiv.YolTavan
+}
+
+// Kural: hazır dosya yolunun tavanı 500 GiB → 413 (seyrek dosyayla); bayi hız sınırı arşiv
+// uçlarında da uygulanır (10/dk) ve kökü sınırlamaz.
+func TestArsivKesif_YolTavaniVeHizSiniri(t *testing.T) {
+	o := arsivKur(t)
+	buyuk := filepath.Join(o.kok, "buyuk.tar.gz")
+	f, err := os.Create(buyuk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(500<<30 + 1); err != nil {
+		f.Close()
+		t.Skipf("seyrek dosya desteklenmiyor: %v", err)
+	}
+	f.Close()
+	_ = os.Chmod(buyuk, 0o644)
+	if kod, g := o.ist(t, "kok", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yol": buyuk}); kod != http.StatusRequestEntityTooLarge || !strings.Contains(g, "500 GiB") {
+		t.Errorf("500 GiB üstü: %d %s", kod, g)
+	}
+	if err := os.Truncate(buyuk, 500<<30); err != nil {
+		t.Fatal(err)
+	}
+	// Tam tavan dosya yol kapısından GEÇER (içerik bozuk olduğundan keşif 'hata' ile biter, 413 değil).
+	if kod, g := o.ist(t, "kok", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yol": buyuk}); kod != http.StatusAccepted {
+		t.Errorf("tam tavan dosya: %d %s", kod, g)
+	}
+	o.bayiAc(t, true)
+	o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"bayi_etkin": true})
+	hizSifirla()
+	for i := 1; i <= 12; i++ {
+		kod, _ := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/yukle", map[string]any{"ad": "a.tar.gz", "boyut": 100}) // 400: geçersiz boyut, hız sayılır
+		want := 400
+		if i > 10 {
+			want = http.StatusTooManyRequests
+		}
+		if kod != want {
+			t.Fatalf("istek %d: %d beklendi, gelen %d", i, want, kod)
+		}
+	}
+	if kod, _ := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": 1}); kod != http.StatusTooManyRequests {
+		t.Errorf("keşif uçları da aynı bayi sınırını paylaşmalı: %d", kod)
+	}
+	if kod, _ := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/baslat", map[string]any{"tip": "arsiv-cpanel", "oturum_id": 1}); kod != http.StatusTooManyRequests {
+		t.Errorf("başlat ucu da aynı bayi sınırını paylaşmalı: %d", kod)
+	}
+	for i := 0; i < 15; i++ {
+		if kod, _ := o.ist(t, "kok", http.MethodPost, "/tasima/arsiv/yukle", map[string]any{"ad": "a.tar.gz", "boyut": 100}); kod == http.StatusTooManyRequests {
+			t.Fatal("kök hız sınırına takılmamalı")
+		}
+	}
+}
+
+// Kural: keşif önkontrolü bayi disk havuzunu (açılmış boyut) hesaba katar; kök oturumu bayi
+// ile paylaşılmaz (kök bayinin oturumunu da okuyamaz).
+func TestArsivKesif_BayiOnkontrolVeKokOkuyamaz(t *testing.T) {
+	o := arsivKur(t)
+	o.bayiAc(t, true)
+	o.ist(t, "kok", http.MethodPut, "/tasima/kaynaklar/arsiv-cpanel", map[string]any{"bayi_etkin": true})
+	yid := o.yukle(t, "bayi7", cpmoveT(t))
+	// Havuz: 1 MiB limit, başka sitelerde 1 MiB kullanım → kalan 0; arşivin açılmış boyutu sığmaz.
+	o.exec(t, `UPDATE users SET max_disk_mb=1 WHERE id=7`)
+	o.exec(t, `UPDATE domains SET boyut_kb=1024 WHERE id=20`)
+	hizSifirla()
+	oturum, y := o.kesfet(t, "bayi7", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": yid})
+	ok := y["onkontrol"].(map[string]any)
+	if y["durum"] != "hazir" || ok["yeterli"] != false || ok["neden"] != errArsivKota.Error() {
+		t.Fatalf("bayi havuzu önkontrolü: %+v", y)
+	}
+	// Havuz serbest: yeterli.
+	o.exec(t, `UPDATE domains SET boyut_kb=0 WHERE id=20`)
+	hizSifirla()
+	oturum2, y2 := o.kesfet(t, "bayi7", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": yid})
+	if y2["onkontrol"].(map[string]any)["yeterli"] != true {
+		t.Errorf("havuz serbestken yeterli olmalı: %+v", y2["onkontrol"])
+	}
+	if kod, _ := o.ist(t, "kok", http.MethodGet, fmt.Sprintf("/tasima/arsiv/kesif/%d", oturum2), nil); kod != 404 {
+		t.Errorf("kök bayinin keşif oturumunu okudu: %d", kod)
+	}
+	if kod, _ := o.ist(t, "bayi7", http.MethodGet, fmt.Sprintf("/tasima/arsiv/kesif/%d", oturum), nil); kod != 404 {
+		t.Errorf("yenisiyle değiştirilen eski oturum duruyor: %d", kod)
+	}
+	// Disk önkontrolü (hedef boş alan) yetersiz: önkontrol kırmızı, neden sabit metin.
+	eski := diskBosAlan
+	diskBosAlan = func(string) (int64, error) { return 5, nil }
+	hizSifirla()
+	_, y3 := o.kesfet(t, "bayi7", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": yid})
+	diskBosAlan = eski
+	ok3 := y3["onkontrol"].(map[string]any)
+	if ok3["yeterli"] != false || ok3["neden"] != errArsivDisk.Error() {
+		t.Errorf("disk önkontrolü: %+v", ok3)
+	}
 }
