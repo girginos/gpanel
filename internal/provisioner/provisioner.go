@@ -2041,11 +2041,19 @@ func GuvenliAltDizin(alt string) (string, bool) {
 // symlink) ile ayni-sahipli kacis da kapali. Cross-tenant ayrica web-sunucu
 // disable_symlinks if_not_owner ile bloklu. Laravel-guvenli: public gercek dizindir.
 func WebRootMutlak(sk, altDizin string) (string, error) {
+	return WebRootMutlakTaban(publicHtml(sk), altDizin)
+}
+
+// WebRootMutlakTaban: WebRootMutlak'in taban-parametreli TEK gercek uygulamasi. Ana alan
+// icin taban /home/<sk>/public_html, ek alan icin <ev>/<sk>/domains/<alan>/public_html;
+// kurallar (.. / mutlak yol / garip karakter / leaf+ara symlink / var olan dizin)
+// ikisinde de BIREBIR ayni koddan gecer.
+func WebRootMutlakTaban(base, altDizin string) (string, error) {
 	temiz, ok := GuvenliAltDizin(altDizin)
 	if !ok {
 		return "", fmt.Errorf("gecersiz dizin adi (yalniz harf/rakam/._- ve alt-klasor)")
 	}
-	base := publicHtml(sk)
+	base = filepath.Clean(base)
 	abs := filepath.Clean(filepath.Join(base, temiz))
 	if abs != base && !strings.HasPrefix(abs, base+"/") {
 		return "", fmt.Errorf("dizin public_html disina cikamaz")
@@ -2076,14 +2084,19 @@ func WebRootMutlak(sk, altDizin string) (string, error) {
 // public_html disiysa public_html'e duser (tampered-DB savunmasi — bozuk bir DB
 // degeri asla /etc gibi keyfi bir yolu sunamaz).
 func GuvenliWebRoot(sk, stored string) string {
-	base := publicHtml(sk)
+	return GuvenliWebRootTaban(publicHtml(sk), stored)
+}
+
+// GuvenliWebRootTaban: GuvenliWebRoot'un taban-parametreli uygulamasi (ek alan da kullanir).
+func GuvenliWebRootTaban(base, stored string) string {
+	base = filepath.Clean(base)
 	stored = strings.TrimSpace(stored)
 	if stored == "" {
 		return base
 	}
 	abs := filepath.Clean(stored)
 	if abs != base && !strings.HasPrefix(abs, base+"/") {
-		log.Printf("web_root guvensiz (%q) → public_html'e dusuldu (sk=%s)", stored, sk)
+		log.Printf("web_root guvensiz (%q) → tabana (%s) dusuldu", stored, base)
 		return base
 	}
 	return abs
@@ -2091,8 +2104,13 @@ func GuvenliWebRoot(sk, stored string) string {
 
 // AltDizinCoz: mutlak web_root'tan public_html'e gore relative alt dizini dondurur (UI).
 func AltDizinCoz(sk, stored string) string {
-	base := publicHtml(sk)
-	abs := GuvenliWebRoot(sk, stored)
+	return AltDizinCozTaban(publicHtml(sk), stored)
+}
+
+// AltDizinCozTaban: AltDizinCoz'un taban-parametreli uygulamasi.
+func AltDizinCozTaban(base, stored string) string {
+	base = filepath.Clean(base)
+	abs := GuvenliWebRootTaban(base, stored)
 	if abs == base {
 		return ""
 	}
@@ -2102,7 +2120,11 @@ func AltDizinCoz(sk, stored string) string {
 // AdayKokler: public_html icindeki (1 seviye) index.php/html iceren dizinleri dondurur
 // → UI'da dinamik secim listesi (Laravel'de "public" burada otomatik gorunur).
 func AdayKokler(sk string) []string {
-	base := publicHtml(sk)
+	return AdayKoklerTaban(publicHtml(sk))
+}
+
+// AdayKoklerTaban: AdayKokler'in taban-parametreli uygulamasi.
+func AdayKoklerTaban(base string) []string {
 	out := []string{}
 	ents, err := os.ReadDir(base)
 	if err != nil {

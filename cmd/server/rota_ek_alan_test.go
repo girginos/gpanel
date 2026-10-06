@@ -27,10 +27,10 @@ func TestEkAlanRotalari_MusteriScopeVeBagli(t *testing.T) {
 			satirlar = append(satirlar, s)
 		}
 	}
-	if len(satirlar) != 8 {
-		t.Fatalf("8 ek alan adı rotası bekleniyordu, bulunan %d", len(satirlar))
+	if len(satirlar) != 10 {
+		t.Fatalf("10 ek alan adı rotası bekleniyordu, bulunan %d", len(satirlar))
 	}
-	re := regexp.MustCompile(`r\.With\(middleware\.MusteriScope\)\.(Get|Post|Delete)\("/domains/\{id\}/ek-alan-adlari`)
+	re := regexp.MustCompile(`r\.With\(middleware\.MusteriScope\)\.(Get|Post|Put|Delete)\("/domains/\{id\}/ek-alan-adlari`)
 	for _, s := range satirlar {
 		if !re.MatchString(strings.TrimSpace(s)) {
 			t.Errorf("ek alan adı rotası MusteriScope arkasında değil: %s", strings.TrimSpace(s))
