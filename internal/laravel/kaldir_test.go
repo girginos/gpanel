@@ -33,6 +33,7 @@ var kaldirDurum struct {
 	webRoot  string // domains.web_root
 	execler  []string
 	execHata string // bu alt dizgiyi içeren Exec hata verir
+	demo     int64  // domains.is_demo
 }
 
 type kaldirSurucu struct{}
@@ -61,7 +62,7 @@ func (kaldirBag) QueryContext(_ context.Context, q string, _ []driver.NamedValue
 	case strings.Contains(q, "web_root") && strings.Contains(q, "FROM domains"):
 		return &sahteSatirlar{kolon: []string{"web_root"}, veri: [][]driver.Value{{kaldirDurum.webRoot}}}, nil
 	case strings.Contains(q, "FROM domains"):
-		return &sahteSatirlar{kolon: []string{"a", "b", "c"}, veri: [][]driver.Value{{"c_test", "8.3", int64(0)}}}, nil
+		return &sahteSatirlar{kolon: []string{"a", "b", "c"}, veri: [][]driver.Value{{"c_test", "8.3", kaldirDurum.demo}}}, nil
 	}
 	return &sahteSatirlar{kolon: []string{"x"}}, nil
 }
@@ -108,7 +109,7 @@ func kaldirKur(t *testing.T) *kaldirOrtam {
 	t.Cleanup(func() { cronDizini, belgekok.RerenderFn = eskiCron, eskiRR })
 	kaldirDurum.mu.Lock()
 	kaldirDurum.kayit, kaldirDurum.appRoot, kaldirDurum.durum = true, "public_html", "hazir"
-	kaldirDurum.webRoot, kaldirDurum.execler, kaldirDurum.execHata = "", nil, ""
+	kaldirDurum.webRoot, kaldirDurum.execler, kaldirDurum.execHata, kaldirDurum.demo = "", nil, "", 0
 	kaldirDurum.mu.Unlock()
 	dosyaYaz(t, o.cron, "* * * * * x\n", 0o644)
 	return o
@@ -224,5 +225,19 @@ func TestKaldirHandler_409IslemSurerken_404KayitYok(t *testing.T) {
 	kaldirDurum.kayit = false
 	if w := handlerIstegi(h.Kaldir, http.MethodDelete, ""); w.Code != http.StatusNotFound {
 		t.Fatalf("kayıt yoksa 404: %d", w.Code)
+	}
+}
+
+func TestKaldirHandler_Demo403_YanEtkisiz(t *testing.T) {
+	o := kaldirKur(t)
+	kaldirDurum.demo = 1
+	if w := handlerIstegi((&Handlers{DB: o.db}).Kaldir, http.MethodDelete, ""); w.Code != http.StatusForbidden {
+		t.Fatalf("demo 403: %d %s", w.Code, w.Body.String())
+	}
+	if len(kaldirExecler()) != 0 {
+		t.Fatal("yan etki olmamalı")
+	}
+	if _, err := os.Stat(o.cron); err != nil {
+		t.Fatal("cron'a dokunulmamalı")
 	}
 }
