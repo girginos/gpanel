@@ -51,6 +51,9 @@ type Handlers struct {
 	// ("https://host:port"). "" = ayrı müşteri kapısı yok (kapı modu kapalı) →
 	// arayüz aynı kökende kalır. main() kurar.
 	MusteriAdresi func(r *http.Request) (adres string, gerekli bool)
+	// SSOAdresi: API anahtarıyla müşteri girişi (sso.go) için müşteri paneli kök
+	// adresi ("https://host:port"); çözülemezse ("", false). main() kurar.
+	SSOAdresi func(r *http.Request) (adres string, ok bool)
 }
 
 type kodKaydi struct {
@@ -63,6 +66,10 @@ type kodKaydi struct {
 	aktorRol  string
 	aktorRID  int64
 	bitis     time.Time
+	// sso: kod API anahtarıyla (POST /domains/{id}/sso) üretildi; anahtarAd yalnız
+	// denetim ayrıntısı içindir (gizli değil).
+	sso       bool
+	anahtarAd string
 }
 
 var (
@@ -140,14 +147,7 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, kod, mesaj)
 		return
 	}
-	var alanAdi, kullanici string
-	var ftpID int64
-	err := h.DB.QueryRowContext(r.Context(),
-		`SELECT d.alan_adi, fa.id, fa.username FROM domains d
-		   JOIN ftp_accounts fa ON fa.domain_id = d.id
-		  WHERE d.id = ? AND fa.tur = 'ana'
-		  ORDER BY (fa.username = d.ftp_user) DESC, fa.id
-		  LIMIT 1`, id).Scan(&alanAdi, &ftpID, &kullanici)
+	alanAdi, ftpID, kullanici, err := h.anaFTP(r, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusConflict, "bu hostingin panel kullanıcısı yok")
 		return
@@ -191,6 +191,17 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// anaFTP: hostingin ana FTP hesabı (adına-oturumun müşteri kimliği).
+func (h *Handlers) anaFTP(r *http.Request, id int64) (alanAdi string, ftpID int64, kullanici string, err error) {
+	err = h.DB.QueryRowContext(r.Context(),
+		`SELECT d.alan_adi, fa.id, fa.username FROM domains d
+		   JOIN ftp_accounts fa ON fa.domain_id = d.id
+		  WHERE d.id = ? AND fa.tur = 'ana'
+		  ORDER BY (fa.username = d.ftp_user) DESC, fa.id
+		  LIMIT 1`, id).Scan(&alanAdi, &ftpID, &kullanici)
+	return
+}
+
 type girisReq struct {
 	Kod string `json:"kod"`
 }
@@ -228,6 +239,7 @@ func (h *Handlers) Giris(w http.ResponseWriter, r *http.Request) {
 		AktorAd:    k.aktorAd,
 		AktorRol:   k.aktorRol,
 		AktorRID:   k.aktorRID,
+		SSO:        k.sso,
 	}
 	tok, exp, err := auth.GenerateMusteri(h.Secret, mc, auth.AdinaOmurSn)
 	if err != nil {
@@ -247,7 +259,11 @@ func (h *Handlers) Giris(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kul := middleware.AdinaAktorAdi(k.aktorAd, k.domainID)
-	httpx.DenetimDomain(h.DB, r, k.aktorUID, kul, "musteri.adina_oturum", k.alanAdi, "müşteri adına oturum açıldı", k.domainID, true)
+	detay := "müşteri adına oturum açıldı"
+	if k.sso {
+		detay += " (API anahtarı: " + k.anahtarAd + ")"
+	}
+	httpx.DenetimDomain(h.DB, r, k.aktorUID, kul, "musteri.adina_oturum", k.alanAdi, detay, k.domainID, true)
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"token":     tok,

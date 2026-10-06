@@ -57,6 +57,10 @@ var Gruplar = []Grup{
 	// ile FTP parolasının alakası olmasın"). Varsayılan kapalı (her izin gibi).
 	{Ad: GrupFTPParola, Etiket: "FTP parolası değiştir", Aciklama: "Hosting hesabının FTP parolasını (ana ve ek FTP hesapları) değiştirme; veritabanı parolasına dokunmaz", Roller: []string{RolKok, RolBayi}, YalnizYaz: true},
 	{Ad: GrupDBParola, Etiket: "DB parolası değiştir", Aciklama: "Hosting veritabanı kullanıcısının parolasını değiştirme; FTP parolasına dokunmaz", Roller: []string{RolKok, RolBayi}, YalnizYaz: true},
+	// WHMCS müşteri tek tık girişi: kısa ömürlü, tek kullanımlık kod → müşteri paneli.
+	// Tek düzey ("sso:yaz"); varsayılan kapalı (her izin gibi). Müşteri parolasını
+	// DEĞİŞTİREMEZ (adına-oturum kuralları: AdinaYasak).
+	{Ad: GrupSSO, Etiket: "Müşteri paneline tek tık giriş", Aciklama: "Hosting müşterisini panele tek tıkla girdirme (60 sn geçerli, tek kullanımlık bağlantı); oturumda müşteri parolası değiştirilemez", Roller: []string{RolKok, RolBayi}, YalnizYaz: true},
 	{Ad: "plan", Etiket: "Hosting planları", Aciklama: "Hosting planlarını listeleme ve yönetme", Roller: []string{RolKok, RolBayi}},
 	{Ad: "dns", Etiket: "DNS", Aciklama: "Alan adı DNS kayıtları", Roller: []string{RolKok, RolBayi}},
 	{Ad: "veritabani", Etiket: "Veritabanları", Aciklama: "Veritabanı listeleme, oluşturma, silme", Roller: []string{RolKok, RolBayi}},
@@ -73,6 +77,8 @@ const p = "/api/v1"
 const (
 	GrupFTPParola = "ftp.parola"
 	GrupDBParola  = "db.parola"
+	// GrupSSO: müşteri paneline tek tık giriş (POST /domains/{id}/sso).
+	GrupSSO = "sso"
 	// grupEskiParola: D4 ilk sürümündeki birleşik "parola" izni (FTP + DB). Yeni
 	// anahtarda SEÇİLEMEZ; DB'de kalmış satır okunurken IzinleriGoc ile iki yeni
 	// izne açılır (eski anahtarın yetkisi daralmaz/genişlemez: ikisi de parola).
@@ -101,6 +107,8 @@ var Rotalar = map[string]Kural{
 	"PUT " + p + "/domains/{id}/ftp/password":                         {GrupFTPParola, Yaz},
 	"PUT " + p + "/domains/{id}/ftp-accounts/{kullanici}/password":    {GrupFTPParola, Yaz},
 	"PUT " + p + "/domains/{id}/databases/users/{kullanici}/password": {GrupDBParola, Yaz},
+	// sso (oturum kodu basan uç — KimlikBenzeriIzinli'de gerekçeli; ayrı izin ister)
+	"POST " + p + "/domains/{id}/sso": {GrupSSO, Yaz},
 	// plan
 	"GET " + p + "/plans":              {"plan", Oku},
 	"GET " + p + "/plans/{id}":         {"plan", Oku},
@@ -228,6 +236,7 @@ var KimlikBenzeriIzinli = map[string]string{
 	"PUT " + p + "/domains/{id}/ftp/password":                         "hosting hesabının ana FTP parolası (WHMCS ChangePassword) — anahtar sahibinin kimliği değil; ayrı 'ftp.parola' izni ister",
 	"PUT " + p + "/domains/{id}/ftp-accounts/{kullanici}/password":    "hosting hesabının FTP hesabı parolası — ayrı 'ftp.parola' izni ister",
 	"PUT " + p + "/domains/{id}/databases/users/{kullanici}/password": "hosting veritabanı kullanıcısı parolası — ayrı 'db.parola' izni ister; FTP'ye dokunmaz",
+	"POST " + p + "/domains/{id}/sso":                                 "WHMCS müşteri tek tık girişi: 60 sn, TEK KULLANIMLIK kod (adına-oturum tüketicisi; müşteri parolası değiştirilemez, askıda 409, denetimli, anahtar başına hız sınırı) — ayrı 'sso' izni ister, varsayılan kapalı",
 	"GET " + p + "/kapi/adres":                                        "yalnız yeni panel adresi döner, jeton basmaz",
 	"GET " + p + "/api-anahtari/ben":                                  "anahtarın kendi meta verisi (gizli/özet DÖNMEZ)",
 }

@@ -246,7 +246,7 @@ func main() {
 
 	musteriH := &musteri.Handlers{DB: d, Secret: cfg.JWTSecret}
 	// Müşteri ADINA panele giriş (bayi/yönetici "panele gir"): bkz. internal/adina.
-	adinaH := &adina.Handlers{DB: d, Secret: cfg.JWTSecret, MusteriAdresi: musteriKapiAdresi}
+	adinaH := &adina.Handlers{DB: d, Secret: cfg.JWTSecret, MusteriAdresi: musteriKapiAdresi, SSOAdresi: ssoMusteriAdresi}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
 	usersH := &users.Handlers{DB: d}
 	domainsH := &domains.Handlers{DB: d, IPv4: ipv4}
@@ -796,6 +796,9 @@ func main() {
 				r.With(middleware.SahipYonetim).Delete("/domains/{id}", domainsH.Delete)
 				// Müşteri paneline tek tık giriş (impersonation): bayi YALNIZ kendi domaini.
 				r.With(middleware.SahipYonetim).Post("/domains/{id}/adina-oturum", adinaH.Baslat)
+				// WHMCS müşteri tek tık girişi: YALNIZ API anahtarı (sso izni, varsayılan kapalı);
+				// kapsam (404) ve askı (409) uçta; kod 60 sn, tek kullanımlık (internal/adina/sso.go).
+				r.With(middleware.AdminVeyaReseller).Post("/domains/{id}/sso", adinaH.SSO)
 				// Toplu islemler (async + process bar): DNS reset / SSL / sahip / plan
 				r.With(middleware.AdminOnly).Post("/domains/toplu/is", topluH.Baslat)
 				r.With(middleware.AdminOnly).Get("/domains/toplu/is", topluH.Durum)

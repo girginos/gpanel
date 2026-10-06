@@ -120,6 +120,10 @@ type MusteriClaims struct {
 	AktorAd  string `json:"aad,omitempty"`
 	AktorRol string `json:"arol,omitempty"` // "admin" | "reseller"
 	AktorRID int64  `json:"arid,omitempty"` // bayi ise kendi kapsam anahtarı
+	// SSO: oturum API anahtarıyla (WHMCS müşteri tek tık girişi) başlatıldı. Bu
+	// oturumda müşteri askısı da kesicidir (adına-oturumdaki "askıdaki hesabı
+	// inceleme" ayrıcalığı yoktur: giren müşterinin kendisidir).
+	SSO bool `json:"sso,omitempty"`
 	jwt.RegisteredClaims
 }
 

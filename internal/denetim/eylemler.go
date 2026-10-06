@@ -39,6 +39,7 @@ var eylemKatalogu = map[string]EylemEtiket{
 	// Müşteri adına giriş (bayi/yönetici müşteri paneline girer)
 	"musteri.adina_kod": {TR: "Müşteri paneline giriş", EN: "Customer panel access", teknik: true,
 		gereksizNot: []string{"müşteri paneline giriş kodu üretildi"}},
+	"musteri.sso_kod": {TR: "API anahtarıyla müşteri girişi", EN: "Customer sign-in via API key"},
 	"musteri.adina_oturum": {TR: "Müşteri paneline girildi", EN: "Entered customer panel",
 		gereksizNot: []string{"müşteri adına oturum açıldı"}},
 	"musteri.adina_cikis": {TR: "Müşteri panelinden çıkıldı", EN: "Left customer panel",

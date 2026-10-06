@@ -25,6 +25,7 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kapi"
 	"girginospanel/internal/middleware"
+	"girginospanel/internal/panelhost"
 	"girginospanel/internal/portyonetim"
 	"girginospanel/internal/provisioner"
 )
@@ -413,4 +414,44 @@ func musteriKapiAdresi(r *http.Request) (string, bool) {
 		return "", true
 	}
 	return kapiAdresURL(r.Host, port), true
+}
+
+// ssoMusteriAdresi: API anahtarıyla müşteri girişinde (POST /domains/{id}/sso) dönen
+// URL'nin kök adresi. Port: kapı modunda müşteri kapısı, değilse panelin tek portu.
+// Host: isteğin geldiği ad; IP/localhost ise panel ana bilgisayar adı (panelhost)
+// ayarlıysa o (tarayıcıda geçerli sertifika için), yoksa isteğin host'u (sunucu IP'si).
+func ssoMusteriAdresi(r *http.Request) (string, bool) {
+	host := ssoHostAdi(r.Host)
+	if host == "" {
+		return "", false
+	}
+	if ip := net.ParseIP(host); ip != nil || host == "localhost" {
+		if ad := panelhost.DurumOku().Hostname; ad != "" {
+			host = ad
+		}
+	}
+	port := 0
+	if kapi.Istek(r) != "" {
+		a, err := kapi.Oku(kapi.AyarYolu)
+		if err != nil {
+			return "", false
+		}
+		if port = a.RolPortu(kapi.Musteri); port == 0 {
+			return "", false
+		}
+	} else if p, err := strconv.Atoi(panelhost.PanelPort()); err == nil {
+		port = p
+	}
+	if port <= 0 {
+		return "", false
+	}
+	return kapiAdresURL(host, port), true
+}
+
+// ssoHostAdi: Host başlığından portsuz, köşeli parantezsiz host adı.
+func ssoHostAdi(h string) string {
+	if hh, _, err := net.SplitHostPort(h); err == nil {
+		return hh
+	}
+	return strings.Trim(h, "[]")
 }

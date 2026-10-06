@@ -144,7 +144,21 @@ func adinaOturumGecerli(ctx context.Context, mc *auth.MusteriClaims) (int, strin
 		return kod, mesaj
 	}
 	// 2) Domain sahipliği + kök askısı — her istekte yeniden.
-	return AdinaDomainKarar(ctx, mc.AktorRol, mc.AktorRID, mc.DomainID)
+	if kod, mesaj := AdinaDomainKarar(ctx, mc.AktorRol, mc.AktorRID, mc.DomainID); kod != 0 {
+		return kod, mesaj
+	}
+	// 3) API anahtarıyla başlatılan müşteri girişi (SSO): hesap askıdaysa oturum
+	//    sürmez (olağan müşteri oturumuyla aynı davranış; kodlu 403 → askı sayfası).
+	if mc.SSO {
+		d, err := adinaDomainSorguFn(ctx, mc.DomainID)
+		if err != nil {
+			return http.StatusServiceUnavailable, "hesap durumu şu anda doğrulanamıyor, birazdan tekrar deneyin"
+		}
+		if d.askida {
+			return http.StatusForbidden, httpx.HesapAskidaMesaj
+		}
+	}
+	return 0, ""
 }
 
 // AdinaYasak: müşteri ADINA açılmış oturumda kimlik işlemlerini (müşteri parolası,
