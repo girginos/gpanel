@@ -17,6 +17,15 @@ import (
 	"testing"
 )
 
+func betikYolu(t *testing.T) string {
+	t.Helper()
+	p, err := filepath.Abs("../../assets/ops/girginospanel-repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestSecClamav_SahipAdlaBulunur_SabitUIDDegil(t *testing.T) {
 	rootGerek(t)
 	out, err := exec.Command("id", "-u", "clamupdate").Output()

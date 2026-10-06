@@ -627,6 +627,10 @@ SIEVEEOF
   fi
 }
 
+# Test kancası: GOSP_REPAIR_KUTUPHANE=1 ile `source` edilince yalnız fonksiyonlar
+# tanımlanır, hiçbir bölüm koşmaz (bkz. internal/opsbetik/clamav_test.go).
+if [ "${GOSP_REPAIR_KUTUPHANE:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
+
 # ================= ÇALIŞTIR =================
 say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
 sec_env_izin
