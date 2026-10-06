@@ -175,6 +175,8 @@ func (h *Handlers) apiFTPParola(w http.ResponseWriter, r *http.Request, kullanic
 		httpx.WriteError(w, http.StatusInternalServerError, "FTP parolası değiştirilemedi")
 		return
 	}
+	// Parola yazıldı: bu FTP hesabının AÇIK oturumları düşer (hata parolayı bozmaz).
+	h.ftpOturumlariDusur(r, uid, aktor, alan, kullanici, id)
 	// Ana FTP hesabı = hostingin Linux kullanıcısı: SSH açıksa aynı hesabın SSH
 	// parolası eşitlenir (FTP parolasının panel sözleşmesi). DB'ye DOKUNULMAZ.
 	if kullanici == sk && sshOn == 1 {

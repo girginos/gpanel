@@ -103,6 +103,8 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"ftp.ek_guncelle":  {TR: "Ek FTP hesabı güncellendi", EN: "Extra FTP account updated"},
 	"ftp.ek_parola":    {TR: "Ek FTP hesabının parolası değiştirildi", EN: "Extra FTP account password changed"},
 	"ftp.ek_sil":       {TR: "Ek FTP hesabı silindi", EN: "Extra FTP account deleted"},
+	// Parola değişince o hesabın açık FTP oturumları düşürülür; başarısızsa kayıt ok=false.
+	"ftp.oturum_dusur": {TR: "FTP açık oturumları sonlandırıldı", EN: "Open FTP sessions ended"},
 
 	// Bayi
 	"bayi.olustur":    {TR: "Bayi oluşturuldu", EN: "Reseller created"},

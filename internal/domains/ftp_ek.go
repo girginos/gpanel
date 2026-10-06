@@ -235,7 +235,10 @@ func (h *Handlers) FTPEkParola(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Denetim: kim/hangi hesap; parola ve özeti ASLA yazılmaz.
-	httpx.DenetimDomain(h.DB, r, uid, aktor, "ftp.ek_parola", h.ekAlanAdi(id), "kullanici="+kullanici, id, true)
+	alan := h.ekAlanAdi(id)
+	httpx.DenetimDomain(h.DB, r, uid, aktor, "ftp.ek_parola", alan, "kullanici="+kullanici, id, true)
+	// Parola yazıldı: bu ek hesabın AÇIK FTP oturumları düşer (hata parolayı bozmaz).
+	h.ftpOturumlariDusur(r, uid, aktor, alan, kullanici, id)
 	w.Header().Set("Cache-Control", "no-store")
 	govde := map[string]any{"ok": true, "kullanici": kullanici, "uretildi": uretildi}
 	if uretildi {

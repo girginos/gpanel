@@ -491,6 +491,7 @@ type anahtarBilgi struct {
 var anahtarSozlugu = map[string]anahtarBilgi{
 	"kullanici":            {iki{"Kullanıcı", "User"}, false},
 	"oturum_sonlandirildi": {iki{"Müşteri oturumları sonlandırıldı", "Customer sessions ended"}, false},
+	"sonlandirilan":        {iki{"Sonlandırılan FTP oturumu", "FTP sessions ended"}, false},
 	"plan":                 {iki{"Plan", "Plan"}, false},
 	"paket":                {iki{"Paket", "Package"}, false},
 	"domain":               {iki{"Alan adı sınırı", "Domain limit"}, false},

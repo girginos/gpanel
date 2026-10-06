@@ -55,6 +55,9 @@ type devirSonuc struct {
 	Kritik        bool // erişim gerçekten kesilemedi → çağıran devri BAŞARISIZ saymalı
 }
 
+// ftpHostingOturumDusur: dikiş (testler gerçek pure-ftpd'ye dokunmaz).
+var ftpHostingOturumDusur = hesaplar.FTPHostingOturumlariDusur
+
 // devret — bir domaini yeni sahibe geçirir ve eski sahibin TÜM erişim
 // artefaktlarını geçersiz kılar.
 func (h *Handlers) devret(ctx context.Context, did int64, alanAdi, sk string, resellerID, customerID *int64, aktorUID int64, aktorAd string) (*devirSonuc, error) {
@@ -130,6 +133,12 @@ func (h *Handlers) devret(ctx context.Context, did int64, alanAdi, sk string, re
 	if err := hesaplar.SyncSSHPassword(h.DB, sk); err != nil {
 		sonuc.Kritik = true
 		uyar("KRİTİK: sistem (SSH/SFTP) parolası eşitlenemedi — eski parola SSH'ta çalışmaya devam edebilir: %v", err)
+	}
+
+	// ── 7b) Eski sahibin AÇIK FTP oturumlarını düşür (ana + ek hesaplar) ───
+	// Parola DB'de döndü; açık oturum eski parolayla sürerdi. Hata devri bozmaz: uyarı.
+	if _, err := ftpHostingOturumDusur(sk); err != nil {
+		uyar("açık FTP oturumları düşürülemedi (eski sahip bağlı kalabilir): %v", err)
 	}
 
 	// ── 8) SSH authorized_keys arşivle + shell kapat ───────────────────────

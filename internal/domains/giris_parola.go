@@ -129,6 +129,8 @@ func (h *Handlers) GirisParola(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "parola değiştirilemedi")
 		return
 	}
+	// Müşterinin AÇIK FTP oturumları da düşer (hata parolayı bozmaz).
+	h.ftpOturumlariDusur(r, uid, aktor, alan, sk, id)
 	if sshOn == 1 {
 		if err := apiSSHEsitle(h.DB, sk); err != nil {
 			log.Printf("giriş parolası: SSH eşitleme domain=%d: %v", id, err)
