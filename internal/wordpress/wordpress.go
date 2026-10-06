@@ -415,8 +415,10 @@ var (
 
 // Makine okunur kodlar (UI i18n'i mesajı bu kodla ve alanlarla yerelleştirir).
 const (
-	KodBelgeKokUyusmuyor  = "belgekok_uyusmuyor"  // 409: kurulum BAŞLATILMADI
-	KodBelgeKokSunulmuyor = "belgekok_sunulmuyor" // 200 uyarısı: kuruldu ama site sunulmuyor
+	KodBelgeKokUyusmuyor  = "belgekok_uyusmuyor"      // 409: kurulum BAŞLATILMADI
+	KodBelgeKokSunulmuyor = "belgekok_sunulmuyor"     // 200 uyarısı: kuruldu ama site sunulmuyor
+	KodBelgeKokMesgul     = "belgekok_laravel_mesgul" // 409: Laravel kurulum/dağıtımı sürüyor, kurulum BAŞLATILMADI
+	KodBelgeKokDegisti    = "belgekok_degisti"        // 200 uyarısı: belge kökü kurulum sırasında değişti, düzeltme atlandı
 )
 
 // kurulumZatenVar: hedef dizinde zaten bir kurulum/içerik var mı? Varsa (mesaj, true)
@@ -538,6 +540,15 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	servisSon := root
 	if kp.Tur == TurAna {
 		bk = belgekok.Degerlendir(r.Context(), h.DB, id, root, hedef)
+		if !bk.Uyumlu && bk.LaravelMesgul {
+			// Laravel kurulumu/dağıtımı sürerken belge kökü ve kayıt dokunulmaz (kurulumu ezmesin).
+			httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+				"hata": "bu alan adında bir Laravel kurulumu/dağıtımı sürüyor; belge kökü şu an değiştirilemez. " +
+					"İşlem bitince WordPress kurulumunu yeniden deneyin",
+				"kod": KodBelgeKokMesgul,
+			})
+			return
+		}
 		if !bk.Uyumlu && !bk.Duzeltilebilir {
 			httpx.WriteJSON(w, http.StatusConflict, map[string]any{
 				"hata": fmt.Sprintf("servis edilen belge kökü %s, WordPress hedefi %s — site WordPress'i sunmaz. "+
@@ -677,23 +688,29 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 	// kurulum yarıda kalırsa web_root'a dokunulmamış olur. Ardından sonuç DOĞRULANIR.
 	belgeKokDuzeltildi := false
 	servisKok := root
+	degisti := false
 	if kp.Tur == TurAna {
 		servisKok = bk.Servis
 		if !bk.Uyumlu {
-			if derr := belgekok.Duzelt(kctx, h.DB, id, sk, root); derr != nil {
+			var derr error
+			belgeKokDuzeltildi, derr = belgeKokUygula(kctx, h.DB, id, sk, root, bk)
+			switch {
+			case derr == nil:
+				servisKok = root
+			case errors.Is(derr, belgekok.ErrDegisti):
+				degisti = true // başkası belge kökünü değiştirdi: EZİLMEDİ
+				log.Printf("wp kurulum: belge kökü kurulum sırasında değişti, düzeltme atlandı (domain=%d)", id)
+			default:
 				log.Printf("wp kurulum: belge kökü düzeltilemedi (domain=%d): %v", id, derr)
-			} else {
-				servisKok, belgeKokDuzeltildi = root, true
-				if bk.LaravelBayat { // uygulama diskte yok → bayat panel kaydı + cron/kuyruk temizlenir
-					if _, lerr := laravelKaldirFn(kctx, h.DB, id, sk); lerr != nil {
-						log.Printf("wp kurulum: bayat Laravel kaydı temizlenemedi (domain=%d): %v", id, lerr)
-					}
-				}
 			}
 		}
 	}
 	var uyari, uyariKod string
-	if kp.Tur == TurAna && !kurulumSunuluyor(servisKok, hedef) {
+	if degisti {
+		uyariKod = KodBelgeKokDegisti
+		uyari = "WordPress kuruldu ancak belge kökü kurulum sırasında başka bir işlemle değiştirildi; otomatik düzeltme atlandı (mevcut ayar ezilmedi). " +
+			"Web Sunucusu sayfasından belge kökünü kontrol edin"
+	} else if kp.Tur == TurAna && !kurulumSunuluyor(servisKok, hedef) {
 		// Kurulum başarılı ama index.php/wp-login.php servis edilen kökten çözülmüyor.
 		uyariKod = KodBelgeKokSunulmuyor
 		uyari = fmt.Sprintf("WordPress kuruldu ancak site sunulmuyor: servis edilen belge kökü %s, WordPress hedefi %s. "+
@@ -716,6 +733,26 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		yanit["servis_koku"], yanit["hedef"] = belgekok.Goreli(root, servisKok), belgekok.Goreli(root, hedef)
 	}
 	httpx.WriteJSON(w, http.StatusOK, yanit)
+}
+
+// belgeKokUygula: düzeltilebilir uyumsuzluğu giderir. Bayat Laravel kaydı varsa ÖNCE
+// laravel.KaydiKaldir (kendi kilidi altında web_root'u geri alır, cron/kuyruk kapatır; kurulum/
+// dağıtım sürüyorsa reddeder → düzeltme HİÇ yapılmaz). web_root hâlâ karar anındaki değerdeyse
+// compare-and-swap ile varsayılana alınır; değiştiyse ErrDegisti (ezilmez).
+func belgeKokUygula(ctx context.Context, db *sql.DB, id int64, sk, root string, bk belgekok.Karar) (bool, error) {
+	if bk.LaravelBayat {
+		geri, err := laravelKaldirFn(ctx, db, id, sk)
+		if err != nil {
+			return false, err
+		}
+		if geri {
+			return true, nil // web_root KaydiKaldir içinde varsayılana döndü
+		}
+	}
+	if err := belgekok.Duzelt(ctx, db, id, sk, root, bk.Stored); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // kurulumSunuluyor: kurulum sonrası doğrulama — hedef servis kökünün kendisi/altında VE

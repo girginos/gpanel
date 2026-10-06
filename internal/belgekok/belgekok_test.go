@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,7 +82,7 @@ func bk_db(t *testing.T) *sql.DB {
 	t.Cleanup(func() { _ = db.Close() })
 	for _, q := range []string{
 		`CREATE TABLE domains (id BIGINT UNSIGNED PRIMARY KEY, sistem_kullanici VARCHAR(64) NOT NULL, web_root VARCHAR(255) NOT NULL DEFAULT '')`,
-		`CREATE TABLE cp_laravel_apps (domain_id BIGINT UNSIGNED PRIMARY KEY, app_root VARCHAR(255) NOT NULL DEFAULT '')`,
+		`CREATE TABLE cp_laravel_apps (domain_id BIGINT UNSIGNED PRIMARY KEY, app_root VARCHAR(255) NOT NULL DEFAULT '', son_deploy_durum VARCHAR(20) NOT NULL DEFAULT '')`,
 		`INSERT INTO domains (id, sistem_kullanici) VALUES (1,'c_a'),(2,'c_b')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -184,6 +185,41 @@ func TestDegerlendir_KararTablosu(t *testing.T) {
 	if k = Degerlendir(ctx, e.db, 1, e.base, e.base); k.Duzeltilebilir || k.Uyumlu {
 		t.Fatalf("elle ayarlı: %+v", k)
 	}
+	// 7b) İLİŞKİSİZ bilinçli web_root: servis dizini var (landing), eski Laravel kaydı artisan'sız
+	// ama başka dizinde → düzeltilemez (landing ezilmez).
+	_ = os.MkdirAll(e.base+"/landing", 0o755)
+	e.set(t, 1, e.base+"/landing")
+	app("laravel_eski")
+	if k = Degerlendir(ctx, e.db, 1, e.base, e.base); k.Duzeltilebilir || k.LaravelBayat {
+		t.Fatalf("ilişkisiz web_root + bayat kayıt düzeltilmemeli: %+v", k)
+	}
+	// 7c) CANLI Laravel + servis dizini YOK → düzeltilemez (kayıt/cron/kuyruk yetim kalmasın).
+	_ = os.WriteFile(e.base+"/artisan", []byte("x"), 0o644)
+	e.set(t, 1, e.base+"/olmayan")
+	app("public_html")
+	if k = Degerlendir(ctx, e.db, 1, e.base, e.base); k.Duzeltilebilir {
+		t.Fatalf("canlı Laravel + yok dizin düzeltilmemeli: %+v", k)
+	}
+	_ = os.Remove(e.base + "/artisan")
+	// 7d) servis dizini yok + artisan'sız Laravel + web_root ilişkisiz ama dizin YOK → düzeltilir.
+	if k = Degerlendir(ctx, e.db, 1, e.base, e.base); !k.Duzeltilebilir || !k.LaravelBayat {
+		t.Fatalf("yok dizin + artisansız kayıt düzeltilmeli: %+v", k)
+	}
+	// 7e) kurulum/dağıtım sürüyor → düzeltilemez + LaravelMesgul
+	for _, d := range []string{"kuruluyor", "calisiyor"} {
+		_, _ = e.db.Exec(`UPDATE cp_laravel_apps SET son_deploy_durum=? WHERE domain_id=1`, d)
+		if k = Degerlendir(ctx, e.db, 1, e.base, e.base); k.Duzeltilebilir || !k.LaravelMesgul {
+			t.Fatalf("%s: meşgul, düzeltme yok: %+v", d, k)
+		}
+	}
+	_, _ = e.db.Exec(`UPDATE cp_laravel_apps SET son_deploy_durum='' WHERE domain_id=1`)
+	// 7f) Laravel tablosu okunamıyor (satır yokluğu DIŞI hata) → muhafazakâr: düzeltme yok
+	_, _ = e.db.Exec(`ALTER TABLE cp_laravel_apps RENAME TO cp_laravel_apps_x`)
+	if k = Degerlendir(ctx, e.db, 1, e.base, e.base); k.Duzeltilebilir {
+		t.Fatalf("okunamayan Laravel kaydında düzeltme yok: %+v", k)
+	}
+	_, _ = e.db.Exec(`ALTER TABLE cp_laravel_apps_x RENAME TO cp_laravel_apps`)
+	app("-")
 	// 8) kurcalanmış web_root (hesap dışı) → tabana düşer → uyumlu
 	e.set(t, 1, "/etc")
 	if k = Degerlendir(ctx, e.db, 1, e.base, e.base); !k.Uyumlu {
@@ -195,7 +231,7 @@ func TestDuzelt_YazarVeRenderEder_SahipDogrulanir(t *testing.T) {
 	e := bk_ev(t)
 	ctx := context.Background()
 	e.set(t, 1, e.base+"/public")
-	if err := Duzelt(ctx, e.db, 1, "c_a", e.base); err != nil {
+	if err := Duzelt(ctx, e.db, 1, "c_a", e.base, e.base+"/public"); err != nil {
 		t.Fatal(err)
 	}
 	if e.wr(t, 1) != e.base || e.rr != 1 {
@@ -203,7 +239,7 @@ func TestDuzelt_YazarVeRenderEder_SahipDogrulanir(t *testing.T) {
 	}
 	// IDOR: sahibi olmayan hesap adıyla başka satır DEĞİŞMEZ
 	e.set(t, 2, "/x/yabanci")
-	if err := Duzelt(ctx, e.db, 2, "c_a", e.base); err == nil {
+	if err := Duzelt(ctx, e.db, 2, "c_a", e.base, "/x/yabanci"); err == nil {
 		t.Fatal("başka hesabın satırı için hata beklenirdi")
 	}
 	if e.wr(t, 2) != "/x/yabanci" || e.rr != 1 {
@@ -215,7 +251,7 @@ func TestDuzelt_RenderHatasi_DBGeriAlinir(t *testing.T) {
 	e := bk_ev(t)
 	e.set(t, 1, e.base+"/public")
 	e.err = errors.New("nginx -t")
-	if err := Duzelt(context.Background(), e.db, 1, "c_a", e.base); err == nil {
+	if err := Duzelt(context.Background(), e.db, 1, "c_a", e.base, e.base+"/public"); err == nil {
 		t.Fatal("hata beklenirdi")
 	}
 	if e.wr(t, 1) != e.base+"/public" {
@@ -233,12 +269,12 @@ func TestDuzelt_SembolikBagVeOlmayanTaban_Reddedilir(t *testing.T) {
 	if err := os.Symlink(hedef, e.base); err != nil {
 		t.Fatal(err)
 	}
-	if err := Duzelt(context.Background(), e.db, 1, "c_a", e.base); err == nil {
+	if err := Duzelt(context.Background(), e.db, 1, "c_a", e.base, e.base+"/public"); err == nil {
 		t.Fatal("symlink taban reddedilmeli")
 	}
 	// taban yok
 	_ = os.Remove(e.base)
-	if err := Duzelt(context.Background(), e.db, 1, "c_a", e.base); err == nil {
+	if err := Duzelt(context.Background(), e.db, 1, "c_a", e.base, e.base+"/public"); err == nil {
 		t.Fatal("olmayan taban reddedilmeli")
 	}
 	if e.wr(t, 1) != e.base+"/public" || e.rr != 0 {
@@ -288,5 +324,66 @@ func TestGeriAl(t *testing.T) {
 	// Duzelt'in ikinci kapısına ya da taban doğrulamasına güvenilmez.
 	if _, err = GeriAl(ctx, e.db, 2, "c_a", e.base, "/b/public_html"); !errors.Is(err, sql.ErrNoRows) || e.wr(t, 2) != "/b/public_html/public" {
 		t.Fatalf("yabancı hesap satırı değişmemeli ve sahip kapısı ErrNoRows vermeli: %v", err)
+	}
+}
+
+// CAS: karar anındaki değer değişmişse ezilmez (ErrDegisti), render edilmez; zaten istenen
+// değerdeyse sessizce başarılı.
+func TestDuzelt_CompareAndSwap_DegisenWebRootEzilmez(t *testing.T) {
+	e := bk_ev(t)
+	ctx := context.Background()
+	e.set(t, 1, e.base+"/baska") // karar anında e.base+"/public" idi; arada başkası değiştirdi
+	err := Duzelt(ctx, e.db, 1, "c_a", e.base, e.base+"/public")
+	if !errors.Is(err, ErrDegisti) || e.wr(t, 1) != e.base+"/baska" || e.rr != 0 {
+		t.Fatalf("ezilmemeli: err=%v web_root=%q rr=%d", err, e.wr(t, 1), e.rr)
+	}
+	// başkası tam istenen değere getirdiyse: hata değil, tekrar render yok
+	e.set(t, 1, e.base)
+	if err := Duzelt(ctx, e.db, 1, "c_a", e.base, e.base+"/public"); err != nil || e.rr != 0 {
+		t.Fatalf("zaten istenen değer: err=%v rr=%d", err, e.rr)
+	}
+}
+
+// Render hatasında geri alma da CAS: render sırasında başkası belge kökünü değiştirdiyse
+// bizim geri almamız onu ezmez.
+func TestDuzelt_RenderHatasi_GeriAlmaBaskasininDegisikligiEzmez(t *testing.T) {
+	e := bk_ev(t)
+	e.set(t, 1, e.base+"/public")
+	e.err = errors.New("nginx -t")
+	RerenderFn = func(*sql.DB, int64) error { e.set(t, 1, e.base+"/baska"); return e.err }
+	if err := Duzelt(context.Background(), e.db, 1, "c_a", e.base, e.base+"/public"); err == nil {
+		t.Fatal("hata beklenirdi")
+	}
+	if e.wr(t, 1) != e.base+"/baska" {
+		t.Fatalf("başkasının değişikliği ezilmemeli: %q", e.wr(t, 1))
+	}
+}
+
+// Kilitlenme yok: Duzelt/GeriAl eşzamanlı (aynı domain) çağrılar zaman aşımsız biter; GeriAl
+// içeriden Duzelt'in kilitsiz çekirdeğini çağırır (kilit yeniden alınmaz).
+func TestKilit_EszamanliDuzeltGeriAl_KilitlenmeYok(t *testing.T) {
+	e := bk_ev(t)
+	ctx := context.Background()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		for i := 0; i < 12; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				if i%2 == 0 {
+					_ = Duzelt(ctx, e.db, 1, "c_a", e.base, "")
+				} else {
+					_, _ = GeriAl(ctx, e.db, 1, "c_a", e.base, e.base)
+				}
+			}(i)
+		}
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("kilitlenme: eşzamanlı Duzelt/GeriAl bitmedi")
 	}
 }

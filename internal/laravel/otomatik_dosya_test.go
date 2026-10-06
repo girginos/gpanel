@@ -868,12 +868,13 @@ func TestKaynakKoruma_KiraciCapali(t *testing.T) {
 // yazıcıya bağlanırdı; davranış testleri dikişi sahteyle değiştirdiği için bunu göremez.
 func TestKaynakKoruma_DikisDegerleri(t *testing.T) {
 	beklenen := map[string]string{
-		"envYazici":    "envYaz",       // kiracı uid'siyle kiraci.Komut tee (KiraciCapali kilitler)
-		"kimlikBul":    "tenantKimlik", // user.Lookup
-		"evKoku":       `"/home"`,
-		"cronDizini":   "cronDDizin",
-		"cronDDizin":   `"/etc/cron.d"`,
-		"yarisKancasi": "", // üretimde nil
+		"envYazici":     "envYaz",       // kiracı uid'siyle kiraci.Komut tee (KiraciCapali kilitler)
+		"kimlikBul":     "tenantKimlik", // user.Lookup
+		"evKoku":        `"/home"`,
+		"cronDizini":    "cronDDizin",
+		"cronDDizin":    `"/etc/cron.d"`,
+		"kuyrukKapatFn": "kuyrukKapat", // üretimde gerçek birim kapatıcı (testler sahteler)
+		"yarisKancasi":  "",            // üretimde nil
 	}
 	p := paketKaynagiOku(t)
 	tanim := map[string]int{}

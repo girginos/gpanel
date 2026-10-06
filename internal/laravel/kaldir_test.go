@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"girginospanel/internal/belgekok"
 )
@@ -34,6 +35,7 @@ var kaldirDurum struct {
 	execler  []string
 	execHata string // bu alt dizgiyi içeren Exec hata verir
 	demo     int64  // domains.is_demo
+	kuyruk   int64  // cp_laravel_apps.queue_enabled
 }
 
 type kaldirSurucu struct{}
@@ -57,7 +59,7 @@ func (kaldirBag) QueryContext(_ context.Context, q string, _ []driver.NamedValue
 		return &sahteSatirlar{
 			kolon: []string{"app_root", "deploy_mode", "php_surum", "node_surum", "schedule_enabled", "queue_enabled",
 				"queue_timeout", "queue_max_jobs", "queue_connection", "maintenance", "last_commit", "son_deploy_durum"},
-			veri: [][]driver.Value{{kaldirDurum.appRoot, "yerel", "8.3", "", int64(1), int64(0), int64(60), int64(1000), "database", int64(0), "", kaldirDurum.durum}},
+			veri: [][]driver.Value{{kaldirDurum.appRoot, "yerel", "8.3", "", int64(1), kaldirDurum.kuyruk, int64(60), int64(1000), "database", int64(0), "", kaldirDurum.durum}},
 		}, nil
 	case strings.Contains(q, "web_root") && strings.Contains(q, "FROM domains"):
 		return &sahteSatirlar{kolon: []string{"web_root"}, veri: [][]driver.Value{{kaldirDurum.webRoot}}}, nil
@@ -73,7 +75,11 @@ func (kaldirBag) ExecContext(_ context.Context, q string, a []driver.NamedValue)
 	if kaldirDurum.execHata != "" && strings.Contains(q, kaldirDurum.execHata) {
 		return nil, errors.New("sahte exec hatası")
 	}
-	if strings.HasPrefix(q, "UPDATE domains SET web_root") && len(a) > 0 {
+	if strings.HasPrefix(q, "UPDATE domains SET web_root") && len(a) >= 4 {
+		// compare-and-swap: son argüman beklenen mevcut değer; uymazsa 0 satır etkilenir.
+		if beklenen, _ := a[3].Value.(string); beklenen != kaldirDurum.webRoot {
+			return driver.RowsAffected(0), nil
+		}
 		kaldirDurum.webRoot, _ = a[0].Value.(string)
 	}
 	kaldirDurum.execler = append(kaldirDurum.execler, q)
@@ -81,11 +87,13 @@ func (kaldirBag) ExecContext(_ context.Context, q string, a []driver.NamedValue)
 }
 
 type kaldirOrtam struct {
-	e    sahteEv
-	db   *sql.DB
-	cron string
-	rr   int
-	rerr error
+	kuyrukCagri int
+	kuyrukHata  error
+	e           sahteEv
+	db          *sql.DB
+	cron        string
+	rr          int
+	rerr        error
 }
 
 func kaldirKur(t *testing.T) *kaldirOrtam {
@@ -106,10 +114,12 @@ func kaldirKur(t *testing.T) *kaldirOrtam {
 	cronDizini = t.TempDir()
 	o.cron = cronDPath(7)
 	belgekok.RerenderFn = func(*sql.DB, int64) error { o.rr++; return o.rerr }
-	t.Cleanup(func() { cronDizini, belgekok.RerenderFn = eskiCron, eskiRR })
+	eskiKuyruk := kuyrukKapatFn
+	kuyrukKapatFn = func(int64) error { o.kuyrukCagri++; return o.kuyrukHata }
+	t.Cleanup(func() { cronDizini, belgekok.RerenderFn, kuyrukKapatFn = eskiCron, eskiRR, eskiKuyruk })
 	kaldirDurum.mu.Lock()
 	kaldirDurum.kayit, kaldirDurum.appRoot, kaldirDurum.durum = true, "public_html", "hazir"
-	kaldirDurum.webRoot, kaldirDurum.execler, kaldirDurum.execHata, kaldirDurum.demo = "", nil, "", 0
+	kaldirDurum.webRoot, kaldirDurum.execler, kaldirDurum.execHata, kaldirDurum.demo, kaldirDurum.kuyruk = "", nil, "", 0, 0
 	kaldirDurum.mu.Unlock()
 	dosyaYaz(t, o.cron, "* * * * * x\n", 0o644)
 	return o
@@ -200,6 +210,13 @@ func TestKaydiKaldir_RenderHatasi_KayitKalir(t *testing.T) {
 	if kaldirDurum.webRoot != o.e.app+"/public" {
 		t.Fatalf("web_root eski değere dönmeli: %q", kaldirDurum.webRoot)
 	}
+	// render hatasında cron/kuyruğa DOKUNULMAZ (kayıt schedule_enabled=1 iken cron kapanmış kalmasın)
+	if _, err := os.Stat(o.cron); err != nil {
+		t.Fatal("render hatasında cron silinmemeli")
+	}
+	if o.kuyrukCagri != 0 {
+		t.Fatal("render hatasında kuyruk kapatılmamalı")
+	}
 }
 
 func TestKaydiKaldir_GecersizKullanici(t *testing.T) {
@@ -239,5 +256,106 @@ func TestKaldirHandler_Demo403_YanEtkisiz(t *testing.T) {
 	}
 	if _, err := os.Stat(o.cron); err != nil {
 		t.Fatal("cron'a dokunulmamalı")
+	}
+}
+
+// (3) cron silme HATASI → kayıt SİLİNMEZ (sahipsiz cron kalmasın), hata döner.
+func TestKaydiKaldir_CronSilmeHatasi_KayitKalir(t *testing.T) {
+	o := kaldirKur(t)
+	_ = os.Remove(o.cron)
+	dosyaYaz(t, filepath.Join(o.cron, "ic"), "x", 0o644) // dizin + dolu → os.Remove ENOTEMPTY (ErrNotExist DEĞİL)
+	if _, err := KaydiKaldir(context.Background(), o.db, 7, "c_test"); err == nil {
+		t.Fatal("cron silme hatası dönmeli")
+	}
+	if kaldirSay("DELETE FROM cp_laravel_apps") != 0 {
+		t.Fatal("cron silinemediyse kayıt SİLİNMEMELİ")
+	}
+}
+
+// (3) kuyruk kapatma hatası → kayıt kalır; başarıda kuyruk bir kez kapatılır ve kayıt silinir.
+func TestKaydiKaldir_Kuyruk(t *testing.T) {
+	o := kaldirKur(t)
+	kaldirDurum.kuyruk = 1
+	o.kuyrukHata = errors.New("systemctl")
+	if _, err := KaydiKaldir(context.Background(), o.db, 7, "c_test"); err == nil || o.kuyrukCagri != 1 {
+		t.Fatalf("kuyruk hatası dönmeli: %v çağrı=%d", err, o.kuyrukCagri)
+	}
+	if kaldirSay("DELETE FROM cp_laravel_apps") != 0 {
+		t.Fatal("kuyruk kapanmadıysa kayıt SİLİNMEMELİ")
+	}
+	o.kuyrukHata = nil
+	if _, err := KaydiKaldir(context.Background(), o.db, 7, "c_test"); err != nil || o.kuyrukCagri != 2 || kaldirSay("DELETE FROM cp_laravel_apps") != 1 {
+		t.Fatalf("başarı: err=%v çağrı=%d", err, o.kuyrukCagri)
+	}
+	// kuyruk kapalıysa kuyruğa dokunulmaz
+	kaldirDurum.kuyruk = 0
+	_, _ = KaydiKaldir(context.Background(), o.db, 7, "c_test")
+	if o.kuyrukCagri != 2 {
+		t.Fatal("queue_enabled=0 iken kuyruk kapatılmamalı")
+	}
+}
+
+// (4) kurulum/dağıtım sürerken KaydiKaldir (WP yolu dahil) RED: hiçbir şeye dokunmaz.
+func TestKaydiKaldir_IslemSuruyor_Reddeder(t *testing.T) {
+	o := kaldirKur(t)
+	for _, d := range []string{"kuruluyor", "calisiyor"} {
+		kaldirDurum.durum = d
+		kaldirDurum.webRoot = o.e.app + "/public"
+		_, err := KaydiKaldir(context.Background(), o.db, 7, "c_test")
+		if !errors.Is(err, ErrIslemSuruyor) {
+			t.Fatalf("%s: ErrIslemSuruyor beklenir: %v", d, err)
+		}
+	}
+	if len(kaldirExecler()) != 0 || o.rr != 0 || kaldirDurum.webRoot != o.e.app+"/public" {
+		t.Fatal("yan etki olmamalı")
+	}
+	if _, err := os.Stat(o.cron); err != nil {
+		t.Fatal("cron'a dokunulmamalı")
+	}
+}
+
+// (6) app_root güvenle çözülemiyor: web_root'a dokunulmaz (geri=false, hata DEĞİL); cron/kayıt
+// yine (3) kuralıyla kaldırılır.
+func TestKaydiKaldir_AppRootCozulemez_WebRootaDokunmaz(t *testing.T) {
+	o := kaldirKur(t)
+	kaldirDurum.appRoot = "../baska"
+	kaldirDurum.webRoot = o.e.app + "/public"
+	geri, err := KaydiKaldir(context.Background(), o.db, 7, "c_test")
+	if err != nil || geri || kaldirDurum.webRoot != o.e.app+"/public" || o.rr != 0 {
+		t.Fatalf("geri=%v err=%v web_root=%q", geri, err, kaldirDurum.webRoot)
+	}
+	if kaldirSay("DELETE FROM cp_laravel_apps") != 1 {
+		t.Fatal("kayıt silinmeli")
+	}
+	if _, err := os.Stat(o.cron); err == nil {
+		t.Fatal("cron kaldırılmalı")
+	}
+}
+
+// (4) Kilit: KaydiKaldir (laravel kilidi → belgekok kilidi) ile eşzamanlı belgekok.Duzelt kilitlenmez.
+func TestKaydiKaldir_EszamanliDuzelt_KilitlenmeYok(t *testing.T) {
+	o := kaldirKur(t)
+	kaldirDurum.webRoot = o.e.app + "/public"
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				if i%2 == 0 {
+					_, _ = KaydiKaldir(context.Background(), o.db, 7, "c_test")
+				} else {
+					_ = belgekok.Duzelt(context.Background(), o.db, 7, "c_test", o.e.app, "")
+				}
+			}(i)
+		}
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("kilitlenme")
 	}
 }

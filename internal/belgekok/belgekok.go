@@ -9,10 +9,14 @@
 // Karar tablosu (Degerlendir):
 //
 //	hedef == servis ya da hedef servis kökünün ALTINDA   → uyumlu (site WordPress'i sunar)
-//	uyumsuz + servis kökü diskte YOK                      → düzeltilebilir (bayat web_root)
-//	uyumsuz + kayıtlı Laravel'in artisan'ı diskte YOK     → düzeltilebilir (uygulama silinmiş)
-//	uyumsuz + servis kökü var ve (Laravel canlı ya da
-//	  Laravel kaydı yok = web_root elle/bilinçli ayarlı)  → düzeltilemez (çağıran 409 döner)
+//	uyumsuz + Laravel kaydı yok + servis dizini YOK       → düzeltilebilir (bayat web_root)
+//	uyumsuz + Laravel kaydı var, artisan diskte YOK ve
+//	  (servis dizini yok  YA DA  servis == <app>/public)  → düzeltilebilir (uygulama silinmiş);
+//	  bayat Laravel kaydı/cron/kuyruk da temizlenir
+//	uyumsuz + Laravel CANLI (artisan var / belirsiz) ya da kurulum/dağıtım SÜRÜYOR
+//	  → düzeltilemez (çağıran 409 döner) — servis dizini yok olsa bile
+//	uyumsuz + servis dizini var ve ilişkisiz (elle/bilinçli web_root; ör. eski Laravel kaydı
+//	  artisan'sız ama web_root başka dizinde) → düzeltilemez (409): bilinçli ayar ezilmez
 //
 // Düzeltme DAİMA web_root'u alan adı varsayılanına (public_html) alır — hedefin kendisine
 // değil: hedef public_html/blog ise ana siteyi blog klasörüne daraltmak kullanıcının
@@ -30,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"girginospanel/internal/provisioner"
 )
@@ -41,10 +46,28 @@ var RerenderFn = provisioner.RerenderVhost
 // Karar: ön kontrolün sonucu.
 type Karar struct {
 	Servis         string // şu an servis edilen (güvenli çözülmüş, mutlak) kök
+	Stored         string // karar anındaki HAM domains.web_root (Duzelt'in compare-and-swap beklentisi)
 	Uyumlu         bool   // hedef bu kökten sunulur mu
 	Duzeltilebilir bool   // Uyumlu değilse: web_root güvenle varsayılana alınabilir
 	LaravelBayat   bool   // düzeltmede bayat cp_laravel_apps satırı da temizlenmeli (artisan yok)
+	LaravelMesgul  bool   // Laravel kurulumu/dağıtımı sürüyor: düzeltme YOK (çağıran 409 döner)
 	Sebep          string // "web_root_yok" | "laravel_silinmis" | "" (günlük/test için)
+}
+
+// ErrDegisti: karar ile yazım arasında web_root başkası tarafından değiştirildi; ezilmedi.
+var ErrDegisti = errors.New("belge kökü bu sırada değişti")
+
+// kilitler: domain başına Duzelt/GeriAl serileştirmesi. Kilit SIRASI: laravel.kilitle(id)
+// → belgekok kilidi (laravel.KaydiKaldir → GeriAl). Bu paket laravel kilidini ALMAZ ve
+// kilit altında dış kilit beklemez → ters yön yok, kendi kendine kilitlenme yok
+// (Duzelt/GeriAl dışarıya kilitsiz iç işlevi çağırır; kilit yeniden alınmaz).
+var kilitler sync.Map
+
+func kilitle(id int64) func() {
+	m, _ := kilitler.LoadOrStore(id, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // Uyumlu: hedef, servis kökünün kendisi ya da altında mı? (Üstünde ya da kardeşi ise site
@@ -73,11 +96,9 @@ func Goreli(base, yol string) string {
 	return filepath.Base(yol)
 }
 
-// laravelArtisanYok: kayıtlı Laravel uygulamasının artisan'ı GERÇEKTEN diskte yok mu?
-// Yalnız "yok" (ErrNotExist) kesin kanıttır; başka her hata/belirsizlik "canlı" sayılır
-// (muhafazakâr: yanlış yere silmek yerine 409). app_root eve göreli ve ev içinde
-// kalmalı; dışına çıkıyorsa güvenle değerlendirilemez → canlı say.
-func laravelArtisanYok(base, appRoot string) bool {
+// laravelAppDizin: kayıtlı app_root (eve göreli) → mutlak uygulama dizini. Ev dışına çıkıyorsa
+// ya da gizli/garip ise güvenle çözülemez (ok=false → çağıran "canlı" sayar).
+func laravelAppDizin(base, appRoot string) (string, bool) {
 	home := filepath.Dir(filepath.Clean(base))
 	appRoot = strings.Trim(strings.TrimSpace(appRoot), "/")
 	if appRoot == "" {
@@ -85,15 +106,22 @@ func laravelArtisanYok(base, appRoot string) bool {
 	}
 	dir := filepath.Clean(filepath.Join(home, appRoot))
 	if dir != home && !strings.HasPrefix(dir, home+"/") {
-		return false
+		return "", false
 	}
-	_, err := os.Lstat(filepath.Join(dir, "artisan"))
+	return dir, true
+}
+
+// artisanYok: artisan GERÇEKTEN diskte yok mu? Yalnız ErrNotExist kesin kanıttır; başka her
+// hata/belirsizlik "canlı" sayılır (muhafazakâr: yanlış yere dokunmak yerine 409).
+func artisanYok(appDir string) bool {
+	_, err := os.Lstat(filepath.Join(appDir, "artisan"))
 	return errors.Is(err, os.ErrNotExist)
 }
 
 // Degerlendir: domain id için (base = <ev>/<sk>/public_html) hedefin servis edilip
-// edilmediğine karar verir. DB okuma hatasında uyumlu kabul edilir (ön kontrol mevcut
-// akışı kırmaz; yeni davranış yalnız kesin kanıtla devreye girer).
+// edilmediğine karar verir. domains.web_root okunamazsa uyumlu kabul edilir (ön kontrol
+// mevcut akışı kırmaz); cp_laravel_apps okunamazsa (satır yokluğu dışında hata) MUHAFAZAKÂR:
+// düzeltilemez — belirsizlikte bilinçli ayar ezilmez.
 func Degerlendir(ctx context.Context, db *sql.DB, id int64, base, hedef string) Karar {
 	var stored string
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(web_root,'') FROM domains WHERE id=?`, id).Scan(&stored); err != nil {
@@ -101,30 +129,56 @@ func Degerlendir(ctx context.Context, db *sql.DB, id int64, base, hedef string) 
 		return Karar{Servis: filepath.Clean(base), Uyumlu: true}
 	}
 	servis := provisioner.GuvenliWebRootTaban(base, stored)
-	k := Karar{Servis: servis, Uyumlu: Uyumlu(servis, hedef)}
+	k := Karar{Servis: servis, Stored: stored, Uyumlu: Uyumlu(servis, hedef)}
 	if k.Uyumlu {
 		return k
 	}
-	// (1) servis edilen dizin diskte yok → bayat web_root (kullanıcı dosyaları sildi).
-	if _, err := os.Lstat(servis); errors.Is(err, os.ErrNotExist) {
-		k.Duzeltilebilir, k.Sebep = true, "web_root_yok"
+	_, serr := os.Lstat(servis)
+	servisYok := errors.Is(serr, os.ErrNotExist)
+
+	var appRoot, durum string
+	lerr := db.QueryRowContext(ctx, `SELECT COALESCE(app_root,''), COALESCE(son_deploy_durum,'') FROM cp_laravel_apps WHERE domain_id=?`, id).Scan(&appRoot, &durum)
+	switch {
+	case errors.Is(lerr, sql.ErrNoRows):
+		// Laravel kaydı yok: yalnız servis dizini diskte YOKSA bayat; varsa elle/bilinçli ayar.
+		if servisYok {
+			k.Duzeltilebilir, k.Sebep = true, "web_root_yok"
+		}
+		return k
+	case lerr != nil:
+		log.Printf("belgekok: cp_laravel_apps okunamadı (domain=%d): %v — düzeltme yapılmaz", id, lerr)
+		return k
 	}
-	// (2) kayıtlı Laravel uygulaması gerçekte silinmiş (artisan yok).
-	var appRoot string
-	lerr := db.QueryRowContext(ctx, `SELECT COALESCE(app_root,'') FROM cp_laravel_apps WHERE domain_id=?`, id).Scan(&appRoot)
-	if lerr == nil && laravelArtisanYok(base, appRoot) {
-		k.Duzeltilebilir, k.LaravelBayat = true, true
-		if k.Sebep == "" {
-			k.Sebep = "laravel_silinmis"
+	// Laravel kaydı VAR.
+	if durum == "kuruluyor" || durum == "calisiyor" {
+		k.LaravelMesgul = true // kurulum/dağıtım sürerken kayıt ve belge kökü dokunulmaz
+		return k
+	}
+	appDir, ok := laravelAppDizin(base, appRoot)
+	if !ok || !artisanYok(appDir) {
+		return k // Laravel CANLI (ya da belirsiz): servis dizini yok olsa bile düzeltme yok
+	}
+	// Uygulama gerçekten silinmiş. Belge kökü onunla İLİŞKİLİYSE (== <app>/public) ya da zaten
+	// diskte yoksa düzeltilir; başka bir dizine bilinçli ayarlıysa (ör. landing) DOKUNULMAZ.
+	if servisYok || filepath.Clean(servis) == filepath.Join(appDir, "public") {
+		k.Duzeltilebilir, k.LaravelBayat, k.Sebep = true, true, "laravel_silinmis"
+		if servisYok {
+			k.Sebep = "web_root_yok"
 		}
 	}
 	return k
 }
 
-// Duzelt: web_root'u domain varsayılanına (base) alır ve vhost'u yeniden kurar; render
-// hatasında (nginx -t geri aldı) DB'yi eski değere döndürür. sk, satırın sahibini doğrular
-// (başka hesabın domains satırı değişmez).
-func Duzelt(ctx context.Context, db *sql.DB, id int64, sk, base string) error {
+// Duzelt: web_root'u domain varsayılanına (base) alır ve vhost'u yeniden kurar. beklenen =
+// karar anındaki HAM web_root: yazım compare-and-swap'tır (kurulum 20-90 sn sürer; bu sürede
+// başkası belge kökünü değiştirdiyse EZİLMEZ → ErrDegisti). Render hatasında (nginx -t geri
+// aldı) DB yalnız hâlâ bizim yazdığımız değerse eski değere döner. sk, satırın sahibini doğrular.
+func Duzelt(ctx context.Context, db *sql.DB, id int64, sk, base, beklenen string) error {
+	defer kilitle(id)()
+	return duzeltKilitsiz(ctx, db, id, sk, base, beklenen)
+}
+
+func duzeltKilitsiz(ctx context.Context, db *sql.DB, id int64, sk, base, beklenen string) error {
 	abs, err := provisioner.WebRootMutlakTaban(base, "")
 	if err != nil {
 		return err
@@ -133,11 +187,22 @@ func Duzelt(ctx context.Context, db *sql.DB, id int64, sk, base string) error {
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(web_root,'') FROM domains WHERE id=? AND sistem_kullanici=?`, id, sk).Scan(&eski); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE domains SET web_root=? WHERE id=? AND sistem_kullanici=?`, abs, id, sk); err != nil {
+	res, err := db.ExecContext(ctx, `UPDATE domains SET web_root=? WHERE id=? AND sistem_kullanici=? AND COALESCE(web_root,'')=?`, abs, id, sk, beklenen)
+	if err != nil {
 		return err
 	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		var simdi string
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(web_root,'') FROM domains WHERE id=? AND sistem_kullanici=?`, id, sk).Scan(&simdi); err != nil {
+			return err
+		}
+		if simdi == abs {
+			return nil // zaten istenen değer
+		}
+		return ErrDegisti
+	}
 	if err := RerenderFn(db, id); err != nil {
-		_, _ = db.ExecContext(context.WithoutCancel(ctx), `UPDATE domains SET web_root=? WHERE id=? AND sistem_kullanici=?`, eski, id, sk)
+		_, _ = db.ExecContext(context.WithoutCancel(ctx), `UPDATE domains SET web_root=? WHERE id=? AND sistem_kullanici=? AND web_root=?`, eski, id, sk, abs)
 		return err
 	}
 	return nil
@@ -147,16 +212,19 @@ func Duzelt(ctx context.Context, db *sql.DB, id int64, sk, base string) error {
 // döndürür — YALNIZ web_root tam olarak <app kökü>/public ise. Elle başka yere ayarlanmışsa
 // dokunmaz (false, nil). appDir mutlak uygulama dizinidir.
 func GeriAl(ctx context.Context, db *sql.DB, id int64, sk, base, appDir string) (bool, error) {
+	defer kilitle(id)()
 	var stored string
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(web_root,'') FROM domains WHERE id=? AND sistem_kullanici=?`, id, sk).Scan(&stored); err != nil {
 		return false, err
 	}
-	stored = strings.TrimSpace(stored)
-	if stored == "" || filepath.Clean(stored) != filepath.Join(filepath.Clean(appDir), "public") {
+	if strings.TrimSpace(stored) == "" || filepath.Clean(strings.TrimSpace(stored)) != filepath.Join(filepath.Clean(appDir), "public") {
 		return false, nil
 	}
 	if filepath.Clean(stored) == filepath.Clean(base) {
 		return false, nil
 	}
-	return true, Duzelt(ctx, db, id, sk, base)
+	if err := duzeltKilitsiz(ctx, db, id, sk, base, stored); err != nil {
+		return false, err
+	}
+	return true, nil
 }

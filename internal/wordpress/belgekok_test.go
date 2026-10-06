@@ -15,8 +15,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"girginospanel/internal/belgekok"
+	"girginospanel/internal/laravel"
 )
 
 type bkOrtam struct {
@@ -26,6 +28,7 @@ type bkOrtam struct {
 	rr    int // RerenderFn çağrı sayısı
 	lk    int // laravelKaldirFn çağrı sayısı
 	rrErr error
+	lkErr error // laravelKaldirFn'in döneceği hata
 }
 
 func bk_ortam(t *testing.T) *bkOrtam {
@@ -42,7 +45,11 @@ func bk_ortam(t *testing.T) *bkOrtam {
 	laravelKaldirFn = func(ctx context.Context, db *sql.DB, id int64, sk string) (bool, error) {
 		o.mu2.Lock()
 		o.lk++
+		lkErr := o.lkErr
 		o.mu2.Unlock()
+		if lkErr != nil {
+			return false, lkErr
+		}
 		_, err := db.ExecContext(ctx, `DELETE FROM cp_laravel_apps WHERE domain_id=?`, id)
 		return false, err
 	}
@@ -330,5 +337,134 @@ func TestBelgeKok_KurcalanmisWebRoot_TabanaDuser(t *testing.T) {
 	}
 	if o.webRoot(t, 1) != "/etc" {
 		t.Fatal("uyumlu yolda web_root'a dokunulmaz")
+	}
+}
+
+// (1) İLİŞKİSİZ bilinçli web_root (landing) + eski artisan'sız Laravel kaydı → 409; landing,
+// kayıt ve vhost dokunulmaz (eskiden WP kurulunca web_root sessizce public_html'e dönerdi).
+func TestBelgeKok_IliskisizWebRoot_BayatLaravelKaydi_409_Dokunulmaz(t *testing.T) {
+	o := bk_ortam(t)
+	if err := os.MkdirAll(o.base+"/landing", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o.ayarla(t, 1, o.base+"/landing")
+	o.laravelSatiri(t, 1, "laravel_eski") // diskte yok → artisan yok
+	kod, govde := wh_kur(o.whOrtam, "/domains/1/wordpress", "blog")
+	if kod != 409 || bk_coz(t, govde).Kod != KodBelgeKokUyusmuyor {
+		t.Fatalf("%d %s", kod, govde)
+	}
+	if o.webRoot(t, 1) != o.base+"/landing" || o.sayi(t, `SELECT COUNT(*) FROM cp_laravel_apps WHERE domain_id=1`) != 1 {
+		t.Fatal("landing/kayıt değişmemeli")
+	}
+	if rr, lk := o.cagri(); rr != 0 || lk != 0 || len(o.komutlar()) != 0 {
+		t.Fatalf("yan etki olmamalı rr=%d lk=%d", rr, lk)
+	}
+}
+
+// (5) CANLI Laravel (artisan var) + servis dizini YOK → düzeltme yok, 409.
+func TestBelgeKok_CanliLaravel_ServisDiziniYok_409(t *testing.T) {
+	o := bk_ortam(t)
+	wh_yaz(t, o.base+"/artisan", "<?php")
+	o.ayarla(t, 1, o.base+"/public") // yok
+	o.laravelSatiri(t, 1, "public_html")
+	kod, govde := wh_kur(o.whOrtam, "/domains/1/wordpress", "blog")
+	if kod != 409 || bk_coz(t, govde).Kod != KodBelgeKokUyusmuyor {
+		t.Fatalf("%d %s", kod, govde)
+	}
+	if rr, lk := o.cagri(); rr != 0 || lk != 0 || len(o.komutlar()) != 0 || o.sayi(t, `SELECT COUNT(*) FROM cp_laravel_apps WHERE domain_id=1`) != 1 {
+		t.Fatal("yan etki olmamalı")
+	}
+}
+
+// (4) Laravel kurulumu/dağıtımı sürerken: ön kontrol 409 (belgekok_laravel_mesgul), kurulum başlamaz.
+func TestBelgeKok_LaravelKurulumuSuruyor_409_Mesgul(t *testing.T) {
+	o := bk_ortam(t)
+	o.ayarla(t, 1, o.base+"/public")
+	o.laravelSatiri(t, 1, "public_html")
+	if _, err := o.db.Exec(`UPDATE cp_laravel_apps SET son_deploy_durum='kuruluyor' WHERE domain_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	kod, govde := wh_kur(o.whOrtam, "/domains/1/wordpress", "")
+	if kod != 409 || bk_coz(t, govde).Kod != KodBelgeKokMesgul {
+		t.Fatalf("%d %s", kod, govde)
+	}
+	if o.webRoot(t, 1) != o.base+"/public" || len(o.komutlar()) != 0 {
+		t.Fatal("yan etki olmamalı")
+	}
+}
+
+// (4) Kurulum sırasında Laravel işlemi başladı (KaydiKaldir ErrIslemSuruyor döner): düzeltme HİÇ
+// yapılmaz (web_root dokunulmaz), kurulum başarılı + uyarı.
+func TestBelgeKok_KurulumSirasindaLaravelMesgul_DuzeltmeYok_Uyari(t *testing.T) {
+	o := bk_ortam(t)
+	o.ayarla(t, 1, o.base+"/public")
+	o.laravelSatiri(t, 1, "public_html")
+	o.lkErr = laravel.ErrIslemSuruyor
+	kod, govde := wh_kur(o.whOrtam, "/domains/1/wordpress", "")
+	if kod != 200 {
+		t.Fatalf("%d %s", kod, govde)
+	}
+	y := bk_coz(t, govde)
+	if y.Duzeltildi || y.UyariKod != KodBelgeKokSunulmuyor {
+		t.Fatalf("düzeltme yok + uyarı: %+v", y)
+	}
+	if o.webRoot(t, 1) != o.base+"/public" {
+		t.Fatal("web_root dokunulmamalı")
+	}
+	if rr, _ := o.cagri(); rr != 0 {
+		t.Fatalf("vhost render edilmemeli: %d", rr)
+	}
+}
+
+// (2) Compare-and-swap: kurulum SIRASINDA (wp-cli adımları 20-90 sn) başkası belge kökünü
+// değiştirirse EZİLMEZ; kurulum başarılı + belgekok_degisti uyarısı; vhost render edilmez.
+func TestBelgeKok_KurulumSirasindaWebRootDegisti_Ezilmez_Uyari(t *testing.T) {
+	o := bk_ortam(t)
+	o.ayarla(t, 1, o.base+"/public") // bayat
+	onceki := wpKomutFn
+	wpKomutFn = func(sk string, args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[0] == "core" && args[1] == "install" {
+			o.ayarla(t, 1, o.base+"/yeni-ayar") // eşzamanlı değişiklik
+		}
+		return onceki(sk, args...)
+	}
+	kod, govde := wh_kur(o.whOrtam, "/domains/1/wordpress", "")
+	if kod != 200 {
+		t.Fatalf("%d %s", kod, govde)
+	}
+	y := bk_coz(t, govde)
+	if y.UyariKod != KodBelgeKokDegisti || y.Duzeltildi || y.Uyari == "" {
+		t.Fatalf("degisti uyarısı beklenir: %+v", y)
+	}
+	if o.webRoot(t, 1) != o.base+"/yeni-ayar" {
+		t.Fatalf("başkasının ayarı ezilmemeli: %q", o.webRoot(t, 1))
+	}
+	if rr, _ := o.cagri(); rr != 0 {
+		t.Fatalf("vhost render edilmemeli: %d", rr)
+	}
+}
+
+// Kendi kendine kilitlenme yok: WP yolu belgekok.Duzelt'i çağırır; Laravel tarafı GeriAl'i kendi
+// kilidi altında çağırır — iki kilit hiçbir yolda iç içe ters sırayla alınmaz. Burada gerçek
+// belgekok kilidiyle eşzamanlı kurulum + Duzelt zaman aşımsız biter.
+func TestBelgeKok_EszamanliKurulumVeDuzelt_KilitlenmeYok(t *testing.T) {
+	o := bk_ortam(t)
+	o.ayarla(t, 1, o.base+"/public")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = belgekok.Duzelt(context.Background(), o.db, 1, wh_sk1, o.base, o.base+"/public")
+		}()
+		go func() { defer wg.Done(); wh_kur(o.whOrtam, "/domains/1/wordpress", "") }()
+		wg.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("kilitlenme")
 	}
 }

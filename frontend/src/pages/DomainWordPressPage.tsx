@@ -130,6 +130,9 @@ const WP_EN: Record<string, string> = {
   "WordPress kuruldu ancak site sunulmuyor: servis edilen belge kökü {0}, WordPress hedefi {1}. Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın.": "WordPress was installed but the site is not being served: the served document root is {0} and the WordPress target is {1}. Change the document root on the Web Server page to the target directory (or a parent of it).",
   "Belge kökü otomatik düzeltildi: önceki belge kökü artık yoktu, alan adı varsayılan belge köküne (public_html) alındı.": "Document root fixed automatically: the previous document root no longer existed, so the domain was reset to the default document root (public_html).",
   "Site sunulmuyor": "Site is not being served",
+  "Bu alan adında bir Laravel kurulumu/dağıtımı sürüyor; belge kökü şu an değiştirilemez. İşlem bitince WordPress kurulumunu yeniden deneyin.": "A Laravel installation/deployment is in progress on this domain, so the document root cannot be changed right now. Retry the WordPress installation when it finishes.",
+  "WordPress kuruldu ancak belge kökü kurulum sırasında başka bir işlemle değiştirildi; otomatik düzeltme atlandı (mevcut ayar ezilmedi). Web Sunucusu sayfasından belge kökünü kontrol edin.": "WordPress was installed, but the document root was changed by another operation during installation; the automatic fix was skipped (the current setting was not overwritten). Check the document root on the Web Server page.",
+  "Belge kökü değişti": "Document root changed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -208,7 +211,9 @@ export default function DomainWordPressPage() {
     } catch (err) {
       // Belge kökü uyuşmazlığı (409): sunucu kodla gelir; mesaj dile göre yollarla kurulur.
       const bk = (err as { response?: { data?: BelgeKokHata } })?.response?.data
-      const m = bk?.kod === 'belgekok_uyusmuyor'
+      const m = bk?.kod === 'belgekok_laravel_mesgul'
+        ? cevir("Bu alan adında bir Laravel kurulumu/dağıtımı sürüyor; belge kökü şu an değiştirilemez. İşlem bitince WordPress kurulumunu yeniden deneyin.")
+        : bk?.kod === 'belgekok_uyusmuyor'
         ? cevirT(cevir("Servis edilen belge kökü {0}, WordPress hedefi {1}. Site WordPress'i sunmaz. Çözüm: Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın ya da WordPress'i servis edilen dizinin içine kurun."), bk.servis_koku ?? '', bk.hedef ?? '')
         : apiHata(err, cevir("Kurulum başarısız"))
       setHata(m)
@@ -702,6 +707,11 @@ function KurulumSonuc({ s, kapat }: { s: Sonuc; kapat: () => void }) {
       {s.uyari_kod === 'belgekok_sunulmuyor' && (
         <UyariKutusu ton="uyari" baslik={cevir("Site sunulmuyor")} className="mt-3">
           {cevirT(cevir("WordPress kuruldu ancak site sunulmuyor: servis edilen belge kökü {0}, WordPress hedefi {1}. Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın."), s.servis_koku ?? '', s.hedef ?? '')}
+        </UyariKutusu>
+      )}
+      {s.uyari_kod === 'belgekok_degisti' && (
+        <UyariKutusu ton="uyari" baslik={cevir("Belge kökü değişti")} className="mt-3">
+          {cevir("WordPress kuruldu ancak belge kökü kurulum sırasında başka bir işlemle değiştirildi; otomatik düzeltme atlandı (mevcut ayar ezilmedi). Web Sunucusu sayfasından belge kökünü kontrol edin.")}
         </UyariKutusu>
       )}
       {s.belge_koku_duzeltildi && (

@@ -17,7 +17,7 @@ func TestWPBelgeKok_KodlarSunucuylaAyni(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kod := range []string{"belgekok_uyusmuyor", "belgekok_sunulmuyor"} {
+	for _, kod := range []string{"belgekok_uyusmuyor", "belgekok_sunulmuyor", "belgekok_laravel_mesgul", "belgekok_degisti"} {
 		if !strings.Contains(string(b), `"`+kod+`"`) {
 			t.Errorf("sunucuda %s kodu yok", kod)
 		}
@@ -34,6 +34,8 @@ func TestWPBelgeKok_SayfaKaynakKilitleri(t *testing.T) {
 		"409 yollar yerleştirilir":  "bk.servis_koku ?? '', bk.hedef ?? ''",
 		"kur hatası toast":          `toast.hata(cevir("İşlem başarısız"), m)`,
 		"sonuç uyarı kutusu":        "s.uyari_kod === 'belgekok_sunulmuyor'",
+		"değişti uyarısı":           "s.uyari_kod === 'belgekok_degisti'",
+		"meşgul 409":                "bk?.kod === 'belgekok_laravel_mesgul'",
 		"uyarı başlığı":             `cevir("Site sunulmuyor")`,
 		"otomatik düzeltme bilgisi": "s.belge_koku_duzeltildi",
 		"sonuç tipi uyarı":          "uyari_kod?: string; servis_koku?: string; hedef?: string",
@@ -47,6 +49,9 @@ func TestWPBelgeKok_SayfaKaynakKilitleri(t *testing.T) {
 		"Servis edilen belge kökü {0}, WordPress hedefi {1}. Site WordPress'i sunmaz.",
 		"WordPress kuruldu ancak site sunulmuyor: servis edilen belge kökü {0}, WordPress hedefi {1}.",
 		"Belge kökü otomatik düzeltildi:",
+		"Bu alan adında bir Laravel kurulumu/dağıtımı sürüyor; belge kökü şu an değiştirilemez.",
+		"WordPress kuruldu ancak belge kökü kurulum sırasında başka bir işlemle değiştirildi;",
+		"Belge kökü değişti",
 		"Site sunulmuyor",
 	} {
 		if n := strings.Count(s, tr); n < 2 {
