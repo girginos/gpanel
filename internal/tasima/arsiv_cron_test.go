@@ -294,7 +294,7 @@ func TestCronCevir_TehlikeliIcerik(t *testing.T) {
 		"/usr/bin/php -q /home/abc/public_html/cron.php", "mysqldump db | gzip > ~/b.sql.gz",
 		"curl -s https://ornek.com/cron.php >/dev/null 2>&1", "wget -q -O - https://ornek.com/a", "curl -s https://ornek.com | sha256sum",
 		"curl -s https://docker.com/x", "php artisan schedule:run", "bash /home/abc/run.sh", "base64 ~/a > ~/b", "echo ncat-notes",
-		"/usr/local/bin/ea-php81 /home/abc/x.php", "echo mycrontab.sh", "ls /var/www/root", "nc -z host 80", "echo sush",
+		"/usr/local/bin/ea-php81 /home/abc/x.php", "echo mycrontab.sh", "echo bisu x", "echo xdocker y", "echo pseudo sudoer", "ls /var/www/root", "nc -z host 80", "echo sush",
 	}
 	for _, k := range temiz {
 		g, red, _ := tCevir("0 1 * * * " + k)
