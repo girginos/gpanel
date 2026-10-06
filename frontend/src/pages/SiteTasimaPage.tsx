@@ -16,6 +16,8 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import EmptyState from '@/components/EmptyState'
 import { TASIMA_TABAN, useTasimaKaynaklari, type TasimaKaynak } from '@/lib/tasima'
 import { useRol, yoneticiMi } from '@/lib/rol'
+import { ArsivGirdiKart, ArsivOzetKart, type ArsivGirdi } from '@/components/tasima/ArsivKaynak'
+import { kesifBilgiAyikla, type ArsivKesifBilgi } from '@/lib/tasimaYukle'
 
 /*
  * Site Taşıma — Plesk / GirginOSPanel / cPanel / DirectAdmin'den bu panele uçtan uca aktarım.
@@ -182,6 +184,17 @@ const STASIMA_EN: Record<string, string> = {
   "Kaynak": "Source",
   "hata": "error",
   "İşlem başarısız": "Operation failed",
+  "Arşiv keşfi başarısız": "Archive discovery failed",
+  "Arşivde taşınabilir site bulunamadı.": "No migratable sites found in the archive.",
+  "Cron görevleri (zamanlanmış görevler)": "Cron jobs (scheduled tasks)",
+  "Arşivdeki zamanlanmış görevler siteye eklenir": "Scheduled tasks in the archive are added to the site",
+  "Kutu parolaları taşınmaz, yeni parola belirlenir.": "Mailbox passwords are not migrated; new passwords are set.",
+  "Arşivde SSL sertifikası bulunmaz; taşıma sonrası Let's Encrypt ile alınır.": "Archives contain no SSL certificate; one is issued via Let's Encrypt after migration.",
+  "arşiv": "archive",
+  "Bayiler de kullanabilsin": "Resellers can use it too",
+  "Açıkken bayiler bu arşiv kaynağını dosya yükleyerek kullanabilir (varsayılan kapalı).": "When on, resellers can use this archive source by uploading files (off by default).",
+  "Kaynak kapalıyken kullanılamaz.": "Unavailable while the source is off.",
+  "Arşiv (yükleme veya dosya yolu)": "Archive (upload or file path)",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (STASIMA_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -364,6 +377,10 @@ export default function SiteTasimaPage() {
   const [retryAcik, setRetryAcik] = useState(false) // oturumdan geldiyse parola sunucuda saklı
   const [sirada, setSirada] = useState(false) // iş kuyrukta (tek genel yuva doluyken)
   const [ayarYuk, setAyarYuk] = useState('')
+  // --- arşiv kaynağı (cPanel/DirectAdmin yedeği) ---
+  const [cron, setCron] = useState(true)
+  const [arsivGirdi, setArsivGirdi] = useState<ArsivGirdi>({})
+  const [arsivBilgi, setArsivBilgi] = useState<ArsivKesifBilgi | null>(null)
   const logRef = useRef<HTMLPreElement>(null)
   const basladiRef = useRef<number | null>(null) // ETA için başlangıç ms
 
@@ -376,6 +393,9 @@ export default function SiteTasimaPage() {
   const seciliKaynak = kullanilabilir.find(k => k.kod === tip)
   const postaVar = !!seciliKaynak?.yetenekler.posta
   const sahiplerVar = yonetici && !!seciliKaynak?.yetenekler.sahipler
+  const arsivMi = !!seciliKaynak?.arsiv
+  const cronVar = arsivMi && !!seciliKaynak?.yetenekler.cron
+  const arsivLimitleri = kaynakVeri?.arsiv_limitleri || { yol_tavan: 0, yukleme_tavan: 0, parca: 0 }
   // Bayide yönetici-yalnız ayarlar her zaman kapalı gönderilir (sunucu da zorlar).
   useEffect(() => {
     if (!yonetici) { setUstune(false); setSahipleriTasi(false); setResellerID(0); setCustomerID(0) }
@@ -523,24 +543,58 @@ export default function SiteTasimaPage() {
     } finally { setKesifYuk(false) }
   }
 
+  // Arşiv kaynağı: dosya yolu (yalnız kök) ya da tamamlanmış yükleme kimliği ile keşif.
+  async function arsivKesfet(girdi: ArsivGirdi) {
+    setKesifYuk(true); setHata(null); setHesaplar(null); setArsivBilgi(null)
+    try {
+      const { data } = await api.post<{ hesaplar: Hesap[]; oturum_id: number }>(`${TASIMA_TABAN}/arsiv/kesif`, {
+        tip, ...(yonetici && girdi.yol ? { yol: girdi.yol } : {}), ...(girdi.yukleme_id ? { yukleme_id: girdi.yukleme_id } : {}),
+      })
+      const list = data.hesaplar || []
+      setArsivGirdi(yonetici && girdi.yol ? { yol: girdi.yol } : { yukleme_id: girdi.yukleme_id })
+      setArsivBilgi(kesifBilgiAyikla(data))
+      setHesaplar(list)
+      const s: Record<string, boolean> = {}; list.forEach(h => { s[h.alan_adi] = varsayilanSecim(h) }); setSecili(s)
+      setOturumID(data.oturum_id || null)
+      if (data.oturum_id) { try { localStorage.setItem(OTURUM_KEY, String(data.oturum_id)) } catch { /* */ } }
+      oturumlarYukle()
+      if (!list.length) { setHata(cevir("Arşivde taşınabilir site bulunamadı.")); toast.hata(cevir("Arşivde taşınabilir site bulunamadı.")) }
+      else setAdim(2)
+    } catch (e) {
+      const m = apiHata(e, cevir("Arşiv keşfi başarısız"))
+      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+    } finally { setKesifYuk(false) }
+  }
+
   async function baslat() {
     const secilenler = (hesaplar || []).filter(h => secili[h.alan_adi] && secilebilir(h))
     if (!secilenler.length) { setHata(cevir("En az bir site seçin.")); toast.hata(cevir("En az bir site seçin.")); return }
     setHata(null)
     try {
-      const { data } = await api.post<{ is_id: number; durum?: string; uretilen_kimlikler?: Array<{ tip: string; ad: string; login: string; eposta: string; parola?: string }> }>(`${TASIMA_TABAN}/baslat`, {
-        ...kaynakGovde(),
-        oturum_id: oturumID || 0, // parola yeniden girilmediyse sunucu bunu kullanır
-        mod: secilenler.length === 1 ? 'tekil' : 'toplu',
-        // Bayide sahip/müşteri/üzerine yazma gönderilmez (sunucu da yok sayar).
-        ayarlar: {
-          dosyalar, veritabani, dns, ssl, posta: posta && postaVar, hedef_php: hedefPHP, plan_id: planID,
-          ustune: yonetici && ustune,
-          reseller_id: yonetici ? resellerID : 0, customer_id: yonetici ? customerID : 0,
-          sahipleri_tasi: sahiplerVar && sahipleriTasi, hesaplar: [],
-        },
-        secilen: secilenler,
-      })
+      const ortakAyar = {
+        dosyalar, veritabani, dns, posta: posta && postaVar, hedef_php: hedefPHP, plan_id: planID,
+        ustune: yonetici && ustune,
+        reseller_id: yonetici ? resellerID : 0, customer_id: yonetici ? customerID : 0,
+      }
+      const govde = arsivMi
+        ? {
+          // Arşiv: ssl gönderilmez (arşivde sertifika yok); sahipler taşınmaz.
+          tip, ...(yonetici && arsivGirdi.yol ? { yol: arsivGirdi.yol } : {}), ...(arsivGirdi.yukleme_id ? { yukleme_id: arsivGirdi.yukleme_id } : {}),
+          oturum_id: oturumID || 0,
+          mod: secilenler.length === 1 ? 'tekil' : 'toplu',
+          ayarlar: { ...ortakAyar, cron: cron && cronVar, sahipleri_tasi: false },
+          secilen: secilenler,
+        }
+        : {
+          ...kaynakGovde(),
+          oturum_id: oturumID || 0, // parola yeniden girilmediyse sunucu bunu kullanır
+          mod: secilenler.length === 1 ? 'tekil' : 'toplu',
+          // Bayide sahip/müşteri/üzerine yazma gönderilmez (sunucu da yok sayar).
+          ayarlar: { ...ortakAyar, ssl, sahipleri_tasi: sahiplerVar && sahipleriTasi, hesaplar: [] },
+          secilen: secilenler,
+        }
+      const { data } = await api.post<{ is_id: number; durum?: string; uretilen_kimlikler?: Array<{ tip: string; ad: string; login: string; eposta: string; parola?: string }> }>(
+        arsivMi ? `${TASIMA_TABAN}/arsiv/baslat` : `${TASIMA_TABAN}/baslat`, govde)
       basladiRef.current = Date.now()
       setSirada(data.durum === 'kuyrukta')
       setUretilenKimlikler(data.uretilen_kimlikler || [])
@@ -586,9 +640,9 @@ export default function SiteTasimaPage() {
       const m = apiHata(e, cevir("Ayar kaydedilemedi")); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setAyarYuk('') }
   }
-  async function kaynakAnahtar(kod: string, etkin: boolean) {
-    setAyarYuk(kod)
-    try { await api.put(`${TASIMA_TABAN}/kaynaklar/${encodeURIComponent(kod)}`, { etkin }); kaynakYenile() } catch (e) {
+  async function kaynakAnahtar(kod: string, alan: 'etkin' | 'bayi_etkin', deger: boolean) {
+    setAyarYuk(alan === 'bayi_etkin' ? `${kod}:bayi` : kod)
+    try { await api.put(`${TASIMA_TABAN}/kaynaklar/${encodeURIComponent(kod)}`, { [alan]: deger }); kaynakYenile() } catch (e) {
       const m = apiHata(e, cevir("Ayar kaydedilemedi")); toast.hata(cevir("İşlem başarısız"), m)
     } finally { setAyarYuk('') }
   }
@@ -606,8 +660,9 @@ export default function SiteTasimaPage() {
     [cevir("Dosyalar"), dosyalar, setDosyalar, cevir("Web kök dizini rsync ile aktarılır"), I.files],
     [cevir("Veritabanları"), veritabani, setVeritabani, cevir("Dump alınır, aktarılır, ayarlar güncellenir"), I.db],
     [cevir("DNS kayıtları"), dns, setDns, cevir("Kaynak zone okunur, A kayıtları çevrilir"), I.dns],
-    [cevir("SSL sertifikası"), ssl, setSsl, cevir("Let's Encrypt denenir"), I.ssl],
-    ...(postaVar ? [[cevir("Posta (kutular + mesajlar)"), posta, setPosta, cevir("Kutular oluşturulur, mail verisi taşınır, parolalar korunur"), I.mail] as [string, boolean, (v: boolean) => void, string, string]] : []),
+    ...(arsivMi ? [] : [[cevir("SSL sertifikası"), ssl, setSsl, cevir("Let's Encrypt denenir"), I.ssl] as [string, boolean, (v: boolean) => void, string, string]]),
+    ...(cronVar ? [[cevir("Cron görevleri (zamanlanmış görevler)"), cron, setCron, cevir("Arşivdeki zamanlanmış görevler siteye eklenir"), I.saat] as [string, boolean, (v: boolean) => void, string, string]] : []),
+    ...(postaVar ? [[cevir("Posta (kutular + mesajlar)"), posta, setPosta, arsivMi ? cevir("Kutu parolaları taşınmaz, yeni parola belirlenir.") : cevir("Kutular oluşturulur, mail verisi taşınır, parolalar korunur"), I.mail] as [string, boolean, (v: boolean) => void, string, string]] : []),
     ...(sahiplerVar ? [[cevir("Site sahiplerini taşı (bayi/müşteri)"), sahipleriTasi, setSahipleriTasi, cevir("Kaynaktaki bayi/müşteri hesapları limitleriyle oluşturulur; her site kendi sahibine atanır (Plesk ve GirginOSPanel). Bayi parolaları başlatınca gösterilir."), I.anahtarIkon] as [string, boolean, (v: boolean) => void, string, string]] : []),
     ...(yonetici ? [[cevir("Mevcut siteyi ez"), ustune, setUstune, cevir("Panelde aynı alan adı varsa üzerine yazar"), I.ez] as [string, boolean, (v: boolean) => void, string, string]] : []),
   ]
@@ -657,8 +712,8 @@ export default function SiteTasimaPage() {
             {oturumlar.map(o => (
               <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200/70 bg-white px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-dark-800">
                 <div className="min-w-0">
-                  <span className="font-medium text-slate-900 dark:text-slate-100">{o.kullanici}@{o.host}</span>
-                  <span className="ml-2 text-xs text-slate-500">{o.tip} · {o.site_sayisi} site{o.kimlik_sakli ? ` · ${cevir("parola saklı")}` : ''}</span>
+                  <span className="font-medium text-slate-900 dark:text-slate-100">{o.tip.startsWith('arsiv-') ? cevir('arşiv') : `${o.kullanici}@${o.host}`}</span>
+                  <span className="ml-2 text-xs text-slate-500">{o.tip} · {o.site_sayisi} site{o.kimlik_sakli && !o.tip.startsWith('arsiv-') ? ` · ${cevir("parola saklı")}` : ''}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Button type="button" color="primary" boyut="sm" ikonSonda={IK.ileri} onClick={() => oturumaGeri(o.id)}>{cevir("Devam et")}</Button>
@@ -673,7 +728,21 @@ export default function SiteTasimaPage() {
       {/* ==================== ADIM 1 — Sunucu ==================== */}
       {adim === 1 && (
         <div className="space-y-5">
-          <Kart>
+          {arsivMi && (
+            <Kart>
+              <label className="block max-w-sm">
+                <span className={labelCls}>{cevir("Kontrol paneli")}</span>
+                <select value={tip} onChange={e => setTip(e.target.value)} className={inputCls}>
+                  {kullanilabilir.map(p => <option key={p.kod} value={p.kod}>{p.etiket}{p.olgunluk === 'deneysel' ? ` (${cevir('deneysel')})` : ''}</option>)}
+                </select>
+              </label>
+              {seciliKaynak?.olgunluk === 'deneysel' && (
+                <span className="mt-1 block text-[11px] text-amber-600 dark:text-amber-400">{cevir("Gerçek sunucuda uçtan uca doğrulanmadı — önce küçük bir siteyle deneyin.")}</span>
+              )}
+            </Kart>
+          )}
+          {arsivMi && <ArsivGirdiKart yonetici={yonetici} limitler={arsivLimitleri} kesifYuk={kesifYuk} onKesfet={g => void arsivKesfet(g)} />}
+          {!arsivMi && <Kart>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Kaynak sunucu bilgileri")}</h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               {cevir(cevir("Taşınacak sitelerin bulunduğu sunucunun SSH bilgileri. Kimlik bilgileri şifreli saklanır, iş bitince silinir."))}
@@ -783,7 +852,7 @@ export default function SiteTasimaPage() {
                 {kesifYuk ? cevir('Siteler taranıyor…') : cevir("Siteleri keşfet")}
               </Button>
             </div>
-          </Kart>
+          </Kart>}
 
           {yonetici && kaynakVeri && (
             <KaynakAnahtarKart veri={kaynakVeri.kaynaklar} bayiAcik={kaynakVeri.bayi_acik} yuk={ayarYuk}
@@ -797,6 +866,7 @@ export default function SiteTasimaPage() {
       {/* ==================== ADIM 2 — Siteler + Ayarlar ==================== */}
       {adim === 2 && hesaplar && (
         <div className="space-y-5">
+          {arsivMi && arsivBilgi && <ArsivOzetKart bilgi={arsivBilgi} />}
           <Kart>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -946,7 +1016,7 @@ export default function SiteTasimaPage() {
                                 <RetrySecim etiket={cevir("Dosyalar")} ikon={I.files} secili={dosyalar} degis={() => setDosyalar(v => !v)} />
                                 <RetrySecim etiket={cevir("SQL (Veritabanı)")} ikon={I.db} secili={veritabani} degis={() => setVeritabani(v => !v)} />
                                 <RetrySecim etiket="DNS" ikon={I.dns} secili={dns} degis={() => setDns(v => !v)} />
-                                <RetrySecim etiket="SSL" ikon={I.ssl} secili={ssl} degis={() => setSsl(v => !v)} />
+                                {!arsivMi && <RetrySecim etiket="SSL" ikon={I.ssl} secili={ssl} degis={() => setSsl(v => !v)} />}
                                 <RetrySecim etiket="Mail" ikon={I.mail} secili={posta && postaVar} degis={() => setPosta(v => !v)} pasif={!postaVar} />
                               </div>
                               {yonetici && (
@@ -1049,7 +1119,7 @@ export default function SiteTasimaPage() {
 // başına etkin anahtarı (olgunluk rozetiyle). Açılan kaynak bayilerde de görünür.
 function KaynakAnahtarKart({ veri, bayiAcik, yuk, bayiDegis, kaynakDegis }: {
   veri: TasimaKaynak[]; bayiAcik: boolean; yuk: string
-  bayiDegis: (acik: boolean) => void; kaynakDegis: (kod: string, etkin: boolean) => void
+  bayiDegis: (acik: boolean) => void; kaynakDegis: (kod: string, alan: 'etkin' | 'bayi_etkin', deger: boolean) => void
 }) {
   return (
     <Kart>
@@ -1059,8 +1129,16 @@ function KaynakAnahtarKart({ veri, bayiAcik, yuk, bayiDegis, kaynakDegis }: {
         <AnahtarSatir etiket={cevir("Bayiler kullanabilir")} aciklama={cevir("Açıkken bayiler kendi hesaplarına taşıma yapabilir: yalnız genel IP'li kaynaklardan, kendi plan ve kotaları içinde.")}
           acik={bayiAcik} yukleniyor={yuk === 'bayi'} degis={() => bayiDegis(!bayiAcik)} />
         {veri.map(k => (
-          <AnahtarSatir key={k.kod} etiket={k.etiket} acik={k.etkin} yukleniyor={yuk === k.kod} degis={() => kaynakDegis(k.kod, !k.etkin)}
-            rozet={<Badge color={k.olgunluk === 'dogrulandi' ? 'success' : 'warning'} variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{k.olgunluk === 'dogrulandi' ? cevir("Doğrulandı") : cevir("Deneysel")}</Badge>} />
+          <div key={k.kod}>
+            <AnahtarSatir etiket={k.etiket} acik={k.etkin} yukleniyor={yuk === k.kod} degis={() => kaynakDegis(k.kod, 'etkin', !k.etkin)}
+              rozet={<Badge color={k.olgunluk === 'dogrulandi' ? 'success' : 'warning'} variant="soft" className="px-2 py-0.5 text-[11px] font-medium">{k.olgunluk === 'dogrulandi' ? cevir("Doğrulandı") : cevir("Deneysel")}</Badge>} />
+            {k.arsiv && (
+              <div className="border-t border-dashed border-slate-100 ps-6 dark:border-dark-600">
+                <AnahtarSatir etiket={cevir("Bayiler de kullanabilsin")} aciklama={k.etkin ? cevir("Açıkken bayiler bu arşiv kaynağını dosya yükleyerek kullanabilir (varsayılan kapalı).") : cevir("Kaynak kapalıyken kullanılamaz.")}
+                  acik={k.bayi_etkin} yukleniyor={yuk === `${k.kod}:bayi` || !k.etkin} degis={() => kaynakDegis(k.kod, 'bayi_etkin', !k.bayi_etkin)} />
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </Kart>
@@ -1103,7 +1181,7 @@ function GecmisKart({ gecmis, sec, sahipSutunu }: { gecmis: Is[]; sec: (g: Is) =
             {gecmis.map(g => (
               <tr key={g.id} className={`${T.satir} cursor-pointer`} onClick={() => sec(g)}>
                 <td className={T.hucreBaslik} data-etiket="#">{g.id}</td>
-                <td className={T.hucre} data-etiket={cevir("Kaynak")}>{g.host}</td>
+                <td className={T.hucre} data-etiket={cevir("Kaynak")}>{g.tip.startsWith('arsiv-') ? cevir('arşiv') : g.host}</td>
                 <td className={T.hucre} data-etiket="Panel">{g.tip}</td>
                 <td className={T.hucre} data-etiket={cevir("Durum")}><DurumRozet durum={g.durum} /></td>
                 <td className={T.hucre} data-etiket={cevir("Sonuç")}>{g.tamamlanan}/{g.toplam}{g.basarisiz ? ` (${g.basarisiz} ${cevir("hata")})` : ''}</td>
