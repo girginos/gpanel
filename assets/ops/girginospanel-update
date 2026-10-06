@@ -801,8 +801,16 @@ fi
 # 9b) WAF (ModSecurity + OWASP CRS) heal — IDEMPOTENT (her sey hazirsa saniyeler icinde ATLAR).
 # nginx sürümü değişmişse connector'ı ABI için yeniden derler. nginx -t GATE + rollback icerir →
 # ana nginx'i asla bozmaz. Modül yüklü değilse panel WAF'ı graceful atlar (site etkilenmez).
+# 🔴 YALNIZ WAF ZATEN KURULUYSA: kurulum betiği WAF'ı varsayılan KURMAZ (--waf ile isteğe bağlı).
+# Eskiden bu çağrı koşulsuzdu → WAF'ı hiç istememiş sunucuda her güncelleme libmodsecurity v3'ü
+# KAYNAKTAN derliyordu (2 çekirdekte ~6 dk; prova: güncelleme 8 dk sürdü, 6'sı bu). Heal yalnız
+# modül ya da ABI damgası VARSA anlamlı (nginx sürümü değiştiyse connector'ı yeniden derler).
 if command -v girginospanel-waf-setup >/dev/null 2>&1; then
-  girginospanel-waf-setup >/dev/null 2>&1 && ok "WAF altyapısı senkron (ModSecurity+CRS)" || warn "waf-setup atlandı (WAF modülsüz graceful)"
+  if [ -f /usr/lib64/nginx/modules/ngx_http_modsecurity_module.so ] || [ -f /etc/nginx/modsec/.built_for_nginx ]; then
+    girginospanel-waf-setup >/dev/null 2>&1 && ok "WAF altyapısı senkron (ModSecurity+CRS)" || warn "waf-setup atlandı (WAF modülsüz graceful)"
+  else
+    ok "WAF kurulu değil — atlandı (isteğe bağlı: girginospanel-waf-setup)"
+  fi
 fi
 
 # 10) izolasyon + araç prereq (eski kurulumlarda yoksa gelsin; idempotent) + SELinux context
