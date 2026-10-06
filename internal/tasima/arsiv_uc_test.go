@@ -563,6 +563,24 @@ func TestYukleme_KapsamDisiAyni404(t *testing.T) {
 	if kod, _ := o.ist(t, "bayi7", http.MethodDelete, fmt.Sprintf("/tasima/arsiv/yukle/%d", id), nil); kod != 200 {
 		t.Errorf("biten işin yüklemesi silinemedi: %d", kod)
 	}
+	// Dosya kayıtla uyuşmuyorsa (kesilmiş/bozulmuş) hazır yükleme çözülmez.
+	id2 := o.yukle(t, "bayi7", cpmoveT(t))
+	if err := os.Truncate(yuklemeYolu(7, id2), 10); err != nil {
+		t.Fatal(err)
+	}
+	hizSifirla()
+	if kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": id2}); kod != 404 {
+		t.Errorf("boyutu uyuşmayan yükleme çözüldü: %d %s", kod, g)
+	}
+	// Yüklenmekte olan (hazır değil) kayıt keşfe konu olamaz.
+	kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/yukle", map[string]any{"ad": "x.tar.gz", "boyut": 1000})
+	if kod != 201 {
+		t.Fatalf("yükleme: %d %s", kod, g)
+	}
+	hizSifirla()
+	if kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": jsonSayi(t, g, "id")}); kod != 404 {
+		t.Errorf("hazır olmayan yükleme çözüldü: %d %s", kod, g)
+	}
 }
 
 // Kural: keşif asenkron (202 + yoklama); kök için hazır dosya yolu doğrulanır; yol/yükleme
