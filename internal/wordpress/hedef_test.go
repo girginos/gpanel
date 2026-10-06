@@ -118,7 +118,8 @@ func wh_db(t *testing.T) *sql.DB {
 		`CREATE TABLE domains (id BIGINT UNSIGNED PRIMARY KEY, alan_adi VARCHAR(253) NOT NULL UNIQUE,
 			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '', cert_path VARCHAR(255) NULL,
 			is_demo TINYINT NOT NULL DEFAULT 0, customer_id BIGINT UNSIGNED NULL, reseller_id BIGINT UNSIGNED NULL,
-			plan_id BIGINT UNSIGNED NULL)`,
+			plan_id BIGINT UNSIGNED NULL, web_root VARCHAR(255) NOT NULL DEFAULT '')`,
+		`CREATE TABLE cp_laravel_apps (domain_id BIGINT UNSIGNED PRIMARY KEY, app_root VARCHAR(255) NOT NULL DEFAULT '', son_deploy_durum VARCHAR(20) NOT NULL DEFAULT '')`,
 		efektiflimit.TabloDDL, // DB sayısı kapısı: efektif limit = plan ⊕ üst yazım
 		`CREATE TABLE ek_alan_adlari (id BIGINT UNSIGNED PRIMARY KEY, domain_id BIGINT UNSIGNED NOT NULL, alan_adi VARCHAR(253) NOT NULL)`,
 		`CREATE TABLE subdomanlar (id BIGINT UNSIGNED PRIMARY KEY, domain_id BIGINT UNSIGNED NOT NULL, alt_ad VARCHAR(63) NOT NULL, tam_ad VARCHAR(253) NOT NULL)`,
@@ -174,6 +175,8 @@ func wh_ortam(t *testing.T) *whOrtam {
 		case len(args) >= 2 && args[0] == "core" && args[1] == "download":
 			_ = os.MkdirAll(path+"/wp-includes", 0o755)
 			_ = os.WriteFile(path+"/wp-includes/version.php", []byte("<?php\n$wp_version = '6.8.1';\n"), 0o644)
+			_ = os.WriteFile(path+"/index.php", []byte("<?php"), 0o644)
+			_ = os.WriteFile(path+"/wp-login.php", []byte("<?php"), 0o644)
 		case len(args) >= 2 && args[0] == "config":
 			_ = os.WriteFile(path+"/wp-config.php", []byte("<?php define('DB_NAME','x');"), 0o644)
 		case len(args) >= 2 && args[0] == "core" && args[1] == "version":

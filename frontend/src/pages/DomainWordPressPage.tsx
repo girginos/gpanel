@@ -19,7 +19,14 @@ type Tur = WpTur
 type Kurulum = { dizin: string; site_url: string; admin_url: string; surum: string; admin_kullanici?: string; parola_var?: boolean; alan_adi?: string; tur?: Tur; ek_alan_id?: number; alt_alan_id?: number }
 // Kurulum hedefi (GET /domains/{id}/wordpress/hedefler): ana alan adı, ek alan adı ya da alt alan adı.
 type Hedef = { tur: Tur; alan_adi: string; ek_alan_id?: number; alt_alan_id?: number; docroot_durum: 'bos' | 'dolu' | 'wp_var' | 'yok'; ssl: boolean; url_onizleme: string; kurulabilir: boolean; kok_kurulabilir: boolean; neden?: string }
-type Sonuc = { site_url: string; admin_url: string; admin_kullanici: string; admin_parola?: string; surum: string }
+type Sonuc = {
+  site_url: string; admin_url: string; admin_kullanici: string; admin_parola?: string; surum: string
+  // Belge kökü doğrulaması: kuruldu ama site sunulmuyorsa uyarı (kod + ev-göreli yollar; mesaj TR gelir,
+  // gösterimde kodla yerelleştirilir). belge_koku_duzeltildi: bayat belge kökü otomatik düzeltildi.
+  uyari?: string; uyari_kod?: string; servis_koku?: string; hedef?: string; belge_koku_duzeltildi?: boolean
+}
+// 409 {kod:'belgekok_uyusmuyor'}: servis edilen belge kökü ile WordPress hedefi uyuşmuyor; kurulum BAŞLATILMADI.
+type BelgeKokHata = { kod?: string; servis_koku?: string; hedef?: string }
 type Durum = { surum: string; guncelleme_var: boolean; hedef_surum: string; php: string; db_mb: string; bakim: boolean; yukleniyor?: boolean }
 type Paket = { name: string; status: string; version: string; update: string; update_version: string }
 type Kullanici = { ID: number; user_login: string; user_email: string; display_name: string; roles: string }
@@ -119,6 +126,13 @@ const WP_EN: Record<string, string> = {
   "Bu alan adının dizini boş değil; bir alt dizin girin.": "This domain's directory is not empty; enter a subdirectory.",
   "Bu alan adının dizini bulunamadı; kurulum yapılamaz.": "This domain's directory was not found; installation is not possible.",
   "Alan adı bilgisi alınamadı": "Could not load domain information",
+  "Servis edilen belge kökü {0}, WordPress hedefi {1}. Site WordPress'i sunmaz. Çözüm: Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın ya da WordPress'i servis edilen dizinin içine kurun.": "The served document root is {0} but the WordPress target is {1}, so the site would not serve WordPress. Fix: change the document root on the Web Server page to the target directory (or a parent of it), or install WordPress inside the served directory.",
+  "WordPress kuruldu ancak site sunulmuyor: servis edilen belge kökü {0}, WordPress hedefi {1}. Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın.": "WordPress was installed but the site is not being served: the served document root is {0} and the WordPress target is {1}. Change the document root on the Web Server page to the target directory (or a parent of it).",
+  "Belge kökü otomatik düzeltildi: önceki belge kökü artık yoktu, alan adı varsayılan belge köküne (public_html) alındı.": "Document root fixed automatically: the previous document root no longer existed, so the domain was reset to the default document root (public_html).",
+  "Site sunulmuyor": "Site is not being served",
+  "Bu alan adında bir Laravel kurulumu/dağıtımı sürüyor; belge kökü şu an değiştirilemez. İşlem bitince WordPress kurulumunu yeniden deneyin.": "A Laravel installation/deployment is in progress on this domain, so the document root cannot be changed right now. Retry the WordPress installation when it finishes.",
+  "WordPress kuruldu ancak belge kökü kurulum sırasında başka bir işlemle değiştirildi; otomatik düzeltme atlandı (mevcut ayar ezilmedi). Web Sunucusu sayfasından belge kökünü kontrol edin.": "WordPress was installed, but the document root was changed by another operation during installation; the automatic fix was skipped (the current setting was not overwritten). Check the document root on the Web Server page.",
+  "Belge kökü değişti": "Document root changed",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (WP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -195,7 +209,13 @@ export default function DomainWordPressPage() {
       if (filtre && filtre !== secili) setFiltre(secili)
       listele()
     } catch (err) {
-      const m = apiHata(err, cevir("Kurulum başarısız"))
+      // Belge kökü uyuşmazlığı (409): sunucu kodla gelir; mesaj dile göre yollarla kurulur.
+      const bk = (err as { response?: { data?: BelgeKokHata } })?.response?.data
+      const m = bk?.kod === 'belgekok_laravel_mesgul'
+        ? cevir("Bu alan adında bir Laravel kurulumu/dağıtımı sürüyor; belge kökü şu an değiştirilemez. İşlem bitince WordPress kurulumunu yeniden deneyin.")
+        : bk?.kod === 'belgekok_uyusmuyor'
+        ? cevirT(cevir("Servis edilen belge kökü {0}, WordPress hedefi {1}. Site WordPress'i sunmaz. Çözüm: Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın ya da WordPress'i servis edilen dizinin içine kurun."), bk.servis_koku ?? '', bk.hedef ?? '')
+        : apiHata(err, cevir("Kurulum başarısız"))
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
     }
@@ -684,6 +704,21 @@ function KurulumSonuc({ s, kapat }: { s: Sonuc; kapat: () => void }) {
       </div>
       <p className="text-xs text-amber-700 dark:text-amber-400 mt-3">{cevir("Parolayı şimdi kaydedin — tekrar gösterilmez.")}</p>
       </UyariKutusu>
+      {s.uyari_kod === 'belgekok_sunulmuyor' && (
+        <UyariKutusu ton="uyari" baslik={cevir("Site sunulmuyor")} className="mt-3">
+          {cevirT(cevir("WordPress kuruldu ancak site sunulmuyor: servis edilen belge kökü {0}, WordPress hedefi {1}. Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın."), s.servis_koku ?? '', s.hedef ?? '')}
+        </UyariKutusu>
+      )}
+      {s.uyari_kod === 'belgekok_degisti' && (
+        <UyariKutusu ton="uyari" baslik={cevir("Belge kökü değişti")} className="mt-3">
+          {cevir("WordPress kuruldu ancak belge kökü kurulum sırasında başka bir işlemle değiştirildi; otomatik düzeltme atlandı (mevcut ayar ezilmedi). Web Sunucusu sayfasından belge kökünü kontrol edin.")}
+        </UyariKutusu>
+      )}
+      {s.belge_koku_duzeltildi && (
+        <UyariKutusu ton="bilgi" className="mt-3">
+          {cevir("Belge kökü otomatik düzeltildi: önceki belge kökü artık yoktu, alan adı varsayılan belge köküne (public_html) alındı.")}
+        </UyariKutusu>
+      )}
     </div>
   )
 }

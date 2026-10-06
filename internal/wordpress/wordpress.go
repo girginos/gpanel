@@ -24,11 +24,13 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/belgekok"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kiraci"
 	"girginospanel/internal/kota"
+	"girginospanel/internal/laravel"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/sinirlidosya"
 
@@ -407,6 +409,16 @@ var (
 	dbDusurFn     = hesaplar.MySQLDropDB
 	kotaFn        = kota.CheckDBEklenebilir
 	sistemKomutFn = func(ad string, arg ...string) { _ = exec.Command(ad, arg...).Run() }
+	// Belge kökü düzeltmesinde bayat Laravel kaydını temizleme (cron/systemd dokunur → testler sahteler).
+	laravelKaldirFn = laravel.KaydiKaldir
+)
+
+// Makine okunur kodlar (UI i18n'i mesajı bu kodla ve alanlarla yerelleştirir).
+const (
+	KodBelgeKokUyusmuyor  = "belgekok_uyusmuyor"      // 409: kurulum BAŞLATILMADI
+	KodBelgeKokSunulmuyor = "belgekok_sunulmuyor"     // 200 uyarısı: kuruldu ama site sunulmuyor
+	KodBelgeKokMesgul     = "belgekok_laravel_mesgul" // 409: Laravel kurulum/dağıtımı sürüyor, kurulum BAŞLATILMADI
+	KodBelgeKokDegisti    = "belgekok_degisti"        // 200 uyarısı: belge kökü kurulum sırasında değişti, düzeltme atlandı
 )
 
 // kurulumZatenVar: hedef dizinde zaten bir kurulum/içerik var mı? Varsa (mesaj, true)
@@ -516,6 +528,44 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "hedef dizin güvenli değil")
 		return
 	}
+	// 🔴 BELGE KÖKÜ ÖN KONTROLÜ (yalnız ana alan adı; ek/alt alan docroot'u sabit). Kurulum
+	// hedefi, nginx'in SERVİS ETTİĞİ kökten (domains.web_root) sunulmuyorsa WordPress kurulur
+	// ama site 404 verir (canlı olay: önce Laravel → web_root=public_html/public, dosyalar
+	// panel dışından silinip köke WordPress kuruldu). Karar tablosu: internal/belgekok.
+	//   - uyumlu                          → olduğu gibi devam
+	//   - uyumsuz + güvenle düzeltilebilir (web_root diskte yok / Laravel'in artisan'ı yok)
+	//                                     → kurulum sonrası web_root public_html'e alınır
+	//   - uyumsuz + düzeltilemez (canlı Laravel / bilinçli web_root) → 409, HİÇBİR yan etki yok
+	var bk belgekok.Karar
+	servisSon := root
+	if kp.Tur == TurAna {
+		bk = belgekok.Degerlendir(r.Context(), h.DB, id, root, hedef)
+		if !bk.Uyumlu && bk.LaravelMesgul {
+			// Laravel kurulumu/dağıtımı sürerken belge kökü ve kayıt dokunulmaz (kurulumu ezmesin).
+			httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+				"hata": "bu alan adında bir Laravel kurulumu/dağıtımı sürüyor; belge kökü şu an değiştirilemez. " +
+					"İşlem bitince WordPress kurulumunu yeniden deneyin",
+				"kod": KodBelgeKokMesgul,
+			})
+			return
+		}
+		if !bk.Uyumlu && !bk.Duzeltilebilir {
+			httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+				"hata": fmt.Sprintf("servis edilen belge kökü %s, WordPress hedefi %s — site WordPress'i sunmaz. "+
+					"Çözüm: Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın ya da WordPress'i servis edilen dizinin içine kurun",
+					belgekok.Goreli(root, bk.Servis), belgekok.Goreli(root, hedef)),
+				"kod":         KodBelgeKokUyusmuyor,
+				"servis_koku": belgekok.Goreli(root, bk.Servis),
+				"hedef":       belgekok.Goreli(root, hedef),
+			})
+			return
+		}
+		if !bk.Uyumlu {
+			servisSon = root // düzeltme sonrası servis kökü (site adresi buna göre kurulur)
+		} else {
+			servisSon = bk.Servis
+		}
+	}
 	// 🔴 PLAN LIMITI: Kur her cagrisinda YENI bir wp_<slug> veritabani acar,
 	// ama kota kapisi (kota.CheckDBEklenebilir) bu pakette HIC cagrilmiyordu →
 	// "domain olustur + WP kur" akisi plan max_db limitini (or. 1) sessizce 2'ye
@@ -601,8 +651,12 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	url := h.scheme(siteSSL) + siteHost
-	if req.AltDizin != "" {
-		url += "/" + req.AltDizin
+	urlYol := req.AltDizin
+	if kp.Tur == TurAna {
+		urlYol = belgekok.UrlYolu(servisSon, hedef) // servis kökü public_html değilse yol farklıdır
+	}
+	if urlYol != "" {
+		url += "/" + urlYol
 	}
 	adminParola := randParola()
 	if adminParola == "" {
@@ -630,14 +684,89 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		id, hedef, req.AdminKullanici, gizli.SaklaBagli(adminParola, sk)); e != nil {
 		log.Printf("wp kurulum parolasi saklanamadi (domain=%d hedef=%s): %v", id, hedef, e)
 	}
+	// Belge kökü: düzeltilebilir uyumsuzluk burada (kurulum BAŞARILI olduktan sonra) giderilir;
+	// kurulum yarıda kalırsa web_root'a dokunulmamış olur. Ardından sonuç DOĞRULANIR.
+	belgeKokDuzeltildi := false
+	servisKok := root
+	degisti := false
+	if kp.Tur == TurAna {
+		servisKok = bk.Servis
+		if !bk.Uyumlu {
+			var derr error
+			belgeKokDuzeltildi, derr = belgeKokUygula(kctx, h.DB, id, sk, root, bk)
+			switch {
+			case derr == nil:
+				servisKok = root
+			case errors.Is(derr, belgekok.ErrDegisti):
+				degisti = true // başkası belge kökünü değiştirdi: EZİLMEDİ
+				log.Printf("wp kurulum: belge kökü kurulum sırasında değişti, düzeltme atlandı (domain=%d)", id)
+			default:
+				log.Printf("wp kurulum: belge kökü düzeltilemedi (domain=%d): %v", id, derr)
+			}
+		}
+	}
+	var uyari, uyariKod string
+	if degisti {
+		uyariKod = KodBelgeKokDegisti
+		uyari = "WordPress kuruldu ancak belge kökü kurulum sırasında başka bir işlemle değiştirildi; otomatik düzeltme atlandı (mevcut ayar ezilmedi). " +
+			"Web Sunucusu sayfasından belge kökünü kontrol edin"
+	} else if kp.Tur == TurAna && !kurulumSunuluyor(servisKok, hedef) {
+		// Kurulum başarılı ama index.php/wp-login.php servis edilen kökten çözülmüyor.
+		uyariKod = KodBelgeKokSunulmuyor
+		uyari = fmt.Sprintf("WordPress kuruldu ancak site sunulmuyor: servis edilen belge kökü %s, WordPress hedefi %s. "+
+			"Web Sunucusu sayfasından belge kökünü hedef dizine (ya da üstüne) alın",
+			belgekok.Goreli(root, servisKok), belgekok.Goreli(root, hedef))
+	}
 	// Denetim: sade etiket + hedef alan adı; parola/DB bilgisi YOK.
 	uid, kul := middleware.Aktor(r)
 	httpx.DenetimDomain(h.DB, r, uid, kul, "wordpress.kur", strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://"), "hesap="+sk+" tur="+kp.Tur, id, true)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+	yanit := map[string]any{
 		"ok": true, "site_url": url, "admin_url": url + "/wp-admin",
 		"admin_kullanici": req.AdminKullanici, "admin_parola": adminParola,
 		"surum": surum, "db_adi": dbName,
-	})
+	}
+	if belgeKokDuzeltildi {
+		yanit["belge_koku_duzeltildi"] = true
+	}
+	if uyari != "" {
+		yanit["uyari"], yanit["uyari_kod"] = uyari, uyariKod
+		yanit["servis_koku"], yanit["hedef"] = belgekok.Goreli(root, servisKok), belgekok.Goreli(root, hedef)
+	}
+	httpx.WriteJSON(w, http.StatusOK, yanit)
+}
+
+// belgeKokUygula: düzeltilebilir uyumsuzluğu giderir. Bayat Laravel kaydı varsa ÖNCE
+// laravel.KaydiKaldir (kendi kilidi altında web_root'u geri alır, cron/kuyruk kapatır; kurulum/
+// dağıtım sürüyorsa reddeder → düzeltme HİÇ yapılmaz). web_root hâlâ karar anındaki değerdeyse
+// compare-and-swap ile varsayılana alınır; değiştiyse ErrDegisti (ezilmez).
+func belgeKokUygula(ctx context.Context, db *sql.DB, id int64, sk, root string, bk belgekok.Karar) (bool, error) {
+	if bk.LaravelBayat {
+		geri, err := laravelKaldirFn(ctx, db, id, sk)
+		if err != nil {
+			return false, err
+		}
+		if geri {
+			return true, nil // web_root KaydiKaldir içinde varsayılana döndü
+		}
+	}
+	if err := belgekok.Duzelt(ctx, db, id, sk, root, bk.Stored); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// kurulumSunuluyor: kurulum sonrası doğrulama — hedef servis kökünün kendisi/altında VE
+// index.php ile wp-login.php hedefte gerçekten var mı (nginx bu kökten bunları çözebilir mi).
+func kurulumSunuluyor(servis, hedef string) bool {
+	if !belgekok.Uyumlu(servis, hedef) {
+		return false
+	}
+	for _, f := range []string{"index.php", "wp-login.php"} {
+		if _, err := os.Lstat(filepath.Join(hedef, f)); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // POST /domains/{id}/wordpress/guncelle  {dizin}

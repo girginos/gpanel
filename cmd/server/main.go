@@ -815,6 +815,7 @@ func main() {
 				r.With(middleware.MusteriScope).Get("/domains/{id}/subdomain/{sid}/composer", compH.Durum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/subdomain/{sid}/composer", compH.Calistir)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel", laravelH.Durum)
+				r.With(middleware.MusteriScope).Delete("/domains/{id}/laravel", laravelH.Kaldir)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/kur", laravelH.Kur)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/laravel/kur/durum", laravelH.KurDurum)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/laravel/otomatik-hazirla", laravelH.OtomatikHazirla)
