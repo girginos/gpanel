@@ -97,6 +97,23 @@ func TestArsivYolDogrula(t *testing.T) {
 			t.Errorf("%s: errArsivYol beklendi, gelen %v", ad, err)
 		}
 	}
+	// Neden metni (kök için): temiz olmayan yol ve sembolik bağ AYRI kapılardan reddedilir.
+	if _, err := arsivYolDogrula(o.dizin+"/../yedek/cpmove-u.tar.gz", kokler, 1<<20); err == nil || !strings.Contains(err.Error(), "temiz") {
+		t.Errorf("temiz olmayan yol 'temiz' kapısından reddedilmeli: %v", err)
+	}
+	// Üst dizin zincirinde (izinli kökün ÜSTÜNDE) sembolik bağ: kökün kendisi gerçek dizin görünse de ret.
+	gercekUst := t.TempDir()
+	_ = os.Chmod(gercekUst, 0o755)
+	_ = os.Mkdir(filepath.Join(gercekUst, "k"), 0o755)
+	_ = os.WriteFile(filepath.Join(gercekUst, "k", "a.tar.gz"), []byte("x"), 0o644)
+	bagUst := filepath.Join(t.TempDir(), "ln")
+	_ = os.Symlink(gercekUst, bagUst)
+	if _, err := arsivYolDogrula(filepath.Join(bagUst, "k", "a.tar.gz"), []string{filepath.Join(bagUst, "k")}, 1<<20); err == nil || !strings.Contains(err.Error(), "sembolik bağ") {
+		t.Errorf("üst bileşen bağı: 'sembolik bağ' kapısından reddedilmeli: %v", err)
+	}
+	if _, err := arsivYolDogrula(filepath.Join(gercekUst, "k", "a.tar.gz"), []string{filepath.Join(gercekUst, "k")}, 1<<20); err != nil {
+		t.Errorf("bağsız eşdeğer yol geçmeli: %v", err)
+	}
 	// Boyut tavanı ayrı hata (413 eşlemesi için).
 	if _, err := arsivYolDogrula(buyuk, kokler, 99); !errors.Is(err, errArsivBoyut) {
 		t.Errorf("tavan aşımı: errArsivBoyut beklendi, gelen %v", err)

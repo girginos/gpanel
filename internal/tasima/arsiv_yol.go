@@ -125,7 +125,10 @@ func arsivYolDogrula(yol string, kokler []string, tavan int64) (os.FileInfo, err
 	}
 	// İzinli kökten dosyanın üst dizinine: gerçek dizin (bağ değil), root sahipli, kapalı yazma.
 	d := kok
-	for {
+	for i := 0; ; i++ {
+		if i > 64 { // yol 1024 baytla sınırlı; sonsuz döngü savunması
+			return red("yol çok derin")
+		}
 		fi, err := os.Lstat(d)
 		if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
 			return red("üst dizin yok ya da dizin/bağ değil")

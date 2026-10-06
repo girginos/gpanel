@@ -572,13 +572,22 @@ func TestYukleme_KapsamDisiAyni404(t *testing.T) {
 	if kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": id2}); kod != 404 {
 		t.Errorf("boyutu uyuşmayan yükleme çözüldü: %d %s", kod, g)
 	}
-	// Yüklenmekte olan (hazır değil) kayıt keşfe konu olamaz.
-	kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/yukle", map[string]any{"ad": "x.tar.gz", "boyut": 1000})
+	// Tüm baytları gelmiş ama BİTİR çağrılmamış (hazır değil) kayıt keşfe konu olamaz (dosya boyutu
+	// kayıtla aynı olduğundan yalnız durum denetimi yakalar).
+	tam := cpmoveT(t)
+	kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/yukle", map[string]any{"ad": "x.tar.gz", "boyut": len(tam)})
 	if kod != 201 {
 		t.Fatalf("yükleme: %d %s", kod, g)
 	}
+	yarim := jsonSayi(t, g, "id")
+	if kod, g := o.ham("bayi7", http.MethodPut, fmt.Sprintf("/tasima/arsiv/yukle/%d?konum=0", yarim), tam[:700]); kod != 200 {
+		t.Fatalf("parça: %d %s", kod, g)
+	}
+	if len(tam) > 700 {
+		o.ham("bayi7", http.MethodPut, fmt.Sprintf("/tasima/arsiv/yukle/%d?konum=700", yarim), tam[700:])
+	}
 	hizSifirla()
-	if kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": jsonSayi(t, g, "id")}); kod != 404 {
+	if kod, g := o.ist(t, "bayi7", http.MethodPost, "/tasima/arsiv/kesif", map[string]any{"tip": "arsiv-cpanel", "yukleme_id": yarim}); kod != 404 {
 		t.Errorf("hazır olmayan yükleme çözüldü: %d %s", kod, g)
 	}
 }
