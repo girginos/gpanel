@@ -7,6 +7,7 @@ import { Button } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import { api } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
+import { cevirT } from '@/lib/cevirT'
 
 // Panel içi güncelleme kartı.
 // Güncelleme sırasında panel servisi yeniden başlar → API kısa süre kesilir.
@@ -38,6 +39,7 @@ const CMP_EN: Record<string, string> = {
   "Sürüm kontrolü kapalı": "Version check is off",
   "Güncelleme çalışıyor — panel kısa süre yeniden başlayabilir, sayfayı kapatmayın.": "Update running — the panel may restart briefly, do not close the page.",
   "Güncelleme tamamlandı": "Update completed",
+  "— panel güncel. Sayfa {0} sn içinde otomatik yenilenecek.": "— panel is up to date. The page will reload automatically in {0} s.",
   "— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.": "— panel is up to date. Refresh the page to see the new features.",
   "Sayfayı yenile": "Refresh page",
   "Güncelleme başarısız": "Update failed",
@@ -83,6 +85,10 @@ export default function PanelGuncelleme() {
   const [hata, setHata] = useState<string | null>(null)
   const [onay, setOnay] = useState(false)
   const logRef = useRef<HTMLPreElement>(null)
+  // Bu sayfa oturumunda güncelleme ÇALIŞIRKEN izlendi mi? Yalnız o zaman bitişte otomatik yenilenir
+  // (sayfa güncelleme bittikten sonra açıldıysa yenileme döngüsü olmasın).
+  const izlendi = useRef(false)
+  const [geriSayim, setGeriSayim] = useState<number | null>(null)
   const [surum, setSurum] = useState<SurumDurum | null>(null)
 
   const surumYukle = useCallback(() => {
@@ -102,6 +108,7 @@ export default function PanelGuncelleme() {
     const r = await api.get<LogYanit>('/system/guncelleme/log')
     const temizLog = ansiSil(r.data.log)
     setLog(temizLog)
+    if (r.data.calisiyor) izlendi.current = true // SUNUCU çalışıyor dedi: bitişte otomatik yenilenir
     const s = bitisSonucu(temizLog, r.data.calisiyor, r.data.durum)
     if (!r.data.calisiyor || s) {
       setCalisiyor(false)
@@ -134,6 +141,21 @@ export default function PanelGuncelleme() {
   }, [calisiyor, logYukle])
 
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }) }, [log])
+
+
+  // 🔴 Güncelleme bitince eski JS paketi tarayıcıda kalıyordu (kullanıcı elle "Sayfayı yenile"ye
+  // basmak zorundaydı). Başarıyla bittiyse, sunucu güncellemeyi çalışırken bildirdiyse 5 sn sonra yenile.
+  useEffect(() => {
+    if (calisiyor || sonuc !== 'tamam' || !izlendi.current) return
+    let kalan = 5
+    setGeriSayim(kalan)
+    const id = window.setInterval(() => {
+      kalan -= 1
+      if (kalan <= 0) { window.clearInterval(id); window.location.reload(); return }
+      setGeriSayim(kalan)
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [calisiyor, sonuc])
 
   async function baslat() {
     setHata(null); setBaslatiliyor(true); setOnay(false); setSonuc(null)
@@ -190,7 +212,7 @@ export default function PanelGuncelleme() {
           {!calisiyor && sonuc === 'tamam' && (
             <UyariKutusu ton="basari" className="mt-2" kucuk>
               <div className="flex flex-wrap items-center gap-2">
-                <span><span className="font-semibold">{cevir("Güncelleme tamamlandı")}</span> {cevir("— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.")}</span>
+                <span><span className="font-semibold">{cevir("Güncelleme tamamlandı")}</span> {geriSayim !== null ? cevirT(cevir("— panel güncel. Sayfa {0} sn içinde otomatik yenilenecek."), geriSayim) : cevir("— panel güncel. Yeni özellikleri görmek için sayfayı yenileyin.")}</span>
                 <Button variant="outlined" boyut="sm" ikon={I.yenile} onClick={() => window.location.reload()} className="ml-auto">{cevir("Sayfayı yenile")}</Button>
               </div>
             </UyariKutusu>
