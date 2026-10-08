@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/bildirim"
 	destekiptal "girginospanel/internal/destek/iptal"
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/domains"
@@ -25,6 +26,7 @@ import (
 	"girginospanel/internal/toplu"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -533,9 +535,18 @@ func (h *Handlers) bayiKaydiniSil(ctx context.Context, id int64) error {
 	}
 	// Silinmiş hesapların yetim yedekleri (O4): bayi kimliği ileride yeniden kullanılırsa yeni bayi eski bayinin
 	// yetimlerini (sahip eşleşmesiyle) yakalamasın → sahip kökte (0) NÖTRLENİR. Yetim kümesi küçüktür ve
-	// `domain_id=0` koşulu ix_backup_domain ile taranır. Hata bayi silmeyi engellemez ama yüksek sesle loglanır.
+	// `domain_id=0` koşulu ix_backup_domain ile taranır. İfadeye özgü hata (ör. 0217 uygulanmamış: tablo/kolon yok)
+	// bayi silmeyi engellemez, yüksek sesle loglanır. Kilit çakışması (1213 işlemin TAMAMINI geri alır, 1205 yarım
+	// bırakır) ve sunucu dışı hata (bağlantı koptu: işlemin durumu bilinmez) yutulamaz: geri alınmış işlemde Commit
+	// boş döner ve bayi silme "başarılı" görünürdü (BLD-1; bkz. toplu.adimHatasiYutulabilir) → silme DÜŞER, iş 'hata'
+	// biter, bayi kaydı kalır ve yeniden silinebilir.
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE backups SET reseller_id=0 WHERE domain_id=0 AND silinme IS NOT NULL AND reseller_id=?`, id); err != nil {
+		var me *mysql.MySQLError
+		if !errors.As(err, &me) || bildirim.KilitCakismasi(err) {
+			_ = tx.Rollback()
+			return fmt.Errorf("silinmiş hesap yedeklerinin sahipliği nötrlenemedi: %w", err)
+		}
 		log.Printf("🔴 bayi %d silinmiş hesap yedeklerinin sahipliği nötrlenemedi (kimlik yeniden kullanılırsa yeni bayi eski yetimleri yakalayabilir): %v", id, err)
 	}
 	return tx.Commit()

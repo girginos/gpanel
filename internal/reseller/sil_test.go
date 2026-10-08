@@ -6,11 +6,13 @@ package reseller
 // Geçici MariaDB (GOSP_TEST_GECICI_DSN yoksa atlanır).
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +33,11 @@ func silGeciciDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	cfg.DBName = ""
-	kok, err := sql.Open("mysql", cfg.FormatDSN())
+	// DROP DATABASE, açık kalmış bir işlemin metadata kilidini bekleyebilir (varsayılan 1 yıl): sızıntıyı gösteren bir test
+	// başarısızlığı zaman aşımına dönüşmesin diye bekleme 10 sn ile sınırlı.
+	kokCfg := cfg.Clone()
+	kokCfg.Params = map[string]string{"lock_wait_timeout": "10"}
+	kok, err := sql.Open("mysql", kokCfg.FormatDSN())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,6 +211,8 @@ func TestBayiSil_YetimYedeklerinSahipligiNotrlenir(t *testing.T) {
 			(0,'c_baska-20261001-000000.tar.gz','baska.test','c_baska',8,NOW()),(0,'c_kok-20261001-000000.tar.gz','kok.test','c_kok',0,NOW())`,
 		// silinme izi olmayan (yetim DEĞİL) ve canlı satırlar: sahibi 7 yazılı olsa bile dokunulmaz
 		`INSERT INTO backups (domain_id, dosya, reseller_id, silinme) VALUES (0,'yarim-20261001-000000.tar.gz',7,NULL),(3,'c_b8-20261001-000000.tar.gz',8,NULL)`,
+		// canlı domaine bağlı satır: bayat bir silinme izi taşısa da yetim DEĞİL (domain_id>0) → sahibi nötrlenmez
+		`INSERT INTO backups (domain_id, dosya, reseller_id, silinme) VALUES (3,'c_b8-bayat-20261001-000000.tar.gz',7,NOW())`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%v\n%s", err, q)
@@ -216,7 +224,7 @@ func TestBayiSil_YetimYedeklerinSahipligiNotrlenir(t *testing.T) {
 	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id=7`); n != 0 {
 		t.Fatalf("bayi silinmeliydi: %d", n)
 	}
-	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE reseller_id=7 AND silinme IS NOT NULL`); n != 0 {
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND reseller_id=7 AND silinme IS NOT NULL`); n != 0 {
 		t.Errorf("🔴 silinen bayinin yetimleri sahibini taşımaya devam ediyor (kimlik yeniden kullanılırsa yeni bayi yakalar): %d", n)
 	}
 	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND silinme IS NOT NULL AND sistem_kullanici='c_eski' AND reseller_id=0 AND alan_adi='eski.test'`); n != 2 {
@@ -231,6 +239,9 @@ func TestBayiSil_YetimYedeklerinSahipligiNotrlenir(t *testing.T) {
 	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=3 AND reseller_id=8`); n != 1 {
 		t.Errorf("canlı domainin satırına dokunulmamalı: %d", n)
 	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=3 AND reseller_id=7 AND silinme IS NOT NULL`); n != 1 {
+		t.Errorf("canlı domaine bağlı satır (domain_id>0) yetim sayılıp nötrlenmemeli: %d", n)
+	}
 }
 
 // Yetim kolonları olmayan şemada (0217 uygulanmamış) bayi silme ENGELLENMEZ (yalnız günlüğe düşer).
@@ -244,5 +255,72 @@ func TestBayiSil_BackupsKolonlariYoksaEngellenmez(t *testing.T) {
 	}
 	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id=7`); n != 0 {
 		t.Errorf("backups tablosu yokken de bayi silinmeli: %d", n)
+	}
+}
+
+// O4 + BLD-1: sahiplik nötrleme ifadesi bir kilit çakışmasına düşerse (burada: başka bir işlem yetim satırı kilitli tutuyor →
+// 1205) bayi silme "başarılı" DÖNMEZ — işlem yarım/geri alınmıştır, Commit boş dönüp silmeyi başarılı gösterirdi. Bayi ve müşteri
+// kayıtları KALIR (silme yeniden denenebilir); kilit kalkınca aynı silme tamamlanır ve yetim sahipsiz olur.
+func TestBayiSil_NotrlemeKilitCakismasi_BayiSilmeDusmeliSonraTamamlanir(t *testing.T) {
+	db := silGeciciDB(t)
+	if _, err := db.Exec(`INSERT INTO backups (domain_id, dosya, alan_adi, sistem_kullanici, reseller_id, silinme)
+		VALUES (0,'c_eski-20261001-000000.tar.gz','eski.test','c_eski',7,NOW())`); err != nil {
+		t.Fatal(err)
+	}
+	// Silmeyi yapan havuz: kilit bekleme süresi 1 sn (1205'e hızlı düşsün; havuzun her bağlantısına uygulanır).
+	var adi string
+	if err := db.QueryRow(`SELECT DATABASE()`).Scan(&adi); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mysql.ParseDSN(os.Getenv("GOSP_TEST_GECICI_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DBName = adi
+	cfg.Params = map[string]string{"innodb_lock_wait_timeout": "1"}
+	kisa, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = kisa.Close() })
+
+	// Başka bir işlem (ör. eşzamanlı bağlama/süpürme) yetim satırı kilitli tutuyor.
+	tutan, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tutan.Rollback() })
+	if _, err := tutan.Exec(`SELECT id FROM backups WHERE domain_id=0 AND silinme IS NOT NULL FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Handlers{DB: kisa}
+	err = h.bayiKaydiniSil(context.Background(), 7)
+	if err == nil || !strings.Contains(err.Error(), "nötrlenemedi") {
+		t.Fatalf("🔴 kilit çakışmasında bayi silme DÜŞMELİYDİ (yarım işlem 'başarılı' görünmemeli): %v", err)
+	}
+	if st := kisa.Stats(); st.InUse != 0 {
+		t.Fatalf("🔴 başarısız bayi silme işlemi AÇIK bıraktı (Rollback yok): kullanımda %d bağlantı — kilitler ve metadata kilidi tutulur", st.InUse)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id IN (7,70,71)`); n != 3 {
+		t.Errorf("başarısız silmede bayi/müşteri kayıtları KALMALI (işlem geri alındı): kalan %d (beklenen 3)", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM service_plans WHERE reseller_id=7`); n != 1 {
+		t.Errorf("başarısız silmede bayi planı kalmalı: %d", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE reseller_id=7 AND silinme IS NOT NULL`); n != 1 {
+		t.Errorf("başarısız silmede yetimin sahibi değişmemeli: %d", n)
+	}
+
+	// kilit kalkınca aynı silme tamamlanır
+	_ = tutan.Rollback()
+	if err := h.bayiKaydiniSil(context.Background(), 7); err != nil {
+		t.Fatalf("kilit kalkınca bayi silme tamamlanmalı: %v", err)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id=7`); n != 0 {
+		t.Errorf("bayi silinmeliydi: %d", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE reseller_id=0 AND silinme IS NOT NULL AND sistem_kullanici='c_eski'`); n != 1 {
+		t.Errorf("yetim sahipsiz (0) olmalı: %d", n)
 	}
 }
