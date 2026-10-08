@@ -25,8 +25,13 @@ func silinenDBHam(t *testing.T) *sql.DB {
 		ADD COLUMN reseller_id BIGINT UNSIGNED NULL, ADD COLUMN backup_retention TINYINT NOT NULL DEFAULT 7, ADD COLUMN is_demo TINYINT NOT NULL DEFAULT 0`)
 	g113_exec(t, db, `ALTER TABLE backups ADD COLUMN tip VARCHAR(16) NOT NULL DEFAULT 'oto', ADD COLUMN boyut_b BIGINT NOT NULL DEFAULT 0, ADD COLUMN notlar VARCHAR(255) NOT NULL DEFAULT '', ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`)
 	g113_exec(t, db, `CREATE TABLE cp_ayarlar (anahtar VARCHAR(64) PRIMARY KEY, deger TEXT NOT NULL)`)
-	g113_exec(t, db, `CREATE TABLE backup_destinations (id BIGINT AUTO_INCREMENT PRIMARY KEY, domain_id BIGINT UNSIGNED NOT NULL, tip VARCHAR(8) NOT NULL,
-		host VARCHAR(253) NOT NULL, port INT NOT NULL, kullanici VARCHAR(128) NOT NULL, parola VARCHAR(255) NOT NULL, uzak_dizin VARCHAR(255) NOT NULL)`)
+	// Gerçek şema (migrations/0023): domain silinince hedef CASCADE ile GİDER — S1'in nedeni.
+	g113_exec(t, db, `CREATE TABLE backup_destinations (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, domain_id BIGINT UNSIGNED NOT NULL, tip VARCHAR(8) NOT NULL DEFAULT 'sftp',
+		host VARCHAR(253) NOT NULL, port INT NOT NULL DEFAULT 22, kullanici VARCHAR(128) NOT NULL, parola VARCHAR(255) NOT NULL, uzak_dizin VARCHAR(255) NOT NULL DEFAULT '/',
+		aktif TINYINT NOT NULL DEFAULT 1, son_yukleme TIMESTAMP NULL DEFAULT NULL, son_durum VARCHAR(32) NOT NULL DEFAULT '', son_hata VARCHAR(512) NOT NULL DEFAULT '',
+		UNIQUE KEY uk_domain (domain_id), CONSTRAINT fk_bdest_domain FOREIGN KEY (domain_id) REFERENCES domains (id) ON DELETE CASCADE) ENGINE=InnoDB`)
+	izYenidenDenemeBekleme = 5 * time.Millisecond // hata dalı testleri 750 ms beklemesin
+	t.Cleanup(func() { izYenidenDenemeBekleme = 750 * time.Millisecond })
 	return db
 }
 
@@ -91,11 +96,12 @@ func silinenDosya(t *testing.T, kok, sk, ad string) string {
 
 func varMi(yol string) bool { _, err := os.Lstat(yol); return err == nil }
 
-// silinenYetim: domain satırı OLMAYAN yetim yedek satırı ekler. sonKullanma: SQL ifadesi ("NULL" ya da "DATE_SUB(NOW(), INTERVAL 1 DAY)").
-func silinenYetim(t *testing.T, db *sql.DB, domainID int64, alan, sk, dosya string, rid int64, sonKullanma string) int64 {
+// silinenYetim: yetim yedek satırı ekler (S4 biçimi: domain_id=0, eski id eski_domain_id'de).
+// eskiID: silinen domainin eski kimliği. sonKullanma: SQL ifadesi ("NULL" ya da "DATE_SUB(NOW(), INTERVAL 1 DAY)").
+func silinenYetim(t *testing.T, db *sql.DB, eskiID int64, alan, sk, dosya string, rid int64, sonKullanma string) int64 {
 	t.Helper()
-	r, err := db.Exec(`INSERT INTO backups (domain_id, tip, dosya, boyut_b, alan_adi, sistem_kullanici, reseller_id, silinme, son_kullanma)
-		VALUES (?,'oto',?,5,?,?,?,NOW(),`+sonKullanma+`)`, domainID, dosya, alan, sk, rid)
+	r, err := db.Exec(`INSERT INTO backups (domain_id, eski_domain_id, tip, dosya, boyut_b, alan_adi, sistem_kullanici, reseller_id, silinme, son_kullanma)
+		VALUES (0,?,'oto',?,5,?,?,?,NOW(),`+sonKullanma+`)`, eskiID, dosya, alan, sk, rid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,13 +135,53 @@ func TestGoc0217_KosucuUyumu(t *testing.T) {
 	}
 	m := string(body)
 	for _, parca := range []string{"DROP FOREIGN KEY IF EXISTS fk_backup_domain", "ADD COLUMN IF NOT EXISTS alan_adi", "ADD COLUMN IF NOT EXISTS sistem_kullanici",
-		"ADD COLUMN IF NOT EXISTS reseller_id", "ADD COLUMN IF NOT EXISTS silinme", "ADD COLUMN IF NOT EXISTS son_kullanma", "ADD KEY IF NOT EXISTS"} {
+		"ADD COLUMN IF NOT EXISTS reseller_id", "ADD COLUMN IF NOT EXISTS silinme", "ADD COLUMN IF NOT EXISTS son_kullanma",
+		"ADD COLUMN IF NOT EXISTS eski_domain_id BIGINT UNSIGNED NOT NULL DEFAULT 0", "ADD KEY IF NOT EXISTS ix_backups_silinen",
+		"CREATE TABLE IF NOT EXISTS backup_yetim_hedefler (", "UNIQUE KEY uk_yetim_hedef_domain (eski_domain_id)"} {
 		if !strings.Contains(m, parca) {
 			t.Errorf("göçte %q yok (idempotent olmalı)", parca)
 		}
 	}
-	if strings.Contains(m, "CREATE TABLE") {
-		t.Error("cp_silinen_yedek tasarımı kaldırıldı: göç tablo oluşturmamalı")
+	if strings.Contains(m, "CREATE TABLE cp_silinen_yedek") || strings.Contains(m, "CREATE TABLE IF NOT EXISTS cp_silinen_yedek") {
+		t.Error("cp_silinen_yedek tasarımı kaldırıldı: göç bu tabloyu oluşturmamalı")
+	}
+	// Kilit/süre güvenliği: kolon ekleme ile indeks ekleme AYNI ALTER'de olmamalı (tablo yeniden yazımı).
+	for _, ifade := range strings.Split(m, ";") {
+		if strings.Contains(ifade, "ADD COLUMN") && strings.Contains(ifade, "ADD KEY") {
+			t.Errorf("ADD COLUMN ve ADD KEY aynı ALTER'de (büyük backups tablosunu yeniden yazar): %s", strings.TrimSpace(ifade))
+		}
+	}
+}
+
+// Eski (yayınlanmamış dev) biçimdeki yetim satırlar — domain_id>0, silinme dolu, domain yok — yeni biçime
+// (domain_id=0, eski_domain_id) çevrilir; canlı satırlar, bağlı satırlar ve zaten çevrilmişler DEĞİŞMEZ; idempotent.
+func TestGoc0217_EskiBicimliYetimYeniyeCevrilir(t *testing.T) {
+	db := silinenDB(t) // göç bir kez uygulandı (FK kalktı)
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9010,'canli.test','c_canli')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, alan_adi, sistem_kullanici, silinme) VALUES
+		(9011,'c_eski-20261001-000000.tar.gz','eski.test','c_eski',NOW()),
+		(9011,'c_eski-20261002-000000.tar.gz','eski.test','c_eski',NOW()),
+		(9010,'c_canli-20261001-000000.tar.gz','canli.test','c_canli',NULL),
+		(9010,'c_canli-20261002-000000.tar.gz','canli.test','c_canli',NOW()),
+		(9012,'c_izsiz-20261001-000000.tar.gz','','',NULL)`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, eski_domain_id, dosya, alan_adi, sistem_kullanici, silinme) VALUES (0,9013,'c_yeni-20261001-000000.tar.gz','yeni.test','c_yeni',NOW())`)
+	for i := 0; i < 3; i++ { // idempotent
+		silinenGocUygula(t, db)
+		if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=9011 AND silinme IS NOT NULL`); n != 2 {
+			t.Fatalf("koşu %d: eski biçimli 2 yetim yeni biçime çevrilmeliydi: %d", i, n)
+		}
+	}
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9010`); n != 2 {
+		t.Errorf("canlı domainin satırları (silinme dolu olsa bile) DEĞİŞMEMELİ: %d", n)
+	}
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9012 AND silinme IS NULL AND eski_domain_id=0`); n != 1 {
+		t.Errorf("silme izi olmayan (silinme NULL) satıra göç dokunmamalı (S2 işaretler): %d", n)
+	}
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=9013`); n != 1 {
+		t.Errorf("zaten yeni biçimdeki satır bozuldu: %d", n)
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 0 {
+		t.Error("göç anlık görüntü uydurmamalı")
 	}
 }
 
@@ -179,11 +225,14 @@ func TestSilinenIsaretle_SatirlarKalirAlanlarDolu(t *testing.T) {
 	g113_exec(t, db, `DELETE FROM domains WHERE id=9101`)
 	iz.Yaz(context.Background(), db)
 
-	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9101 AND alan_adi='silinen1.test' AND sistem_kullanici='c_silinen1' AND reseller_id=5 AND silinme IS NOT NULL`); n != 2 {
-		t.Fatalf("2 satır yetim işaretlenmeliydi, %d", n)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=9101 AND alan_adi='silinen1.test' AND sistem_kullanici='c_silinen1' AND reseller_id=5 AND silinme IS NOT NULL`); n != 2 {
+		t.Fatalf("2 satır yetim işaretlenmeliydi (domain_id=0, eski_domain_id=9101), %d", n)
+	}
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9101`); n != 0 {
+		t.Errorf("silinen domainin id'sini taşıyan satır kalmamalı (S4): %d", n)
 	}
 	// slot 3 < alt sınır 7 → 7 gün
-	if g := g113_say(t, db, `SELECT DATEDIFF(son_kullanma, silinme) FROM backups WHERE domain_id=9101 LIMIT 1`); g != 7 {
+	if g := g113_say(t, db, `SELECT DATEDIFF(son_kullanma, silinme) FROM backups WHERE eski_domain_id=9101 LIMIT 1`); g != 7 {
 		t.Errorf("süre 7 gün olmalı (slot alt sınırı): %d", g)
 	}
 	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9199 AND silinme IS NOT NULL`); n != 0 {
@@ -215,11 +264,11 @@ func TestSilinenIsaretle_AyarSureyiBelirler(t *testing.T) {
 		if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=? AND silinme IS NOT NULL`, 8000+id); n != 0 {
 			t.Errorf("ayar %q: başka domainin satırı işaretlendi", c.ayar)
 		}
-		if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=? AND silinme IS NOT NULL AND sistem_kullanici='c_ayar'`, id); n != 1 {
+		if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=? AND domain_id=0 AND silinme IS NOT NULL AND sistem_kullanici='c_ayar'`, id); n != 1 {
 			t.Errorf("ayar %q: hedef domainin satırı işaretlenmedi", c.ayar)
 		}
 		var g *int
-		if err := db.QueryRow(`SELECT DATEDIFF(son_kullanma, silinme) FROM backups WHERE domain_id=?`, id).Scan(&g); err != nil {
+		if err := db.QueryRow(`SELECT DATEDIFF(son_kullanma, silinme) FROM backups WHERE eski_domain_id=?`, id).Scan(&g); err != nil {
 			t.Fatal(err)
 		}
 		if c.beklenen == -1 {
@@ -249,6 +298,10 @@ func TestSilinenIz_HataSilmeyiEngellemezPanikYutulur(t *testing.T) {
 	if SilinenIzHazirla(ctx, db, 1, "x.test", "../etc") != nil || SilinenIzHazirla(ctx, db, 1, "x.test", "") != nil {
 		t.Error("geçersiz sk için iz nil olmalı")
 	}
+	// 🔴 domain_id<=0: Yaz'ın WHERE domain_id=? koşulu MEVCUT yetimleri (domain_id=0) vururdu.
+	if SilinenIzHazirla(ctx, db, 0, "x.test", "c_x") != nil || SilinenIzHazirla(ctx, db, -5, "x.test", "c_x") != nil {
+		t.Error("domainID<=0 için iz nil olmalı")
+	}
 	// kapalı DB'de de panik yok
 	kapali := silinenDB(t)
 	iz2 := &SilinenIz{alanAdi: "k.test", sk: "c_kapali", domainID: 1, slot: 7}
@@ -258,30 +311,22 @@ func TestSilinenIz_HataSilmeyiEngellemezPanikYutulur(t *testing.T) {
 
 func TestSkDosyaAdindan(t *testing.T) {
 	ok := map[string]string{
-		"c_abc-20261001-123456.tar.gz":        "c_abc",
-		"c_a_b1-20261001-123456.tar.gz":       "c_a_b1",
-		"c_ornek_alan-20260101-000000.tar.gz": "c_ornek_alan",
+		"c_abc-20261001-123456.tar.gz":                             "c_abc",
+		"c_a_b1-20261001-123456.tar.gz":                            "c_a_b1",
+		"c_ornek_alan-20260101-000000.tar.gz":                      "c_ornek_alan",
+		"c_abc-20261001-123456-planli.tar.gz":                      "c_abc", // eski bash zamanlayıcısı eki
+		"c_abc-20261001-123456-auto.tar.gz":                        "c_abc",
+		"c_" + strings.Repeat("a", 40) + "-20261001-123456.tar.gz": "c_" + strings.Repeat("a", 40),
 	}
 	for d, sk := range ok {
 		if g, o := skDosyaAdindan(d); !o || g != sk {
 			t.Errorf("%s → %q,%v", d, g, o)
 		}
 	}
-	for _, d := range []string{"", "x-20261001-123456.tar.gz", "c_abc-2026-123456.tar.gz", "c_abc-20261001-123456.tar", "../c_abc-20261001-123456.tar.gz", "c_ABC-20261001-123456.tar.gz", "c_abc-20261001-123456.tar.gz/x"} {
+	for _, d := range []string{"", "x-20261001-123456.tar.gz", "c_abc-2026-123456.tar.gz", "c_abc-20261001-123456.tar", "../c_abc-20261001-123456.tar.gz", "c_ABC-20261001-123456.tar.gz", "c_abc-20261001-123456.tar.gz/x", "c_" + strings.Repeat("a", 41) + "-20261001-123456.tar.gz", "c_abc-20261001-123456-x.tar.gz"} {
 		if g, o := skDosyaAdindan(d); o {
 			t.Errorf("%q geçersiz olmalı, %q", d, g)
 		}
-	}
-}
-
-func TestSilinenIsaretsizTani(t *testing.T) {
-	db := silinenDB(t)
-	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9130,'canli.test','c_canli')`)
-	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya) VALUES (9130,'c_canli-20261001-000000.tar.gz'),(9131,'c_yok-20261001-000000.tar.gz'),(9132,'garip.tar.gz')`)
-	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, silinme) VALUES (9133,'c_yetim-20261001-000000.tar.gz', NOW())`)
-	top, tur := SilinenIsaretsizTani(context.Background(), db)
-	if top != 2 || tur != 1 {
-		t.Errorf("işaretsiz sayısı: toplam=%d türetilebilir=%d (2,1 beklenir)", top, tur)
 	}
 }
 

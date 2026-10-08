@@ -55,7 +55,7 @@ func (h *Handlers) GetSchedule(w http.ResponseWriter, r *http.Request) {
 	var son sql.NullString
 	_ = h.DB.QueryRowContext(r.Context(),
 		`SELECT DATE_FORMAT(MAX(created_at),'%Y-%m-%d %H:%i') FROM backups
-		 WHERE domain_id=? AND (tip IN ('oto','planli') OR job_id IS NOT NULL)`, id).Scan(&son)
+		 WHERE domain_id=? AND tip<>'kurtarma' AND (tip IN ('oto','planli') OR job_id IS NOT NULL)`, id).Scan(&son)
 	y.SonSistemYedek = son.String
 	if !beklemedenMuaf(rol) {
 		y.Manuel.BeklemeSn = int64(manuelBeklemeKalan(r.Context(), h.DB, id) / time.Second)

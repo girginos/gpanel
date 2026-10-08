@@ -137,6 +137,8 @@ func TestAdvListe_GrupluYalnizYetimEnYeniOnce(t *testing.T) {
 		Boyut     int64  `json:"boyut_b"`
 		YerelVar  bool   `json:"yerel_var"`
 		Baglanabi *int64 `json:"baglanabilir_domain_id"`
+		BaglAlan  string `json:"baglanabilir_alan_adi"`
+		BaglFark  bool   `json:"baglanabilir_farkli"`
 		Yedekler  []struct {
 			ID    int64 `json:"id"`
 			Yerel bool  `json:"yerel"`
@@ -148,12 +150,16 @@ func TestAdvListe_GrupluYalnizYetimEnYeniOnce(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("2 grup (c_b en yeni, c_a), canlı domain listelenmemeli: %s", g)
 	}
-	if out[0].SK != "c_b" || out[0].Sonk != "" || out[0].Baglanabi != nil || out[0].YerelVar {
+	if out[0].SK != "c_b" || out[0].Sonk != "" || out[0].Baglanabi != nil || out[0].YerelVar || out[0].BaglFark || out[0].BaglAlan != "" {
 		t.Errorf("c_b grubu: %+v", out[0])
 	}
 	a := out[1]
 	if a.SK != "c_a" || a.N != 2 || a.Boyut != 10 || a.Rid != 3 || !a.YerelVar || a.Baglanabi == nil || *a.Baglanabi != 9403 || a.Sonk == "" {
 		t.Errorf("c_a grubu: %+v", a)
+	}
+	// Hedef domain a2.test, yedekler a.test'in (ve reseller 3 ≠ 0): arayüz baştan uyarsın.
+	if a.BaglAlan != "a2.test" || !a.BaglFark {
+		t.Errorf("c_a: baglanabilir_alan_adi=%q baglanabilir_farkli=%v (a2.test, true beklenir)", a.BaglAlan, a.BaglFark)
 	}
 	yerelSay := 0
 	for _, y := range a.Yedekler {
@@ -171,7 +177,8 @@ func TestAdvListe_GrupluYalnizYetimEnYeniOnce(t *testing.T) {
 func TestAdvBagla(t *testing.T) {
 	db := silinenDB(t)
 	r := advRouter(db, &Handlers{DB: db})
-	a := silinenYetim(t, db, 9501, "a.test", "c_bag", "c_bag-20261001-000000.tar.gz", 8, "NULL") // farklı sahip de olsa YÖNETİCİ bağlar
+	// Yedek a.test / reseller 8 → hedef yeni.test / reseller 9: FARKLI müşteri (aynı sk).
+	a := silinenYetim(t, db, 9501, "a.test", "c_bag", "c_bag-20261001-000000.tar.gz", 8, "NULL")
 	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (9502,'yeni.test','c_bag',9)`)
 	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9503,'baska.test','c_baska')`)
 	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9504,'diger.test','c_bag2')`)
@@ -180,6 +187,9 @@ func TestAdvBagla(t *testing.T) {
 
 	if kod, _ := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9503}`); kod != 400 {
 		t.Errorf("sk uyuşmazlığı 400 olmalı: %d", kod)
+	}
+	if kod, _ := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9503,"zorla":true}`); kod != 400 {
+		t.Errorf("sk uyuşmazlığı zorla ile de 400 olmalı (zorla yalnız alan adı/sahip farkını aşar): %d", kod)
 	}
 	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND silinme IS NOT NULL`, a) != 1 {
 		t.Fatal("reddedilen bağlamada satır değişti")
@@ -195,18 +205,31 @@ func TestAdvBagla(t *testing.T) {
 	if kod, _ := advIstek(r, "POST", "/s/BAD..sk/bagla", `{"domain_id":9502}`); kod != 400 {
 		t.Errorf("geçersiz sk: %d", kod)
 	}
+	// 🔴 Farklı alan adı/sahip + onay yok → 409, satıra DOKUNULMAZ.
 	kod, g := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9502}`)
-	if kod != 200 || !strings.Contains(g, `"baglanan":1`) {
-		t.Fatalf("bağlama: %d %s", kod, g)
+	if kod != 409 || !strings.Contains(g, `"alan_adi_farkli":true`) || !strings.Contains(g, `"yedek_alan_adi":"a.test"`) ||
+		!strings.Contains(g, `"hedef_alan_adi":"yeni.test"`) || !strings.Contains(g, `"yedek_reseller_id":8`) || !strings.Contains(g, `"hedef_reseller_id":9`) || !strings.Contains(g, `"ok":false`) {
+		t.Fatalf("farklı müşteri onaysız bağlanmamalı (409): %d %s", kod, g)
 	}
-	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=9502 AND silinme IS NULL AND son_kullanma IS NULL`, a) != 1 {
-		t.Error("satır bağlanmadı / silinme temizlenmedi")
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=0 AND eski_domain_id=9501 AND silinme IS NOT NULL AND tip='oto'`, a) != 1 {
+		t.Fatal("409 sonrası satır DEĞİŞTİ")
+	}
+	if kod, _ := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9502,"zorla":false}`); kod != 409 {
+		t.Errorf("zorla:false da 409 olmalı: %d", kod)
+	}
+	// Açık onay → bağlanır.
+	kod, g = advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9502,"zorla":true}`)
+	if kod != 200 || !strings.Contains(g, `"baglanan":1`) {
+		t.Fatalf("zorla=true bağlama: %d %s", kod, g)
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=9502 AND eski_domain_id=0 AND silinme IS NULL AND son_kullanma IS NULL AND tip='kurtarma'`, a) != 1 {
+		t.Error("satır bağlanmadı / silinme temizlenmedi / tip kurtarma olmadı")
 	}
 	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=9504`, canliSatir) != 1 {
 		t.Error("domaini canlı olan (yetim olmayan) satır başka domaine TAŞINDI")
 	}
 	if _, g := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9502}`); !strings.Contains(g, `"baglanan":0`) {
-		t.Errorf("ikinci bağlama 0 olmalı: %s", g)
+		t.Errorf("ikinci bağlama 0 olmalı (yetim kalmadı, farklılık da yok): %s", g)
 	}
 }
 
@@ -338,7 +361,8 @@ func TestAdvSupur_YalnizSuresiDolanYetimSilinir(t *testing.T) {
 	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9702,'c.test','c_s')`)
 	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, silinme, son_kullanma) VALUES (9702,'c_s-20261004-000000.tar.gz',NOW(),DATE_SUB(NOW(), INTERVAL 1 DAY))`)
 	d := satirID(t, db, 9702)
-	// Silme izi olmayan (silinme NULL) ve domain'i olmayan satır: otomatik temizlenmez.
+	// Silme izi olmayan (silinme NULL) ve domain'i olmayan satır: süpürme önce yetim İŞARETLER (S2),
+	// yeni saklama süresi (7 gün) başlar → aynı turda SİLİNMEZ.
 	izsizDosya := silinenDosya(t, kok, "c_iz", "c_iz-20261001-000000.tar.gz")
 	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici, son_kullanma) VALUES (9703,'c_iz-20261001-000000.tar.gz','c_iz',DATE_SUB(NOW(), INTERVAL 1 DAY))`)
 	e := satirID(t, db, 9703)
@@ -357,7 +381,10 @@ func TestAdvSupur_YalnizSuresiDolanYetimSilinir(t *testing.T) {
 		}
 	}
 	if !satirVarMi(t, db, e) || !varMi(izsizDosya) {
-		t.Error("silme izi olmayan satır otomatik silinmemeli")
+		t.Error("silme izi olmayan satır aynı turda silinmemeli")
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=0 AND eski_domain_id=9703 AND silinme IS NOT NULL AND sistem_kullanici='c_iz' AND son_kullanma>NOW()`, e) != 1 {
+		t.Error("silme izi olmayan satır yetim işaretlenip yeni süreye sokulmalıydı (S2)")
 	}
 }
 
@@ -365,21 +392,21 @@ func TestAdvSupur_Limit200_CtxIptali_UzakHata(t *testing.T) {
 	db := silinenDB(t)
 	silinenOrtam(t)
 	for i := 0; i < 205; i++ {
-		g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici, silinme, son_kullanma) VALUES (9801,?, 'c_lim', NOW(), DATE_SUB(NOW(), INTERVAL 1 DAY))`,
+		g113_exec(t, db, `INSERT INTO backups (domain_id, eski_domain_id, dosya, sistem_kullanici, silinme, son_kullanma) VALUES (0,9801,?, 'c_lim', NOW(), DATE_SUB(NOW(), INTERVAL 1 DAY))`,
 			fmt.Sprintf("c_lim-20261001-%06d.tar.gz", i))
 	}
 	iptal, cancel := context.WithCancel(context.Background())
 	cancel()
 	SilinenSupur(iptal, db)
-	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9801`); n != 205 {
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9801`); n != 205 {
 		t.Fatalf("iptal edilmiş ctx ile hiçbir şey silinmemeli: %d", n)
 	}
 	SilinenSupur(context.Background(), db)
-	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9801`); n != 5 {
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9801`); n != 5 {
 		t.Errorf("tur başına en çok 200 silinmeli, 5 kalmalı: %d", n)
 	}
 	SilinenSupur(context.Background(), db)
-	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9801`); n != 0 {
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9801`); n != 0 {
 		t.Errorf("ertesi tur kalanı silmeli: %d", n)
 	}
 
@@ -398,7 +425,7 @@ func TestAdvSupur_EszamanliTurlar(t *testing.T) {
 	db := silinenDB(t)
 	silinenOrtam(t)
 	for i := 0; i < 40; i++ {
-		g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici, silinme, son_kullanma) VALUES (9901,?, 'c_es', NOW(), DATE_SUB(NOW(), INTERVAL 1 DAY))`,
+		g113_exec(t, db, `INSERT INTO backups (domain_id, eski_domain_id, dosya, sistem_kullanici, silinme, son_kullanma) VALUES (0,9901,?, 'c_es', NOW(), DATE_SUB(NOW(), INTERVAL 1 DAY))`,
 			fmt.Sprintf("c_es-20261001-%06d.tar.gz", i))
 	}
 	var wg sync.WaitGroup
@@ -407,7 +434,7 @@ func TestAdvSupur_EszamanliTurlar(t *testing.T) {
 		go func() { defer wg.Done(); SilinenSupur(context.Background(), db) }()
 	}
 	wg.Wait()
-	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9901`); n != 0 {
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9901`); n != 0 {
 		t.Errorf("eşzamanlı turlardan sonra hepsi silinmeli: %d", n)
 	}
 }

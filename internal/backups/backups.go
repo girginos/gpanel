@@ -574,7 +574,13 @@ func yedekBitir(id int64) {
 // birakmak olurdu (sorunu gorunmez kilmak). Bir sonraki turda tekrar
 // denenir.
 func yedekKaydiniYokEt(ctx context.Context, db *sql.DB, domainID int64, sk, dosya string, bid int64) (yerelHata string, err error) {
-	if e := YedekUzaktanSil(ctx, db, domainID, dosya); e != nil {
+	return yedekKaydiniYokEtFn(ctx, db, sk, dosya, bid, func() error { return YedekUzaktanSil(ctx, db, domainID, dosya) })
+}
+
+// yedekKaydiniYokEtFn — yedekKaydiniYokEt'in gövdesi; uzak silme adımı çağırandan gelir (yetim yedek
+// için domain hedefi değil, silme anında alınan anlık görüntü hedefi kullanılır: bkz. silinen.go).
+func yedekKaydiniYokEtFn(ctx context.Context, db *sql.DB, sk, dosya string, bid int64, uzakSil func() error) (yerelHata string, err error) {
+	if e := uzakSil(); e != nil {
 		return "", e
 	}
 	if e := os.Remove(filepath.Join(yedekKok, sk, dosya)); e != nil && !os.IsNotExist(e) {

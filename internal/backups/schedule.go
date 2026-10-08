@@ -33,6 +33,15 @@ func StartScheduler(db *sql.DB) {
 	// Panel yeniden baslarken yarim kalan isleri kapat (UI sonsuz "calisiyor" gostermesin).
 	AsiliIsleriKapat(db)
 
+	// S2: silme izi yazılamamış (süreç çöktü/UPDATE başarısız) sahipsiz yedek satırlarını işaretle.
+	// Ayrı goroutine, idempotent; 04:00 süpürmesi de aynısını yapar (bkz. silinen.go).
+	go func() {
+		time.Sleep(45 * time.Second)
+		sctx, iptal := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer iptal()
+		SilinenSahipsizIsaretle(sctx, db)
+	}()
+
 	go func() {
 		// İlk run: panel başladıktan 2 dakika sonra (warmup)
 		time.Sleep(2 * time.Minute)

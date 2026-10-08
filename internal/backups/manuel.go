@@ -221,8 +221,13 @@ func beklemedenMuaf(rol string) bool { return rol == "admin" }
 // ---- Kaynak ----
 
 // yedekKaynagi: liste rozeti. Zamanlayıcı ('oto'), eski bash zamanlayıcısı
-// ('planli') ve kök toplu işi (job_id dolu) → "sistem"; geri kalan → "manuel".
+// ('planli') ve kök toplu işi (job_id dolu) → "sistem"; silinmiş hesaptan bağlanan ('kurtarma') →
+// "kurtarma"; geri kalan → "manuel".
 func yedekKaynagi(tip string, jobID sql.NullInt64) string {
+	// Silinmiş hesaptan domaine bağlanan yedek: ne sistem ne manuel (bkz. silinen.go S3).
+	if tip == TipKurtarma {
+		return "kurtarma"
+	}
 	if tip == "oto" || tip == "planli" || jobID.Valid {
 		return "sistem"
 	}

@@ -19,7 +19,8 @@ import (
 // orphan tablolar ve domains satırı) YOK eder. Tekil silme (Delete) ile bayi silme
 // zinciri AYNI yolu kullanır: iki yol ayrışırsa biri kalıntı bırakır.
 // 🔴 YEDEKLER SİLME İLE İLGİLENMEZ: yedek dizini ve uzak kopyalar olduğu yerde kalır; silme
-// yalnız backups satırlarını yetim işaretler (backups.SilinenIz.Yaz; FK yok, satırlar kalır), süre dolunca günlük tur temizler.
+// yalnız backups satırlarını yetim işaretler (backups.SilinenIz.Yaz; FK yok, satırlar kalır ve domain_id=0'a taşınır,
+// eski kimlik eski_domain_id'de; domaine özel FTP/SFTP hedefinin şifreli anlık görüntüsü de saklanır), süre dolunca günlük tur temizler.
 // Çağıran: kilit.Bayi kilidini tutar ve denetim kaydını yazar.
 // Dönen kapsam, satır gitmeden ÖNCE çözülen domains.reseller_id'dir (denetim için).
 // İstemci kopsa da yıkım yarım kalmasın diye çağıran context.WithoutCancel vermelidir.
