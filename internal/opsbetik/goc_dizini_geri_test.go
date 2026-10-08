@@ -201,7 +201,7 @@ func TestUpdateGocDiziniCagriSirasi(t *testing.T) {
 	}
 	rb := idx(`yeni sürüm sağlıklı başlamadı`, 0)
 	dur := idx(`systemctl stop girginospanel`, rb)
-	geri := idx(`goc_dizini_geri_al || true`, rb)
+	geri := idx(`goc_dizini_geri_al && goc_dizini_temizle || true`, rb)
 	restart := idx(`systemctl restart girginospanel; sleep 3`, rb)
 	dbGeri := idx(`zcat "$PREDUMP" | mysql`, rb)
 	if !(dur < geri && geri < restart) {

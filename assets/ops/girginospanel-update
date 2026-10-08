@@ -229,6 +229,36 @@ goc_dizini_temizle() {
 }
 # <<< goc-dizini-geri
 
+# >>> frontend-geri
+# 🔴 FRONTEND DE ROLLBACK'TE GERİ ALINIR. 7. adım frontend-dist'i atomik takas eder ve güncelleme
+# öncesini ${FDIST}.old olarak bırakır. Rollback ikiliyi, DB'yi ve göç dizinini geri alıp frontend'e
+# dokunmazsa "geri alınmış" sistem ESKİ ikili + YENİ arayüz olur: yeni arayüz henüz olmayan uç
+# noktaları çağırır ve yeni alanları eski ikiliye gönderir. 181 provasında ölçüldü: rollback sonrası
+# index-<yeni>.js sürdü, eskisi frontend-dist.old'da kaldı.
+FDIST_TAKAS=0   # 1 = BU koşu frontend-dist'i takas etti: ${FDIST}.old güncelleme öncesidir (eski koşudan kalan .old DEĞİL)
+
+# frontend_geri_al — rollback'te panel DURMUŞKEN çağrılır. Dizin kalıcı olarak yok kalmaz: yeni arayüz
+# kenara alınır, eskisi yerine konur; ikinci adım başarısızsa yeni arayüz geri konur.
+frontend_geri_al() {
+  [ "$FDIST_TAKAS" = 1 ] && [ -d "${FDIST}.old" ] || return 1
+  local kenar="${FDIST}.red.$$"
+  rm -rf "$kenar" 2>/dev/null || true
+  if [ -e "$FDIST" ] && ! mv "$FDIST" "$kenar"; then
+    warn "frontend-dist geri alınamadı — elle: mv $FDIST $FDIST.red; mv $FDIST.old $FDIST"
+    return 1
+  fi
+  if ! mv "${FDIST}.old" "$FDIST"; then
+    [ -e "$kenar" ] && mv "$kenar" "$FDIST" 2>/dev/null || true
+    warn "frontend-dist geri alınamadı (yeni arayüz yerinde bırakıldı) — elle: mv $FDIST.old $FDIST"
+    return 1
+  fi
+  rm -rf "$kenar" 2>/dev/null || true
+  command -v restorecon >/dev/null && restorecon -R "$FDIST" >/dev/null 2>&1 || true
+  FDIST_TAKAS=0
+  ok "frontend-dist güncelleme öncesine döndürüldü"
+}
+# <<< frontend-geri
+
 # çalışan panelin /healthz'inden sürüm (binary'nin --version flag'i YOK, asla çalıştırmıyoruz)
 # 🔴 SAGLIK URL'INI VARSAYMA — env'den OKU. Sabit :8080, portu degistirilmis
 # (girginospanel-port-swap.sh) saglikli bir sunucuda saglik kontrolunu HIC
@@ -740,6 +770,7 @@ if [ -f "$A/frontend-dist.tar.gz" ]; then
   rm -rf "${FDIST}.old"
   [ -d "$FDIST" ] && mv "$FDIST" "${FDIST}.old"
   mv "$FDNEW" "$FDIST"
+  FDIST_TAKAS=1   # rollback ${FDIST}.old'u geri koyabilsin (bkz. frontend-geri bloğu)
   sync   # reboot-güvenli: delayed-alloc veri kaybını önlemek için diske flush et
   ok "frontend-dist güncellendi (atomik doğrulanmış swap)"
 fi
@@ -1087,8 +1118,12 @@ else
   systemctl stop girginospanel >/dev/null 2>&1 || true
 
   # Göç dizinini güncelleme öncesine döndür: yoksa ESKİ ikili açılırken bu güncellemenin göç
-  # dosyalarını geri alınmış DB'ye yeniden uygular (bkz. goc-dizini-geri bloğu).
-  goc_dizini_geri_al || true
+  # dosyalarını geri alınmış DB'ye yeniden uygular (bkz. goc-dizini-geri bloğu). Geri alma
+  # başarılıysa yedek artık gereksiz (bayat .bak kalmasın); başarısızsa elle kurtarma için durur.
+  goc_dizini_geri_al && goc_dizini_temizle || true
+
+  # Arayüz de güncelleme öncesine döner: ESKİ ikili + YENİ arayüz tutarsızdır (bkz. frontend-geri bloğu).
+  frontend_geri_al || true
 
   # 10e'nin geçirdiği birimi geri koy: ESKİ ikili kimlikli birimle açılamaz (sırları
   # yalnız ortamdan okur). env dosyası hiç değişmedi → eski birim + eski ikili tam eski hal.
