@@ -76,7 +76,8 @@ export default function SunucuOptimize() {
       await api.post('/system/optimize/baslat')
       setLog(cevir("Optimizasyon başlatıldı…") + '\n')
       setCalisiyor(true)
-    } catch (e: any) {
+    } catch (err) {
+      const e = err as { response?: { data?: { hata?: string } }; message?: string }
       setHata(e?.response?.data?.hata || e?.message || cevir("optimizasyon başlatılamadı"))
     } finally { setBaslatiliyor(false) }
   }

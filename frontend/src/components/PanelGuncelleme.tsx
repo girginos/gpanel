@@ -54,7 +54,7 @@ const cevir = (tr: string): string => (i18n.language === "en" ? (CMP_EN[tr] || O
 
 // ANSI renk kaçış dizilerini (\x1b[..m) sil — terminal renkleri tarayıcıda
 // çıplak '[32m' gibi görünmesin. Log salt-okunur gösterildiği için düz metin yeter.
-const ansiSil = (t: string): string => t.replace(/\x1b\[[0-9;]*m/g, '')
+const ansiSil = (t: string): string => t.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), '')
 
 function bitisSonucu(logMetin: string, calis: boolean, durum: string): 'tamam' | 'hata' | null {
   // 🔴 Verdict UNIT durumundan (kesin exit sinyali) alinir — log regex DEGIL.
@@ -141,7 +141,8 @@ export default function PanelGuncelleme() {
       await api.post('/system/guncelleme/baslat')
       setLog('Güncelleme başlatıldı…\n')
       setCalisiyor(true)
-    } catch (e: any) {
+    } catch (err) {
+      const e = err as { response?: { data?: { hata?: string } }; message?: string }
       setHata(e?.response?.data?.hata || e?.message || cevir("güncelleme başlatılamadı"))
     } finally { setBaslatiliyor(false) }
   }

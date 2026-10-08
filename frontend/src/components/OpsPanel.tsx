@@ -138,16 +138,17 @@ function Lejant({ seriler }: { seriler: SeriTanim[] }) {
   )
 }
 
-function Ipucu({ active, payload, label, bicim }: any) {
+type IpucuYuk = { dataKey?: string | number; color?: string; stroke?: string; name?: string | number; value?: number }
+function Ipucu({ active, payload, label, bicim }: { active?: boolean; payload?: IpucuYuk[]; label?: React.ReactNode; bicim: (v: number) => string }) {
   if (!active || !payload?.length) return null
   return (
     <div className="ops-tip">
       <strong>{label}</strong>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.dataKey}>
           <i style={{ background: p.color || p.stroke }} />
           <span>{p.name}</span>
-          <b>{bicim(p.value)}</b>
+          <b>{bicim(p.value as number)}</b>
         </div>
       ))}
     </div>
@@ -155,7 +156,7 @@ function Ipucu({ active, payload, label, bicim }: any) {
 }
 
 function Panel({ baslik, ikon: Ikon, sag, genis, children }: {
-  baslik: string; ikon: any; sag?: React.ReactNode; genis?: boolean; children: React.ReactNode
+  baslik: string; ikon: React.ElementType; sag?: React.ReactNode; genis?: boolean; children: React.ReactNode
 }) {
   return (
     <section className={`ops-panel${genis ? ' genis' : ''}`}>
@@ -277,7 +278,7 @@ export default function OpsPanel() {
       {kutular.length > 0 && (
         <div className="ops-stats">
           {kutular.map((k) => (
-            <div className="ops-stat" key={k.ad} style={{ ['--d' as any]: k.renk }}>
+            <div className="ops-stat" key={k.ad} style={{ '--d': k.renk } as React.CSSProperties}>
               <h4><k.ikon />{k.ad}</h4>
               <b>{k.deger}</b>
               <small>{k.alt}</small>
@@ -306,7 +307,7 @@ export default function OpsPanel() {
                     </linearGradient>
                   </defs>
                   {izgara}{xEksen}
-                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: any) => `%${v}`} />
+                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: number) => `%${v}`} />
                   <ReferenceLine y={90} stroke={GR.refKrit} strokeDasharray="4 4" />
                   <Tooltip content={<Ipucu bicim={yuzde} />} />
                   <Area type="monotone" dataKey="cpuMax" name={cevir('tepe')} stroke={RENK.cpuMax} strokeWidth={1} strokeDasharray="3 3" fill="none" dot={false} isAnimationActive={false} />
@@ -332,7 +333,7 @@ export default function OpsPanel() {
                     </linearGradient>
                   </defs>
                   {izgara}{xEksen}
-                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: any) => `%${v}`} />
+                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: number) => `%${v}`} />
                   <Tooltip content={<Ipucu bicim={yuzde} />} />
                   <Area type="monotone" dataKey="bellek" name={cevir('Bellek')} stroke={RENK.bellek} strokeWidth={2} fill="url(#opsMem)" dot={false} isAnimationActive={false} />
                   <Area type="monotone" dataKey="swap" name={cevir('Swap')} stroke={RENK.swap} strokeWidth={1.6} fill="none" dot={false} isAnimationActive={false} />
@@ -381,7 +382,7 @@ export default function OpsPanel() {
                     </linearGradient>
                   </defs>
                   {izgara}{xEksen}
-                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: any) => `%${v}`} />
+                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} domain={[0, 100]} width={38} tickFormatter={(v: number) => `%${v}`} />
                   <ReferenceLine y={90} stroke={GR.refKrit} strokeDasharray="4 4" />
                   <Tooltip content={<Ipucu bicim={yuzde} />} />
                   <Area type="monotone" dataKey="disk" name={cevir('Disk')} stroke={RENK.disk} strokeWidth={2} fill="url(#opsDisk)" dot={false} isAnimationActive={false} />
@@ -407,7 +408,7 @@ export default function OpsPanel() {
                     </linearGradient>
                   </defs>
                   {izgara}{xEksen}
-                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} width={68} tickFormatter={(v: any) => hiz(v)} />
+                  <YAxis axisLine={false} tickLine={false} tick={eksenStil} width={68} tickFormatter={(v: number) => hiz(v)} />
                   <ReferenceLine y={0} stroke={GR.sifir} />
                   <Tooltip content={<Ipucu bicim={hiz} />} />
                   <Area type="monotone" dataKey="rx" name={cevir('Gelen')} stroke={RENK.rx} strokeWidth={2} fill="url(#opsRx)" dot={false} isAnimationActive={false} />
