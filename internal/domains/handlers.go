@@ -31,7 +31,6 @@ import (
 	"girginospanel/internal/nginxset"
 	"girginospanel/internal/plans"
 	"girginospanel/internal/provisioner"
-	"girginospanel/internal/redis"
 	"girginospanel/internal/subdomain"
 
 	"github.com/go-chi/chi/v5"
@@ -721,72 +720,16 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	// engellemeye calistigi durumu URETIYORDU.
 	silCtx := context.WithoutCancel(r.Context())
 
-	if isDemo == 0 {
-		// MariaDB'deki gerçek DB'leri kaldır (CASCADE FK sadece panel DB metadata'sını siler)
-		_ = hesaplar.MySQLDropAllForDomain(h.DB, id)
-		// Ek (addon) alan adları: vhost + sertifika (acme kaydı) + günlük + bölge + satır
-		// (docroot'lar ev dizinidir: userdel -r siler). Deprovision'ın nginx reload'undan ÖNCE.
-		subdomain.EkAlanlariTemizle(silCtx, h.DB, id, sk)
-		// nginx vhost + PHP pool + Linux user + per-tenant FPM servisi (Deprovision içinde)
-		if err := provisioner.Deprovision(alanAdi, sk); err != nil {
-			log.Printf("deprovision warn (%s): %v", alanAdi, err)
-		}
-		// Kaynak-limit slice'ını (girginos-<sk>.slice) kaldır (Deprovision FPM'i söktü).
-		_ = kaynaklimit.SystemdSliceSil(sk)
-		// Redis tenant cache: Valkey ACL user + WP drop-in + cp_domain_redis satırı.
-		// cp_domain_redis'te CASCADE FK olmadığı için domain silinince satır orphan kalıyordu.
-		redis.KapatDomain(h.DB, id, sk)
-		// 🔴 YEDEK DİZİNİ SİLİNİR.
-		//
-		// Buradaki eski yorum "yedekler kurtarma için KASITLI korunur" diyordu
-		// ama kod bunun TERSİNİ yapıyordu: Deprovision içindeki RemoveAll
-		// dizini zaten siliyordu. Yorumla davranış arasındaki bu çelişki,
-		// "yanlışlıkla silinen domainin yedeğinden kurtarma" diye var
-		// sanılan ama HİÇ VAR OLMAYAN bir özelliği belgeliyordu.
-		//
-		// Davranış korunuyor (silinen domainin yedekleri kök diskte sınırsız
-		// birikmemeli), ama artık DOĞRU yerde ve UZAK kopyalar temizlendikten
-		// SONRA yapılıyor (yukarıdaki uzakTemizlik adımı).
-		// 🔴 KORUMALI YARDIMCI. Ham `os.RemoveAll(filepath.Join(...))` hicbir
-		// kontrol yapmiyordu: `sk` bos gelirse yol KOK dizine cozuluyor ve
-		// TUM kiracilarin yedekleri siliniyordu (DB bos sistem_kullanici'yi
-		// kabul ediyor — olculdu). RemoveDomainBackups `c_` on-ek ve
-		// path-escape kontrolu yapiyor ama cagirani kalmamisti.
-		if e := backups.RemoveDomainBackups(sk); e != nil {
-			log.Printf("yedek dizini silinemedi (%s): %v", sk, e)
-		}
-	}
-
-	// Orphan temizliği: bu tablolarda FK cascade yok (mevcut kurulumlar için),
-	// domain silinince satırlar orphan kalmasın diye açıkça sil.
-	// 🔴 Domaine-ÖZEL plan da gider: katalog planları (domain_id NULL) korunur.
-	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM service_plans WHERE domain_id=?`, id)
-	// Hostinge özel limitler (0120; FK ON DELETE CASCADE da siler — FK'si kurulamamış
-	// eski şemada da artık kalmasın).
-	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM hosting_limit_ust WHERE domain_id=?`, id)
-	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM domain_trafik WHERE domain_id=?`, id)
-	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM domain_trafik_imlec WHERE domain_id=?`, id)
-	_, _ = h.DB.ExecContext(silCtx, `DELETE FROM wp_bakim WHERE domain_id=?`, id)
-
-	// Denetim kaydi SILMEDEN once alinir: kapsam (domains.reseller_id) satir
-	// gittikten sonra cozulemez.
-	kapsamSil := httpx.DomainKapsam(h.DB, id)
+	kapsamSil, yikErr := HostingYik(silCtx, h.DB, id, alanAdi, sk, isDemo)
 	uidSil, kulSil := middleware.Aktor(r)
-	if _, err := h.DB.ExecContext(silCtx, `DELETE FROM domains WHERE id=?`, id); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "silme hatası: "+err.Error())
+	if yikErr != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "silme hatası: "+yikErr.Error())
 		return
 	}
 	httpx.Denetim(h.DB, r, uidSil, kulSil, "hosting.sil", alanAdi, "sistem_kullanici="+sk, kapsamSil, true)
 	destekiptal.Domain(r.Context(), h.DB, id, protokol.IptalAlanSilme, uidSil, kulSil)
 
-	// BIND zone temizliği DELETE'ten SONRA: updateZoneIncludes zones.conf'u domains
-	// tablosundan yeniden üretir; domain hâlâ tabloda olsaydı (eski sıra) son silinen
-	// domainin zone include'u geri yazılırdı (dangling → named reload hatası).
-	if isDemo == 0 {
-		if err := dns.DeleteZone(r.Context(), h.DB, alanAdi); err != nil {
-			log.Printf("DNS DeleteZone warn (%s): %v", alanAdi, err)
-		}
-	}
+	HostingYikSonrasi(r.Context(), h.DB, alanAdi, isDemo)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"silinen": map[string]string{"alan_adi": alanAdi, "sistem_kullanici": sk},

@@ -13,7 +13,10 @@ import (
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/backups"
 	destekiptal "girginospanel/internal/destek/iptal"
+	"girginospanel/internal/destek/protokol"
+	"girginospanel/internal/domains"
 	"girginospanel/internal/hesapaski"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kilit"
@@ -379,7 +382,7 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DELETE /resellers/{id} — reseller sil (admin). Hosting hesabi varsa reddet.
+// DELETE /resellers/{id} — reseller sil (admin). Altindaki tum hosting + musteri kullanicilari ile birlikte.
 func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	// 🔴 ParseInt hatasi 0'a dusuyordu: /resellers/abc ya da /resellers/0 istegi
 	// "DELETE FROM service_plans WHERE reseller_id=0" yoluna, yani KOKUN GLOBAL
@@ -395,14 +398,70 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "bayi bulunamadı")
 		return
 	}
-	var dom int
-	_ = h.DB.QueryRow(`SELECT COUNT(*) FROM domains WHERE reseller_id=?`, id).Scan(&dom)
-	if dom > 0 {
-		uid, kul := middleware.Aktor(r)
-		httpx.Denetim(h.DB, r, uid, kul, "bayi.sil", strconv.FormatInt(id, 10),
-			fmt.Sprintf("reddedildi: %d hosting hesabı var", dom), 0, false)
-		httpx.WriteError(w, http.StatusConflict, "önce bu reseller'ın hosting hesaplarını taşıyın/silin")
+	// Bayi silinince altındaki HER ŞEY gider: hosting hesapları (vhost, PHP havuzu,
+	// Linux kullanıcısı, DB'ler, yedekler, DNS) ve bayinin müşteri kullanıcıları.
+	// Eskiden hosting varsa 409 dönüyordu; kullanıcı kararı: bayi silmek = hepsini silmek.
+	// Admin'e onay arayüzde alınır (AdminOnly rota). Aynı bayinin askı/silme/plan
+	// işlemleriyle yarışmasın diye bayi kilidi tüm zincir boyunca tutulur.
+	kl := kilit.Bayi(id)
+	kl.Lock()
+	defer kl.Unlock()
+	type hst struct {
+		id     int64
+		ad, sk string
+		isDemo int
+	}
+	var hostlar []hst
+	if rows, e := h.DB.QueryContext(r.Context(),
+		`SELECT id, alan_adi, sistem_kullanici, is_demo FROM domains WHERE reseller_id=? ORDER BY id`, id); e == nil {
+		for rows.Next() {
+			var x hst
+			if rows.Scan(&x.id, &x.ad, &x.sk, &x.isDemo) == nil {
+				hostlar = append(hostlar, x)
+			}
+		}
+		rows.Close()
+	} else {
+		httpx.WriteError(w, http.StatusInternalServerError, "hosting listesi okunamadı: "+e.Error())
 		return
+	}
+	uid, kul := middleware.Aktor(r)
+	uzagiYoksay := r.URL.Query().Get("uzagi_yoksay") == "1"
+	// 1. geçiş: uzak (FTP/SFTP) yedekler. DB satırı gidince erişim bilgisi de gider;
+	// temizlenemeyen varsa HİÇBİR ŞEY silinmeden dur (kısmi silme olmasın).
+	if !uzagiYoksay {
+		for _, x := range hostlar {
+			if kalan, e := backups.DomainYedekleriniTemizle(r.Context(), h.DB, x.id); kalan > 0 {
+				msg := fmt.Sprintf("%s alan adının uzak depodaki %d yedeği silinemedi; hiçbir şey silinmedi", x.ad, kalan)
+				if e != nil {
+					msg += " (" + e.Error() + ")"
+				}
+				httpx.Denetim(h.DB, r, uid, kul, "bayi.sil", strconv.FormatInt(id, 10), "reddedildi: "+msg, 0, false)
+				httpx.WriteJSON(w, http.StatusConflict, map[string]any{"ok": false, "hata": msg, "uzagi_yoksay": true})
+				return
+			}
+		}
+	}
+	// 2. geçiş: yıkım. İstemci kopsa da yarım kalmasın.
+	silCtx := context.WithoutCancel(r.Context())
+	silinenHost := 0
+	for _, x := range hostlar {
+		kap, e := domains.HostingYik(silCtx, h.DB, x.id, x.ad, x.sk, x.isDemo)
+		if e != nil {
+			httpx.Denetim(h.DB, r, uid, kul, "hosting.sil", x.ad, "bayi silme zinciri HATA: "+e.Error(), kap, false)
+			httpx.WriteError(w, http.StatusInternalServerError,
+				fmt.Sprintf("%s silinemedi (%d hosting silindi, bayi duruyor): %v", x.ad, silinenHost, e))
+			return
+		}
+		silinenHost++
+		httpx.Denetim(h.DB, r, uid, kul, "hosting.sil", x.ad, "sistem_kullanici="+x.sk+" (bayi silme zinciri)", kap, true)
+		destekiptal.Domain(silCtx, h.DB, x.id, protokol.IptalAlanSilme, uid, kul)
+		domains.HostingYikSonrasi(silCtx, h.DB, x.ad, x.isDemo)
+	}
+	// Bayinin müşteri kullanıcıları: fk_users_reseller ON DELETE SET NULL olduğundan
+	// silinmezse reseller_id=NULL kalıp SAHİPSİZ (köke ait gibi) hesaplara dönerlerdi.
+	if _, e := h.DB.ExecContext(silCtx, `DELETE FROM users WHERE reseller_id=? AND role='user'`, id); e != nil {
+		log.Printf("bayi %d müşteri kullanıcıları silinemedi: %v", id, e)
 	}
 	var bayiAd string
 	_ = h.DB.QueryRowContext(r.Context(), `SELECT username FROM users WHERE id=?`, id).Scan(&bayiAd)
@@ -438,7 +497,6 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi: "+err.Error())
 		return
 	}
-	uid, kul := middleware.Aktor(r)
 	bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "bayi_silindi")
 	destekiptal.Bayi(r.Context(), h.DB, id, true, uid, kul)
 	// Kapsam KOK: bayi artik yok; ID ileride yeniden kullanilirsa yeni bayi

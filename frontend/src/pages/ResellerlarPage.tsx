@@ -29,6 +29,7 @@ const RES_EN: Record<string, string> = {
   "oluşturuldu.": "created.",
   "Emin misiniz?": "Are you sure?",
   "bayisi silinsin mi?": "be deleted?",
+  "Bayinin tüm hosting hesapları (siteler, dosyalar, veritabanları, e-posta, yedekler) ve müşteri kullanıcıları da KALICI olarak silinir. Geri alınamaz.": "All of the reseller's hosting accounts (sites, files, databases, email, backups) and customer users will also be PERMANENTLY deleted. This cannot be undone.",
   "Bayi silindi.": "Reseller deleted.",
   "Silinemedi": "Could not delete",
   "Anasayfa": "Home",
@@ -163,7 +164,7 @@ export default function ResellerlarPage() {
   }
 
   async function sil(x: Reseller) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}\n\n${cevir("Bayinin tüm hosting hesapları (siteler, dosyalar, veritabanları, e-posta, yedekler) ve müşteri kullanıcıları da KALICI olarak silinir. Geri alınamaz.")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
     setHata(null); setOk(null); setSilinen(x.id)
     try { await api.delete(`/resellers/${x.id}`); setOk(cevir('Bayi silindi.')); toast.basari(cevir('Bayi silindi.')); yukle() }
     catch (err) {
