@@ -37,6 +37,14 @@ func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	// Plan var mı doğrula (+ reseller ise plan sahipligi: kendi plani veya global)
 	rid := middleware.ResellerIDFrom(r)
+	// 🔴 Bayi hostingini PLANSIZ bırakamaz: plansız hostingte tüm limitler "tanımsız =
+	// sınırsız" olur ve bayi havuzu (BayiTaahhut) o hostingi 0 sayar → bayi kendi hostingini
+	// plan_id=null ile sınırsız kaynağa çevirip paket havuzunu/kotalarını aşardı. Planı
+	// kaldırmak yalnız yöneticiye açıktır.
+	if req.PlanID == nil && rid > 0 {
+		httpx.WriteError(w, http.StatusForbidden, "bayi hosting hesabını plansız bırakamaz — bir plan seçin")
+		return
+	}
 	if req.PlanID != nil {
 		var planDomain sql.NullInt64
 		if err := h.DB.QueryRowContext(r.Context(),

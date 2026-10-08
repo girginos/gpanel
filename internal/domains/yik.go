@@ -46,6 +46,16 @@ func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, i
 	_, _ = db.ExecContext(ctx, `DELETE FROM domain_trafik WHERE domain_id=?`, id)
 	_, _ = db.ExecContext(ctx, `DELETE FROM domain_trafik_imlec WHERE domain_id=?`, id)
 	_, _ = db.ExecContext(ctx, `DELETE FROM wp_bakim WHERE domain_id=?`, id)
+	// domains(id)'e FK'si OLMAYAN ve hosting silinince KALAN hesap-kapsamlı tablolar:
+	//   - subdomanlar: tam_ad UNIQUE + ad-alanı kuralı (AdAlaniDenetle) yetim alt alan
+	//     adını sonsuza dek "dolu" tutar → o ad yeniden hosting/alt alan olarak açılamaz.
+	//     (alt tabloları — erişim kısıtı, PHP/web ayarı — subdomanlar(id) FK CASCADE ile gider)
+	//   - korumali_dizinler: dizin parola korumasının kullanıcı/htpasswd kayıtları
+	//   - cp_uygulama_kurulumlar: uygulama sihirbazı kurulum kayıtları
+	//   - cp_wp_kurulum: WordPress yönetici kullanıcısı + (şifreli) parolası
+	for _, t := range []string{"subdomanlar", "korumali_dizinler", "cp_uygulama_kurulumlar", "cp_wp_kurulum"} {
+		_, _ = db.ExecContext(ctx, `DELETE FROM `+t+` WHERE domain_id=?`, id) //nolint:gosec // G202: t SABİT dilimden gelir; kullanıcı girdisi yok, tablo adı ? ile parametrelenemez.
+	}
 
 	kapsam = httpx.DomainKapsam(db, id)
 	if _, err = db.ExecContext(ctx, `DELETE FROM domains WHERE id=?`, id); err != nil {

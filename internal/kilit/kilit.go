@@ -16,6 +16,7 @@ var (
 	mu       sync.Mutex
 	kilitler = map[int64]*sync.Mutex{}
 	hesaplar = map[string]*sync.Mutex{}
+	dbler    = map[int64]*sync.Mutex{}
 )
 
 // Hesap: verilen hosting hesabi (sistem kullanicisi) icin paylasilan kilit.
@@ -43,6 +44,23 @@ func Bayi(rid int64) *sync.Mutex {
 	if !ok {
 		k = &sync.Mutex{}
 		kilitler[rid] = k
+	}
+	return k
+}
+
+// DBOlustur: hosting (domain) başına "DB sayısı kapısı + DB oluşturma" kilidi.
+// kota.CheckDBEklenebilir (COUNT) ile MariaDB/db_accounts yazımı arasındaki TOCTOU
+// yarışını kapatır: eşzamanlı N istek aynı COUNT'u okuyup hepsi geçerek max_db sınırını
+// aşıyordu. Panel tek-node olduğundan süreç-içi kilit yeterlidir; kilit domain BAZINDA
+// (farklı hostingler birbirini beklemez). Askı/silme zincirlerinin kilitlerinden (Bayi,
+// Hesap) AYRIDIR: bu kilidin altında onlar alınmaz → kilit sırası çakışması yok.
+func DBOlustur(domainID int64) *sync.Mutex {
+	mu.Lock()
+	defer mu.Unlock()
+	k, ok := dbler[domainID]
+	if !ok {
+		k = &sync.Mutex{}
+		dbler[domainID] = k
 	}
 	return k
 }

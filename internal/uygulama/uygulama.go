@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"girginospanel/internal/hesaplar"
+	"girginospanel/internal/kilit"
 	"girginospanel/internal/kiraci"
 	"girginospanel/internal/kota"
 	"girginospanel/internal/selinuxetiket"
@@ -396,6 +397,10 @@ func uygulamaDBKur(ctx context.Context, db *sql.DB, a KurArgs,
 	}
 	// 🔴 DB SAYISI KAPISI: uygulama sihirbazı da hosting DB limitine (plan ⊕ üst yazım)
 	// tabidir; eskiden bu yol kota.CheckDBEklenebilir'i HİÇ çağırmıyordu.
+	// Kapı + oluşturma TEK kilit altında (eşzamanlı kurulumlar max_db'yi aşmasın).
+	dbKilit := kilit.DBOlustur(a.Domain.ID)
+	dbKilit.Lock()
+	defer dbKilit.Unlock()
 	if err := kota.CheckDBEklenebilir(ctx, db, a.Domain.ID); err != nil {
 		return "", nil, err
 	}
