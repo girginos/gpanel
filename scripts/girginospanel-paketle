@@ -139,7 +139,53 @@ fi
 #
 # build-assets.sh artik: ucretliyi (mail, calistirici) gecici yola derler,
 # gosp-paketle ile .gosp uretir, DUZ ikiliyi SILER; whitelabel duz kalir.
+# 🔴 ORTAK GOOGLE DRIVE OAUTH İSTEMCİSİ — ikiliye GÖMÜLÜR (2026-10-08).
+# ONCESI: bu betik istemciyi hic gommuyordu (build-assets.sh yalniz GOSP_GDRIVE_CLIENT_ID/SECRET
+# env'i verilirse gomer; verilmedi) ve kurulum/guncelleme betikleri /etc/girginospanel/
+# gdrive-istemci.json'i dagitmiyor. Sonuc: musteri sunucusunda "Google ile bagla" daima
+# "Ortak Google istemcisi bu surumde yapilandirilmamis" verirdi; yalniz dosyasi olan 181 calisirdi.
+# Kaynak sirasi: env (GOSP_GDRIVE_CLIENT_ID/SECRET) > $GOSP_GDRIVE_DOSYA (varsayilan
+# /etc/girginospanel/gdrive-istemci.json; duz ya da Google "JSON indir" bicimi). Degerler ASLA
+# yazdirilmaz. Bilerek gommeden uretmek icin GOSP_GDRIVE_YOK=1.
+if [ -z "${GOSP_GDRIVE_CLIENT_ID:-}" ] || [ -z "${GOSP_GDRIVE_CLIENT_SECRET:-}" ]; then
+  GDRIVE_DOSYA="${GOSP_GDRIVE_DOSYA:-/etc/girginospanel/gdrive-istemci.json}"
+  if [ -r "$GDRIVE_DOSYA" ]; then
+    GDRIVE_CIFT=$(python3 - "$GDRIVE_DOSYA" <<'PYGD'
+import json, re, sys
+d = json.load(open(sys.argv[1]))
+if isinstance(d.get("installed"), dict):
+    d = d["installed"]
+i = str(d.get("client_id", "")).strip()
+s = str(d.get("client_secret", "")).strip()
+if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{5,200}\.apps\.googleusercontent\.com", i):
+    sys.exit(2)
+if not re.fullmatch(r"[0-9A-Za-z._-]{8,128}", s):
+    sys.exit(3)
+print(i)
+print(s)
+PYGD
+    ) || dur "ortak Google istemci dosyası okunamadı/geçersiz biçim: $GDRIVE_DOSYA"
+    GOSP_GDRIVE_CLIENT_ID=$(printf '%s\n' "$GDRIVE_CIFT" | sed -n 1p)
+    GOSP_GDRIVE_CLIENT_SECRET=$(printf '%s\n' "$GDRIVE_CIFT" | sed -n 2p)
+    unset GDRIVE_CIFT
+  fi
+fi
+if [ -n "${GOSP_GDRIVE_CLIENT_ID:-}" ] && [ -n "${GOSP_GDRIVE_CLIENT_SECRET:-}" ]; then
+  export GOSP_GDRIVE_CLIENT_ID GOSP_GDRIVE_CLIENT_SECRET
+  ok "ortak Google Drive istemcisi ikiliye gömülecek (değerler gösterilmez)"
+elif [ "${GOSP_GDRIVE_YOK:-0}" = "1" ]; then
+  uyar "ortak Google Drive istemcisi GÖMÜLMEYECEK (GOSP_GDRIVE_YOK=1) — müşteride 'Google ile bağlan' çalışmaz"
+else
+  dur "ortak Google Drive istemcisi yok (env GOSP_GDRIVE_CLIENT_ID/SECRET ya da /etc/girginospanel/gdrive-istemci.json) — bilerek atlamak için GOSP_GDRIVE_YOK=1"
+fi
 GOSP_SURUM="$SURUM_TAM" bash "$S/scripts/build-assets.sh" || dur "build-assets.sh (eklenti yukleri + .gosp)"
+
+# 🔴 KAPI: gömülü istemci gerçekten ikilide mi? (build-assets.sh env'i sessizce yok sayarsa
+# paket yine "Google ile bağlan" kıran biçimde çıkardı — bu kapı o sessiz başarısızlığı kapatır.)
+if [ -n "${GOSP_GDRIVE_CLIENT_ID:-}" ]; then
+  grep -aqF -- "$GOSP_GDRIVE_CLIENT_ID" "$A/girginospanel-server" || dur "ortak Google istemcisi ikilide YOK (build-assets.sh gömmedi)"
+  ok "ortak Google Drive istemcisi ikilide gömülü"
+fi
 
 # 🔴 KAPI: Telegram destek ajani (panelden AYRI hizmet) build-assets.sh ile GOAMD64=v1 derlenir;
 # installer/updater $A/girginospanel-destek-ajan'a atif yapar — yoksa paket reddedilir.
