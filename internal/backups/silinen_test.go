@@ -197,7 +197,11 @@ func TestSilinenSupur_SKDevralindiysaYeniHostingeDokunmaz(t *testing.T) {
 	silinenDosya(t, kok, "c_ayni", "c_ayni-yeni-kayitli.tar.gz", time.Hour)
 	silinenDosya(t, kok, "c_ayni", "c_ayni-yeni-kayitsiz.tar.gz", time.Minute) // silinmeden SONRA yazılmış
 
-	dos, devralindi := silinenDosyalari(context.Background(), db, "c_ayni", time.Now().Add(-10*24*time.Hour))
+	var silinme time.Time
+	if err := db.QueryRow(`SELECT silinme FROM cp_silinen_yedek WHERE eski_domain_id=9121`).Scan(&silinme); err != nil {
+		t.Fatal(err)
+	}
+	dos, devralindi := silinenDosyalari(context.Background(), db, "c_ayni", silinme)
 	if !devralindi || len(dos) != 1 {
 		t.Fatalf("yalnız eski dosya sayılmalı: devralindi=%v dos=%v", devralindi, dos)
 	}

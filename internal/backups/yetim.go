@@ -33,7 +33,7 @@ func (h *Handlers) YetimIceAl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ents, err := os.ReadDir(filepath.Join(yedekKok, sk))
-	if err != nil {
+	if err != nil || !yedekDizinGuvenli(sk) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "alinan": 0, "mesaj": "bu hesap için diskte yedek klasörü yok"})
 		return
 	}

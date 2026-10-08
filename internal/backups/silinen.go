@@ -152,6 +152,16 @@ func SilinenIsaretle(ctx context.Context, db *sql.DB, domainID int64, alanAdi, s
 // silinenSupurKilit: aynı anda tek süpürme.
 var silinenSupurKilit sync.Mutex
 
+// yedekDizinGuvenli — BackupRoot/<sk> gerçek bir dizin mi (symlink DEĞİL)? Symlink ise dışarıya
+// okuma/silme/indirme açılırdı.
+func yedekDizinGuvenli(sk string) bool {
+	if !silinenSKGecerli(sk) {
+		return false
+	}
+	fi, err := os.Lstat(filepath.Join(yedekKok, sk))
+	return err == nil && fi.IsDir() && fi.Mode()&os.ModeSymlink == 0
+}
+
 var silinenSKRe = regexp.MustCompile(`^c_[a-z0-9_]{1,40}$`)
 
 func silinenSKGecerli(sk string) bool { return silinenSKRe.MatchString(sk) }
@@ -178,9 +188,17 @@ func silinenDosyalari(ctx context.Context, db *sql.DB, sk string, silinme time.T
 			rows.Close()
 		}
 	}
+	if !yedekDizinGuvenli(sk) {
+		return out, sahipID > 0
+	}
 	ents, err := os.ReadDir(filepath.Join(yedekKok, sk))
 	if err != nil {
 		return out, sahipID > 0
+	}
+	// Alt sınır: aynı sk'nin ÖNCEKİ silinmiş kaydından (önceki "hayat") eski dosyalar ona aittir.
+	var oncekiSilinme sql.NullTime
+	if !silinme.IsZero() {
+		_ = db.QueryRowContext(ctx, `SELECT MAX(silinme) FROM cp_silinen_yedek WHERE sistem_kullanici=? AND silinme<?`, sk, silinme).Scan(&oncekiSilinme)
 	}
 	for _, e := range ents {
 		ad := e.Name()
@@ -194,6 +212,9 @@ func silinenDosyalari(ctx context.Context, db *sql.DB, sk string, silinme time.T
 		// Silinmeden SONRA yazılan dosya hesabın sonraki "hayatına" aittir (alan adı yeniden açılıp
 		// tekrar silinmiş olabilir: o dosyalar bu kayda değil, sonraki kayda ait). Pay: sürmekte olan yedek.
 		if !silinme.IsZero() && fi.ModTime().After(silinme.Add(10*time.Minute)) {
+			continue
+		}
+		if oncekiSilinme.Valid && !fi.ModTime().After(oncekiSilinme.Time.Add(10*time.Minute)) {
 			continue
 		}
 		out[ad] = fi.Size()
@@ -304,7 +325,9 @@ func SilinenTemizleBir(ctx context.Context, db *sql.DB, id int64, uzagiYoksay bo
 		var ilk error
 		kalan := 0
 		for f := range uzakAdlar {
-			if e := yedekUzaktanSilHedefle(ctx, db, d, f); e != nil && !errors.Is(e, ErrLftpYok) {
+			// ErrLftpYok da HATA: uzak hedef tanımlıyken lftp yoksa kopya silinemedi demektir; sessizce
+			// geçmek uzak yedeği (ve parolası silineceği için bir daha temizlenemeyecek) yetim bırakırdı.
+			if e := yedekUzaktanSilHedefle(ctx, db, d, f); e != nil {
 				kalan++
 				if ilk == nil {
 					ilk = e
@@ -442,8 +465,8 @@ func silinenAyarJSON(v string) any {
 		return nil
 	}
 	n, err := strconv.Atoi(v)
-	if err != nil {
-		return nil
+	if err != nil || n < 0 || n > silinenEnCokGun {
+		return nil // silinenSaklamaGunu da aralık dışını yok sayıp slota düşer
 	}
 	return n
 }
