@@ -1880,16 +1880,13 @@ func hardenHomePerms(home, sk string, uid, gid int) {
 	// çevirebilir. Kök os.Chown/os.Chmod/setfacl yol dizgesiyle bağı İZLER ve her açılışta
 	// (HealHomePerms) /etc/shadow gibi bir hedefi kiracıya devrederdi (yerel yetki yükseltme).
 	// O_NOFOLLOW|O_DIRECTORY ile bir kez PİNLENİR; sahiplik/mod fd üzerinden (Fchown/Fchmod),
-	// setfacl ise /proc/self/fd/N ile pinlenmiş inode'a uygulanır. Symlink ise ph'a dokunulmaz.
+	// setfacl/chown ise pinli fd ÇOCUĞA 3 numaralı fd olarak geçirilip pinCocukYolu ile uygulanır
+	// (pinliKomut). Symlink ise ph'a dokunulmaz.
 	phf, perr := dizinPinle(ph)
 	if perr != nil {
 		log.Printf("hardenHomePerms: %s atlandı (symlink/dizin değil/yok): %v", ph, perr)
 	} else {
 		defer phf.Close()
-	}
-	phYol := ph
-	if phf != nil {
-		phYol = fdYolu(phf)
 	}
 	// Birincil model: per-user ACL. Dosyalar sitenin kendi kullanıcısında (c_X:c_X) kalır,
 	// nginx erişimi minimal user-ACL ile verilir. İzinler DAİMA home 0710 / public_html 0750
@@ -1913,11 +1910,11 @@ func hardenHomePerms(home, sk string, uid, gid int) {
 		// (sentinel) tarafından tek seferde dönüştürülür; yeni site zaten boş.
 		var o2 []byte
 		if phf != nil {
-			o2, _ = exec.Command("setfacl", "-m", "u:nginx:rX", phYol).CombinedOutput()
-			_, _ = exec.Command("setfacl", "-d", "-m", "u:nginx:rX", phYol).CombinedOutput()
+			o2, _ = pinliKomut(phf, "setfacl", "-m", "u:nginx:rX", pinCocukYolu).CombinedOutput()
+			_, _ = pinliKomut(phf, "setfacl", "-d", "-m", "u:nginx:rX", pinCocukYolu).CombinedOutput()
 			if apacheKullanicisiVar() {
-				_, _ = exec.Command("setfacl", "-m", "u:apache:rX", phYol).CombinedOutput()
-				_, _ = exec.Command("setfacl", "-d", "-m", "u:apache:rX", phYol).CombinedOutput()
+				_, _ = pinliKomut(phf, "setfacl", "-m", "u:apache:rX", pinCocukYolu).CombinedOutput()
+				_, _ = pinliKomut(phf, "setfacl", "-d", "-m", "u:apache:rX", pinCocukYolu).CombinedOutput()
 			}
 		}
 		// 🔴 DOĞRULA: setfacl bazı dosya sistemlerinde (acl mount opsiyonu yok, vb.) hatayı
@@ -1938,8 +1935,8 @@ func hardenHomePerms(home, sk string, uid, gid int) {
 		_ = os.Chmod(home, 0o710)
 		// Mevcut içeriğin grubunu da nginx yap (yeni site: yalnız index.html) — grup okuması için.
 		if phf != nil {
-			// -H: komut satırı argümanı (/proc/self/fd/N pinli inode) izlenir; içerideki symlink'ler izlenmez.
-			_, _ = exec.Command("chown", "-R", "-H", fmt.Sprintf("%d:%d", uid, nginxGid), phYol).CombinedOutput()
+			// -H: komut satırı argümanı (çocuğun fd 3'ü = pinli inode) izlenir; içerideki symlink'ler izlenmez.
+			_, _ = pinliKomut(phf, "chown", "-R", "-H", fmt.Sprintf("%d:%d", uid, nginxGid), pinCocukYolu).CombinedOutput()
 			_ = phf.Chmod(0o750 | os.ModeSetgid)
 		}
 		return
@@ -1953,7 +1950,7 @@ func hardenHomePerms(home, sk string, uid, gid int) {
 }
 
 // dizinPinle: yolu symlink İZLEMEDEN dizin olarak açar (son bileşen symlink ise hata).
-// Dönen dosya fd'si pinlenmiş inode'u tutar: sonraki Fchown/Fchmod/setfacl(/proc/self/fd/N)
+// Dönen dosya fd'si pinlenmiş inode'u tutar: sonraki Fchown/Fchmod ve pinliKomut (setfacl/chown)
 // kiracının ad takasından etkilenmez.
 func dizinPinle(yol string) (*os.File, error) {
 	fd, err := unix.Open(yol, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
@@ -1963,8 +1960,20 @@ func dizinPinle(yol string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), yol), nil
 }
 
-// fdYolu: pinlenmiş dosyanın /proc/self/fd yolu (setfacl gibi yol alan araçlar için).
-func fdYolu(f *os.File) string { return "/proc/self/fd/" + strconv.Itoa(int(f.Fd())) }
+// pinCocukYolu: pinliKomut'un çocuğa geçirdiği pinli dizinin ÇOCUKTAKİ yolu. ExtraFiles[0] çocukta
+// 3 numaralı fd olur; "/proc/self" çocuğun KENDİSİDİR, bu yüzden yol çocuğun fd tablosuna bakar.
+const pinCocukYolu = "/proc/self/fd/3"
+
+// pinliKomut: pinlenmiş dizin fd'sini (f) komutun 3 numaralı fd'si olarak geçirir; komutun yol
+// argümanı pinCocukYolu OLMALI. 🔴 Çağıranın "/proc/self/fd/<N>" yolu çocuğa VERİLEMEZ (4ea7bac
+// regresyonu): çocukta o numaralı fd yoktur (fd O_CLOEXEC, Go yalnız 0-2 ve ExtraFiles'ı aktarır) →
+// "setfacl: /proc/self/fd/12: No such file or directory" → public_html'e nginx ACL'i konmaz, grup=nginx
+// fail-safe da (aynı yol) çalışmaz → her YENİ hosting nginx'ten 404. Test: homeperms_acl_test.go.
+func pinliKomut(f *os.File, ad string, arg ...string) *exec.Cmd {
+	c := exec.Command(ad, arg...)
+	c.ExtraFiles = []*os.File{f}
+	return c
+}
 
 // nginxOkuyabilir: nginx public_html'i GERÇEKTEN okuyabiliyor mu? setfacl "başarılı" dönse
 // bile bazı dosya sistemleri ACL'i onurlandırmaz — tek güvenilir sinyal, nginx uid'iyle
@@ -1997,12 +2006,11 @@ func hardenHomePermsRecursive(ph string) {
 		return
 	}
 	defer phf.Close()
-	phYol := fdYolu(phf)
-	_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", phYol).CombinedOutput()
-	_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", phYol).CombinedOutput()
+	_, _ = pinliKomut(phf, "setfacl", "-R", "-m", "u:nginx:rX", pinCocukYolu).CombinedOutput()
+	_, _ = pinliKomut(phf, "setfacl", "-R", "-d", "-m", "u:nginx:rX", pinCocukYolu).CombinedOutput()
 	if apacheKullanicisiVar() {
-		_, _ = exec.Command("setfacl", "-R", "-m", "u:apache:rX", phYol).CombinedOutput()
-		_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:apache:rX", phYol).CombinedOutput()
+		_, _ = pinliKomut(phf, "setfacl", "-R", "-m", "u:apache:rX", pinCocukYolu).CombinedOutput()
+		_, _ = pinliKomut(phf, "setfacl", "-R", "-d", "-m", "u:apache:rX", pinCocukYolu).CombinedOutput()
 	}
 }
 
