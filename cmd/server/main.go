@@ -1087,6 +1087,7 @@ func main() {
 				r.With(middleware.AdminOnly).Post("/admin/backups/tick", backupsH.TickNow)
 				r.With(middleware.AdminOnly).Post("/admin/backups/verify", backupsH.VerifyNow)
 				r.With(middleware.AdminOnly).Get("/admin/backups/ozet", backupsH.Ozet)
+				r.With(middleware.AdminOnly).Post("/domains/{id}/backups/yetim-ice-al", backupsH.YetimIceAl)
 				r.With(middleware.AdminOnly).Get("/admin/silinen-yedekler", backupsH.SilinenListe)
 				r.With(middleware.AdminOnly).Get("/admin/silinen-yedekler/ayar", backupsH.SilinenAyarGet)
 				r.With(middleware.AdminOnly).Put("/admin/silinen-yedekler/ayar", backupsH.SilinenAyarSet)

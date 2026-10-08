@@ -84,6 +84,10 @@ const BACKUP_EN: Record<string, string> = {
   "Çalışma saati (yerel)": "Run time (local)",
   "Üzerine yaz": "Overwrite",
   "Şimdi Yedekle": "Back Up Now",
+  "Silinmiş hesaptan yedekleri bul": "Find backups of a deleted account",
+  "Bu alan adı daha önce silindiyse diskte kalan yedekleri listeye geri alır.": "If this domain was deleted before, restores the backups left on disk into the list.",
+  "{0} yedek listeye alındı.": "{0} backups added to the list.",
+  "Listeye alınacak yeni yedek bulunamadı.": "No new backups found to add.",
   "Hesabınız sistem tarafından otomatik yedeklenir; bu yedekler aşağıda listelenir. İhtiyaç duyduğunuzda 'Şimdi Yedekle' ile ek yedek alabilirsiniz.": "Your account is backed up automatically by the system; these backups are listed below. When you need one, you can take an extra backup with 'Back Up Now'.",
   "Otomatik yedek": "Automatic backup",
   "Sistem tarafından": "By the system",
@@ -411,6 +415,17 @@ export default function DomainBackupsPage() {
     }, 1500)
   }
 
+  const [yetimMesgul, setYetimMesgul] = useState(false)
+  // Yalnız yönetici: alan adı silinmişti, yedek dosyaları diskte kaldı → yedek listesine geri al.
+  async function yetimIceAl() {
+    setYetimMesgul(true)
+    try {
+      const { data } = await api.post<{ alinan: number; mesaj?: string }>(`/domains/${id}/backups/yetim-ice-al`)
+      if (data.alinan > 0) { toast.basari(cevirT(cevir("{0} yedek listeye alındı."), data.alinan)); yukle() }
+      else toast.bilgi(cevir("Listeye alınacak yeni yedek bulunamadı."), data.mesaj)
+    } catch (e) { toast.hata(cevir("İşlem başarısız"), apiHata(e)) } finally { setYetimMesgul(false) }
+  }
+
   async function olustur() {
     setIsleniyor(true); setHata(null); setBasari(null)
     try {
@@ -565,6 +580,10 @@ export default function DomainBackupsPage() {
                 {isleniyor ? (ilerleme?.sirada ? cevir("Yedek sırada") : cevir("Yedekleniyor…")) : cevir("Şimdi Yedekle")}
               </Button>
               <Button onClick={yukle} yukleniyor={yuk} variant="outlined" ikon={I.yenile}>{cevir("Yenile")}</Button>
+              {admin && (
+                <Button onClick={yetimIceAl} yukleniyor={yetimMesgul} variant="outlined" ikon={I.yukle}
+                  title={cevir("Bu alan adı daha önce silindiyse diskte kalan yedekleri listeye geri alır.")}>{cevir("Silinmiş hesaptan yedekleri bul")}</Button>
+              )}
             </div>
             {beklemeSn > 0 && !isleniyor && (
               <p className="mt-2 text-xs text-amber-700 dark:text-amber-300" role="status">
