@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -103,6 +104,13 @@ func (b *Bot) WebhookIsle(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer b.isler.Done()
 		defer func() { <-b.sem }()
+		// Tek bir kötü güncelleme (nil/dizin hatası) tüm destek merkezi sürecini
+		// düşürmesin: goroutine'de kurtarılmayan panik süreci sonlandırır.
+		defer func() {
+			if r := recover(); r != nil {
+				b.m.log.Error("telegram güncellemesi işlenirken panik (güncelleme atlandı)", "panik", fmt.Sprint(r))
+			}
+		}()
 		ctx, iptal := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer iptal()
 		b.guncellemeIsle(ctx, &u)
