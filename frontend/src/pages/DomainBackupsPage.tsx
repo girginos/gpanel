@@ -22,7 +22,7 @@ import { UzakSatirCubugu } from '@/components/UzakIlerleme'
 import { useUzakIlerleme } from '@/lib/uzakIlerleme'
 
 type Domain = { id: number; alan_adi: string; sistem_kullanici: string }
-type Yedek = { id: number; domain_id: number; tip: string; kaynak?: 'sistem' | 'manuel'; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'drive' | 'yok'; yerel_var?: boolean; drive_var?: boolean }
+type Yedek = { id: number; domain_id: number; tip: string; kaynak?: 'sistem' | 'manuel' | 'kurtarma'; dosya: string; boyut_b: number; notlar: string; olusturma: string; mevcut?: 'yerel' | 'uzak_iddia' | 'drive' | 'yok'; yerel_var?: boolean; drive_var?: boolean }
 // duzenlenebilir: YALNIZ gerçek yönetici (sunucu söyler). Müşteri / bayi / müşteri-adına
 // görünümünde plan seçici çizilmez — müşteri yedeği yalnız manuel (2026-10-03).
 type ManuelDurum = { bekleme_sn: number; bekleme_saat: number; eszamanli: number; calisan: number; sira: number }
@@ -112,6 +112,8 @@ const BACKUP_EN: Record<string, string> = {
   "Drive: iptal edildi": "Drive: cancelled",
   "Yedek Drive'a gönderilmek üzere sıraya alındı.": "Backup queued for Google Drive.",
   "Manuel": "Manual",
+  "Kurtarılan yedek": "Recovered backup",
+  "Silinmiş bir hesaptan bu alan adına bağlandı. Otomatik silinmez ve uzağa gönderilmez; gerekirse elle silebilirsiniz.": "Linked to this domain from a deleted account. It is never deleted automatically or sent off-site; you can delete it manually if needed.",
   "Kaynak": "Source",
   "Yedek": "Backup",
   "{0} sa {1} dk": "{0} h {1} min",
@@ -768,8 +770,9 @@ export default function DomainBackupsPage() {
                   )}
                 </td>
                 <td className={T.hucre} data-etiket={cevir("Kaynak")}>
-                  <Badge variant="soft" color={kaynakOf(y) === 'sistem' ? 'info' : 'neutral'}
-                    className="px-1.5 py-0.5 text-[11px] font-semibold">{kaynakOf(y) === 'sistem' ? cevir('Sistem') : cevir('Manuel')}</Badge>
+                  <Badge variant="soft" color={kaynakOf(y) === 'sistem' ? 'info' : kaynakOf(y) === 'kurtarma' ? 'success' : 'neutral'}
+                    title={kaynakOf(y) === 'kurtarma' ? cevir('Silinmiş bir hesaptan bu alan adına bağlandı. Otomatik silinmez ve uzağa gönderilmez; gerekirse elle silebilirsiniz.') : undefined}
+                    className="px-1.5 py-0.5 text-[11px] font-semibold">{kaynakOf(y) === 'sistem' ? cevir('Sistem') : kaynakOf(y) === 'kurtarma' ? cevir('Kurtarılan yedek') : cevir('Manuel')}</Badge>
                   {admin && driveDurum?.aktif && kaynakOf(y) === 'sistem' && <DriveRozeti d={driveDurum.durumlar[String(y.id)]} />}
                   {admin && driveIlerleme?.aktif && driveIlerleme.aktif.yedek_id === y.id && <UzakSatirCubugu a={driveIlerleme.aktif} />}
                 </td>
@@ -1034,8 +1037,9 @@ function DriveRozeti({ d }: { d?: string }) {
 }
 
 // kaynakOf: sunucu "kaynak" döndürmeyen eski sürümde tipten türetilir.
-function kaynakOf(y: Yedek): 'sistem' | 'manuel' {
+function kaynakOf(y: Yedek): 'sistem' | 'manuel' | 'kurtarma' {
   if (y.kaynak) return y.kaynak
+  if (y.tip === 'kurtarma') return 'kurtarma'
   return y.tip === 'oto' || y.tip === 'planli' ? 'sistem' : 'manuel'
 }
 

@@ -36,6 +36,10 @@ const EN: Record<string, string> = {
   '{0} yedek bağlandı': '{0} backups linked',
   'Yedek sayfasına git': 'Open backup page',
   'Bağlanamadı': 'Could not link',
+  'Farklı bir müşterinin hesabına bağlanıyor': 'Linking to a different customer’s account',
+  'Bu yedek {0} hesabına ait; hedef hosting {1}. Dosyalar ve veritabanı (kullanıcı parola özetleri dahil) başka bir müşterinin hesabına geri yüklenebilir. Devam edilsin mi?': 'This backup belongs to the {0} account; the target hosting is {1}. The files and the database (including user password hashes) could be restored into another customer’s account. Continue?',
+  'Yine de bağla': 'Link anyway',
+  'Bağlanacak hosting: {0} — yedeğin alan adından veya sahibinden farklı': 'Target hosting: {0} — differs from the backup’s domain or owner',
   'otomatik silinmez': 'never automatic',
   'İndir': 'Download',
   'Kalıcı sil': 'Delete permanently',
@@ -52,8 +56,12 @@ type Yedek = { id: number; dosya: string; boyut_b: number; olusturma: string; ye
 type Grup = {
   sk: string; alan_adi: string; reseller_id?: number | null; silinme: string; son_kullanma: string
   dosya_sayisi: number; boyut_b: number; yerel_var: boolean; baglanabilir_domain_id: number | null
+  // Hedef hostingin alan adı; baglanabilir_farkli = alan adı VEYA sahip yedeklerinkinden farklı
+  // (aynı sistem kullanıcısı aynı müşteri demek değildir: girgin.com / girgin.net).
+  baglanabilir_alan_adi?: string; baglanabilir_farkli?: boolean
   yedekler: Yedek[]
 }
+type BaglaHata = { response?: { status?: number; data?: { alan_adi_farkli?: boolean; yedek_alan_adi?: string; hedef_alan_adi?: string } } }
 
 function fmtB(b: number): string {
   if (b >= 1 << 30) return (b / (1 << 30)).toFixed(1) + ' GB'
@@ -105,15 +113,38 @@ export default function YedekSilinenler() {
     }
   }
 
-  async function bagla(s: Grup) {
+  // Farklı alan adı/sahip: iki alan adını gösteren tehlike tonlu AÇIK onay (iptal = false).
+  function farkliOnayi(yedekAlan: string, hedefAlan: string): Promise<boolean> {
+    return onay({
+      baslik: cevir('Farklı bir müşterinin hesabına bağlanıyor'),
+      mesaj: cevirT(cevir('Bu yedek {0} hesabına ait; hedef hosting {1}. Dosyalar ve veritabanı (kullanıcı parola özetleri dahil) başka bir müşterinin hesabına geri yüklenebilir. Devam edilsin mi?'), yedekAlan, hedefAlan),
+      onayEtiketi: cevir('Yine de bağla'), ton: 'tehlike', onayIkonu: I.link,
+    })
+  }
+
+  async function bagla(s: Grup, zorla = false) {
     if (s.baglanabilir_domain_id == null) return
+    if (!zorla && s.baglanabilir_farkli) {
+      if (!(await farkliOnayi(s.alan_adi, s.baglanabilir_alan_adi || ''))) return
+      zorla = true
+    }
     setMesgul(s.sk)
     try {
-      const { data } = await api.post<{ ok: boolean; baglanan: number }>(`/admin/silinen-yedekler/${encodeURIComponent(s.sk)}/bagla`, { domain_id: s.baglanabilir_domain_id })
+      const { data } = await api.post<{ ok: boolean; baglanan: number }>(`/admin/silinen-yedekler/${encodeURIComponent(s.sk)}/bagla`,
+        zorla ? { domain_id: s.baglanabilir_domain_id, zorla: true } : { domain_id: s.baglanabilir_domain_id })
       toast.basari(cevirT(cevir('{0} yedek bağlandı'), data.baglanan))
       setBagli(b => ({ ...b, [s.sk]: s.baglanabilir_domain_id as number }))
       yukle()
-    } catch (e) { toast.hata(cevir('Bağlanamadı'), apiHata(e)) }
+    } catch (e) {
+      // Liste eskiydi / sahip sunucuda değişti: sunucu 409 alan_adi_farkli döner → aynı açık onayı göster.
+      const x = e as BaglaHata
+      if (!zorla && x.response?.status === 409 && x.response.data?.alan_adi_farkli) {
+        const d = x.response.data
+        if (await farkliOnayi(d.yedek_alan_adi || s.alan_adi, d.hedef_alan_adi || s.baglanabilir_alan_adi || '')) await bagla(s, true)
+        return
+      }
+      toast.hata(cevir('Bağlanamadı'), apiHata(e))
+    }
     finally { setMesgul('') }
   }
 
@@ -161,6 +192,9 @@ export default function YedekSilinenler() {
                 <span className="font-mono text-xs text-slate-400">{cevir('Silinme')}: {s.silinme}</span>
                 <span className="font-mono text-xs text-slate-400">{cevir('Son saklama')}: {s.son_kullanma || cevir('otomatik silinmez')}</span>
                 <span className="font-mono text-xs text-slate-400">{s.dosya_sayisi} {cevir('Yedek').toLowerCase()} · {fmtB(s.boyut_b)}</span>
+                {s.baglanabilir_domain_id != null && s.baglanabilir_farkli && (
+                  <span className="text-xs text-amber-600 dark:text-amber-400">{cevirT(cevir('Bağlanacak hosting: {0} — yedeğin alan adından veya sahibinden farklı'), s.baglanabilir_alan_adi || '')}</span>
+                )}
                 <span className="ml-auto flex flex-wrap items-center gap-2">
                   {bagliId != null && (
                     <Link to={`/abonelikler/${bagliId}/yedekler`} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir('Yedek sayfasına git')}</Link>
