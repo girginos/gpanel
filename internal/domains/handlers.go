@@ -656,11 +656,10 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🔴 YEDEKLER SİLİNMEZ (kullanıcı kararı, 2026-10-08): müşteri sonradan yedek isteyebilir
-	// ya da hesabı yanlışlıkla silmiş olabilir. HostingYik ilk adımda yerel yedek dizinini
-	// saklamaya taşır (backups.SilinenKaydet), uzak kopyalara dokunmaz; süre dolunca
-	// (varsayılan: hostingin yedek slotu kadar gün) temizlenir. Uzak depo erişilemez olsa
-	// bile silme artık engellenmez.
+	// 🔴 SİLME YEDEKLERDEN BAĞIMSIZDIR (kullanıcı kararı, 2026-10-08): yedek dizinine ve uzak
+	// kopyalara dokunulmaz, yedek/uzak depo durumu silmeyi engellemez. Yedekler olduğu yerde kalır;
+	// HostingYik yalnız best-effort bir iz bırakır (backups.SilinenIsaretle), süre dolunca
+	// (varsayılan: hostingin yedek slotu kadar gün) günlük tur temizler.
 
 	// 🔴 YIKIM BASLADIKTAN SONRA ISTEK BAGLAMI KULLANILMAZ.
 	//

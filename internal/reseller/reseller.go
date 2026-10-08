@@ -464,7 +464,7 @@ func (h *Handlers) bayiSilCalistir(isID, id int64, bayiAd string, hostlar []bayi
 	// Istemci kopsa da / panel istegi bitse de yikim yarim kalmasin.
 	ctx := context.Background()
 
-	// Yikim. Yedekler SILINMEZ: HostingYik yerel yedek dizinini saklamaya tasir, uzak kopyalara dokunmaz.
+	// Yikim. Silme yedeklerden BAGIMSIZ: HostingYik yedek dizinine/uzak kopyalara dokunmaz.
 	for i, x := range hostlar {
 		toplu.IsIlerle(h.DB, isID, i, basari, hata, x.ad)
 		kap, e := domains.HostingYik(ctx, h.DB, x.id, x.ad, x.sk, x.isDemo)

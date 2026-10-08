@@ -1,13 +1,14 @@
 -- 0217_silinen_yedek.sql
--- Silinen hosting/bayinin yedekleri SILINMEZ: yerel dizin BackupRoot/_silinen/<id>-<sk> altina
--- tasinir ve burada izlenir; saklama suresi dolunca (ya da yonetici isteyince) temizlenir.
+-- Hosting/bayi silme yedeklerden BAGIMSIZDIR: yedek dizini BackupRoot/<sk> yerinde kalir, uzak
+-- kopyalara dokunulmaz. Silme yalniz burada best-effort bir iz birakir; saklama suresi dolunca
+-- (ya da yonetici isteyince) temizlenir.
 --
 -- Idempotent: yalniz CREATE TABLE IF NOT EXISTS. Satir ici yorum YOK (goc kosucusu
 -- yalniz basinda iki tire olan satirlari atar ve metni noktalı virgulden boler).
 --
 --   son_kullanma   NULL = otomatik silinmez (yonetici elle siler)
---   dizin          BackupRoot altindaki goreli yol (_silinen/<id>-<sk>); dizin yoksa bos
---   dosyalar       JSON dizi: yedek dosya adlari (uzak kopyalari silmek icin)
+--   dizin          sk (BackupRoot/<sk>); dizine silme sirasinda dokunulmaz
+--   dosyalar       JSON dizi: silme anindaki yedek dosya adlari (uzak kopyalari silmek icin)
 --   hedef_*        domaine ozel FTP/SFTP hedefinin kopyasi (domains satiri gidince
 --                  backup_destinations CASCADE ile gider; uzak temizlik icin saklanir).
 --                  hedef_parola gizli.SaklaBagli ile sifreli kalir, API'de donmez.
