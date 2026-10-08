@@ -11,6 +11,26 @@
 # mevcut sunucular kendini onarır.
 set -uo pipefail
 
+# Sessiz mod: her şey yerindeyse TEK satır yazar. Bir şey kurulduysa/düzeltildiyse
+# ya da hata varsa tüm çıktı gösterilir. --ayrinti (veya GOSP_AYRINTI=1) = her zaman tam çıktı.
+# İç çağrı kendini WPON_ICERI=1 ile çalıştırıp çıktıyı yakalar; çıkış kodu aynen korunur.
+if [ -z "${WPON_ICERI:-}" ]; then
+  AYR=${GOSP_AYRINTI:-0}
+  for a in "$@"; do [ "$a" = "--ayrinti" ] && AYR=1; done
+  if [ "$AYR" != 1 ]; then
+    CIKTI=$(WPON_ICERI=1 bash "$0" "$@" 2>&1); RC=$?
+    case "$CIKTI" in
+      *"✔"*|*"(dry)"*|*"✗"*|*" ! "*) echo "$CIKTI" ;;
+      *) if [ $RC -eq 0 ]; then
+           echo -e "  \e[32m✓\e[0m WordPress ön koşulları tamam (SELinux + imagick, değişiklik yok)"
+         else
+           echo "$CIKTI"
+         fi ;;
+    esac
+    exit $RC
+  fi
+fi
+
 DRY=0
 for a in "$@"; do [ "$a" = "--dry-run" ] && DRY=1; done
 
