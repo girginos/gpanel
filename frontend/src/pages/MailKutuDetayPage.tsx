@@ -978,7 +978,7 @@ export default function MailKutuDetayPage() {
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4"><span className="font-mono text-slate-700 dark:text-slate-300">{uretilen.email}</span> {cevir("— bu parola yalnızca şimdi gösteriliyor, güvenli bir yere kaydedin.")}</p>
             <div className="flex items-center gap-2">
               <code className="flex-1 font-mono text-sm bg-slate-100 dark:bg-dark-800 rounded-lg px-3 py-2.5 break-all select-all text-slate-800 dark:text-slate-100">{uretilen.parola}</code>
-              <Button onClick={() => { navigator.clipboard?.writeText(uretilen.parola); setKopyalandi(true) }} color="primary" boyut="sm" ikon={kopyalandi ? I.onay : I.kopya} className="shrink-0">{kopyalandi ? cevir("Kopyalandı") : cevir("Kopyala")}</Button>
+              <Button onClick={() => { navigator.clipboard?.writeText(uretilen.parola).then(() => setKopyalandi(true)).catch(() => { /* panoya yazılamadı: 'kopyalandı' gösterme */ }) }} color="primary" boyut="sm" ikon={kopyalandi ? I.onay : I.kopya} className="shrink-0">{kopyalandi ? cevir("Kopyalandı") : cevir("Kopyala")}</Button>
             </div>
           </>
         )}

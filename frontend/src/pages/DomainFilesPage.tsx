@@ -657,7 +657,12 @@ export default function DomainFilesPage() {
     // Header'lı GET tarayıcıdan; en basit: ayrı fetch + blob
     fetch(url, { headers: { Authorization: `Bearer ${tok}` } })
       // Askı 403'ü: askı sayfasına geçilir; hata gövdesi dosya diye indirilmez.
-      .then(async r => ((await fetchAskiKontrol(r, tok)) ? null : r.blob()))
+      .then(async r => {
+        if (await fetchAskiKontrol(r, tok)) return null
+        // Hata gövdesi (404/500 JSON-HTML) yedek/dosya diye indirilmesin.
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.blob()
+      })
       .then(blob => {
         if (!blob) return
         const a = document.createElement('a')

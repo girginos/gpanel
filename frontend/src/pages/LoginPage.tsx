@@ -31,6 +31,9 @@ const LOGINP_EN: Record<string, string> = {
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (LOGINP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
+// Marka bağlantıları yalnız http(s) ise tıklanabilir (sunucu da doğrular; javascript: şeması savunması).
+const httpAdres = (u: string): boolean => /^https?:\/\//i.test(u || '')
+
 export default function LoginPage() {
   const m = useMarka()
   useTranslation() // dil re-render aboneligi
@@ -136,7 +139,7 @@ export default function LoginPage() {
                   ) : null}
                 </>
               )
-              return m.banner_url ? (
+              return httpAdres(m.banner_url) ? (
                 <a href={m.banner_url} target="_blank" rel="noopener noreferrer"
                   className="block rounded-lg transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary-500/40">
                   {icerik}
@@ -197,7 +200,7 @@ export default function LoginPage() {
             {m.panel_adi}{surum ? ' · ' + surum : ''}
           </p>
         ) : null}
-        {m.destek_url ? (
+        {httpAdres(m.destek_url) ? (
           <p className="mt-2 text-center text-xs">
             <a href={m.destek_url} target="_blank" rel="noopener noreferrer"
               className="inline-block min-h-[44px] px-3 py-2 text-primary-700 hover:underline dark:text-primary-400">
