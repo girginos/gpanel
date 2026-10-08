@@ -1468,10 +1468,9 @@ func Deprovision(alanAdi, sk string) error {
 		// 🔴 YEDEK DIZINI BURADA SILINMEZ — cagirana tasindi.
 		// Deprovision yalniz domain silmeden degil, site TASIMA ROLLBACK'inden
 		// de cagriliyor; buradaki `RemoveAll`, yarim kalan bir tasimanin
-		// mevcut yedekleri yok etmesine yol aciyordu. Ayrica yedeklerin
-		// silinmesi, UZAK kopyalarin ONCE temizlenmesini gerektiriyor ve o
-		// is icin veritabani erisimi lazim (bkz. backups.DomainYedekleriniTemizle).
-		// Domain silme akisi: internal/domains/handlers.go
+		// mevcut yedekleri yok etmesine yol aciyordu. Domain silinince yedekler
+		// zaten SILINMEZ: domains.HostingYik ilk adimda saklamaya tasir
+		// (backups.SilinenKaydet), suresi dolunca temizlenir.
 	}
 	// 🔴 Havuz supurmesi userdel'den SONRA: kullanici artik yok, dolayisiyla
 	// writePoolValidated koruması devreye girer ve hicbir yol havuzu geri yazamaz.

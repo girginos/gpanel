@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"girginospanel/internal/backups"
 	destekiptal "girginospanel/internal/destek/iptal"
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/dns"
@@ -657,54 +656,11 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🔴 UZAK YEDEKLER, HER ŞEYDEN ÖNCE.
-	//
-	// `DELETE FROM domains` çalıştığı anda `backup_destinations` FK cascade
-	// ile gider — FTP host/kullanıcı/PAROLA dahil. Ondan sonra uzak depoyu
-	// temizlemek imkânsızdır: ne dosya listesi ne kimlik kalır. Bu yüzden
-	// temizlik en başta yapılır.
-	//
-	// Temizlenemezse silme DURDURULUR (409) — kullanıcı ya bağlantıyı
-	// düzeltir ya `?uzagi_yoksay=1` ile bilerek devam eder. Sessizce devam
-	// etmek, geri dönülemez bir sızıntıyı görünmez kılardı.
-	// 🔴 `uzagi_yoksay` YALNIZ ADMIN.
-	//
-	// Bu bayrak "uzak depoda kalici cop birak" demektir ve YedekUzaktanSil
-	// SISTEM GENELI hedefe (backup_genel_ayar) de dokunur — yani birakilan
-	// cop ADMIN'in deposundadir. Rol kontrolu olmadan bir BAYI, admin'in
-	// bilgisi olmadan admin'in kotasinda kalici cop birakabiliyordu
-	// (olculdu: rol=reseller ile 200 donuyordu).
-	uzagiYoksay := r.URL.Query().Get("uzagi_yoksay") == "1" && middleware.RolFrom(r) == "admin"
-
-	// Ö6: yoksayiliyorsa temizligi HIC calistirma. Eskiden kosul `kalan > 0`
-	// oldugu icin zorlama isteginde de tum temizlik bastan kosuyordu —
-	// kullanici ayni bedeli iki kez oduyordu (olculdu: 30sn + 30sn).
-	kalan, uzakErr := 0, error(nil)
-	if !uzagiYoksay {
-		kalan, uzakErr = backups.DomainYedekleriniTemizle(r.Context(), h.DB, id)
-	}
-	if kalan > 0 {
-		{
-			mesaj := "Bu alan adının uzak depodaki (FTP/SFTP) " + strconv.Itoa(kalan) +
-				" yedeği silinemedi. Alan adı silinirse uzak depo erişim bilgileri de silineceği için " +
-				"bu dosyalar bir daha temizlenemez."
-			if middleware.RolFrom(r) == "admin" && uzakErr != nil {
-				mesaj += " (" + uzakErr.Error() + ")"
-			}
-			// Zorlama secenegi YALNIZ admin'e bildirilir.
-			httpx.WriteJSON(w, http.StatusConflict, map[string]any{
-				"ok":           false,
-				"hata":         mesaj,
-				"uzagi_yoksay": middleware.RolFrom(r) == "admin",
-			})
-			return
-		}
-	}
-	if uzagiYoksay {
-		uidY, kulY := middleware.Aktor(r)
-		httpx.Denetim(h.DB, r, uidY, kulY, "hosting.sil.uzak-yedek-birakildi", alanAdi,
-			"uzak yedekler BIRAKILDI (admin onayı)", id, true)
-	}
+	// 🔴 YEDEKLER SİLİNMEZ (kullanıcı kararı, 2026-10-08): müşteri sonradan yedek isteyebilir
+	// ya da hesabı yanlışlıkla silmiş olabilir. HostingYik ilk adımda yerel yedek dizinini
+	// saklamaya taşır (backups.SilinenKaydet), uzak kopyalara dokunmaz; süre dolunca
+	// (varsayılan: hostingin yedek slotu kadar gün) temizlenir. Uzak depo erişilemez olsa
+	// bile silme artık engellenmez.
 
 	// 🔴 YIKIM BASLADIKTAN SONRA ISTEK BAGLAMI KULLANILMAZ.
 	//

@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 
-	"girginospanel/internal/backups"
 	destekiptal "girginospanel/internal/destek/iptal"
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/domains"
@@ -426,7 +425,6 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	uid, kul := middleware.Aktor(r)
-	uzagiYoksay := r.URL.Query().Get("uzagi_yoksay") == "1"
 	// toplam = her hosting + son adim (bayi + musteri kayitlari).
 	isID, err := toplu.IsAc(h.DB, "bayi_sil", len(hostlar)+1, fmt.Sprintf(`{"bayi_id":%d}`, id), kul)
 	if errors.Is(err, toplu.ErrMesgul) {
@@ -437,7 +435,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "iş kaydı açılamadı")
 		return
 	}
-	go h.bayiSilCalistir(isID, id, bayiAd, hostlar, uzagiYoksay, uid, kul)
+	go h.bayiSilCalistir(isID, id, bayiAd, hostlar, uid, kul)
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"is_id": isID, "toplam": len(hostlar) + 1})
 }
 
@@ -446,7 +444,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 // musteri kullanicilari. Bayi kilidi zincir boyunca tutulur (aski/plan/silme yarismasin).
 // Bir hosting silinemezse DIGERLERI silinmeye devam eder ama bayi KAYDI silinmez
 // (durum=kismi): sorun giderilip silme tekrarlanabilir.
-func (h *Handlers) bayiSilCalistir(isID, id int64, bayiAd string, hostlar []bayiHosting, uzagiYoksay bool, uid int64, kul string) {
+func (h *Handlers) bayiSilCalistir(isID, id int64, bayiAd string, hostlar []bayiHosting, uid int64, kul string) {
 	var detay []string
 	basari, hata := 0, 0
 	bitti := false
@@ -466,25 +464,7 @@ func (h *Handlers) bayiSilCalistir(isID, id int64, bayiAd string, hostlar []bayi
 	// Istemci kopsa da / panel istegi bitse de yikim yarim kalmasin.
 	ctx := context.Background()
 
-	// 1. gecis: uzak (FTP/SFTP) yedekler. DB satiri gidince erisim bilgisi de gider;
-	// temizlenemeyen varsa HICBIR SEY silinmeden dur (kismi silme olmasin).
-	if !uzagiYoksay {
-		for _, x := range hostlar {
-			toplu.IsIlerle(h.DB, isID, 0, 0, 0, x.ad+" (uzak yedekler denetleniyor)")
-			if kalan, e := backups.DomainYedekleriniTemizle(ctx, h.DB, x.id); kalan > 0 {
-				msg := fmt.Sprintf("%s alan adının uzak depodaki %d yedeği silinemedi; hiçbir şey silinmedi. Bağlantıyı düzeltin ya da yönetici olarak yedekleri bırakarak devam edin (uzagi_yoksay).", x.ad, kalan)
-				if e != nil {
-					msg += " (" + e.Error() + ")"
-				}
-				httpx.DenetimSistem(h.DB, uid, kul, "bayi.sil", strconv.FormatInt(id, 10), "reddedildi: "+msg, 0, false)
-				detay = append(detay, msg)
-				bitti = true
-				toplu.IsBitir(h.DB, isID, "hata", detay)
-				return
-			}
-		}
-	}
-	// 2. gecis: yikim.
+	// Yikim. Yedekler SILINMEZ: HostingYik yerel yedek dizinini saklamaya tasir, uzak kopyalara dokunmaz.
 	for i, x := range hostlar {
 		toplu.IsIlerle(h.DB, isID, i, basari, hata, x.ad)
 		kap, e := domains.HostingYik(ctx, h.DB, x.id, x.ad, x.sk, x.isDemo)

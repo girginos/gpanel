@@ -324,10 +324,20 @@ func kisaCikti(s string) string {
 // gelmeden once yuklenmis yedekler tabandadir; indirme yolu da ayni iki
 // adayi deniyor).
 func YedekUzaktanSil(ctx context.Context, db *sql.DB, domainID int64, dosyaAdi string) error {
+	d, err := readDestination(ctx, db, domainID)
+	if err != nil {
+		d = nil
+	}
+	return yedekUzaktanSilHedefle(ctx, db, d, dosyaAdi)
+}
+
+// yedekUzaktanSilHedefle — YedekUzaktanSil'in gövdesi. d = domaine özel FTP/SFTP hedefi
+// (nil olabilir; domains satırı silinmişse silinen-yedek kaydındaki kopyadan kurulur).
+func yedekUzaktanSilHedefle(ctx context.Context, db *sql.DB, d *Destination, dosyaAdi string) error {
 	var hatalar []string
 	lftpEksik := false
 
-	if d, err := readDestination(ctx, db, domainID); err == nil && d != nil {
+	if d != nil {
 		if e := deleteFromRemote(ctx, d, d.UzakDizin, dosyaAdi); e != nil {
 			if errors.Is(e, ErrLftpYok) {
 				lftpEksik = true

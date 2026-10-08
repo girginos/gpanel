@@ -11,6 +11,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import YedekGenelAyar from '@/components/YedekGenelAyar'
 import YedekGoogleDrive from '@/components/YedekGoogleDrive'
 import YedekUzakKopya from '@/components/YedekUzakKopya'
+import YedekSilinenler from '@/components/YedekSilinenler'
 import { Button, butonSinifi } from '@/components/ui'
 import { useToast } from '@/components/Toast'
 import { useDialog } from '@/components/Dialog'
@@ -148,6 +149,8 @@ export default function BackupYonetimiPage() {
           {jobs.map(j => <JobSatir key={j.id} j={j} onDurdur={() => { setBasari(cevir('İş durduruldu.')); toast.basari(cevir('İş durduruldu.')); jobYukle(); ozetYukle() }} />)}
         </div>
       </div>
+
+      <YedekSilinenler />
 
       {o && o.domainler.length > 0 && (
         <details className="mt-4 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">

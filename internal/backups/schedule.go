@@ -71,6 +71,8 @@ func tickOnce(db *sql.DB) {
 	// SESSIZCE birakmak, kurtarma aninda "yedek var ama bozuk" felaketi demektir.
 	if currentHour == 4 {
 		verifyYedekBozulma(db)
+		// Silinen hesapların saklama süresi dolan yedekleri (bkz. silinen.go).
+		SilinenSupur(ctx, db)
 	}
 
 	// ANA SALTER + DISK KAPISI (yedek YAZMADAN once).

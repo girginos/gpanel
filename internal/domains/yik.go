@@ -16,14 +16,19 @@ import (
 )
 
 // HostingYik — bir hosting hesabını (vhost, PHP havuzu, Linux kullanıcısı, DB'ler,
-// yedek dizini, orphan tablolar ve domains satırı) YOK eder. Tekil silme (Delete)
-// ile bayi silme zinciri AYNI yolu kullanır: iki yol ayrışırsa biri kalıntı bırakır.
-// Çağıran: kilit.Bayi kilidini tutar, uzak yedek temizliğini
-// (backups.DomainYedekleriniTemizle) yapmıştır ve denetim kaydını yazar.
+// orphan tablolar ve domains satırı) YOK eder. Tekil silme (Delete) ile bayi silme
+// zinciri AYNI yolu kullanır: iki yol ayrışırsa biri kalıntı bırakır.
+// 🔴 YEDEKLER SİLİNMEZ: yerel yedek dizini saklamaya taşınır, uzak kopyalara dokunulmaz
+// (backups.SilinenKaydet); saklama süresi dolunca ya da yönetici isteyince temizlenir.
+// Çağıran: kilit.Bayi kilidini tutar ve denetim kaydını yazar.
 // Dönen kapsam, satır gitmeden ÖNCE çözülen domains.reseller_id'dir (denetim için).
 // İstemci kopsa da yıkım yarım kalmasın diye çağıran context.WithoutCancel vermelidir.
 func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, isDemo int) (kapsam int64, err error) {
 	if isDemo == 0 {
+		// 🔴 İLK ADIM: yedekleri saklamaya al. Taşınamazsa hiçbir şey yıkılmadan hata döner.
+		if e := backups.SilinenKaydet(ctx, db, id, alanAdi, sk); e != nil {
+			return 0, e
+		}
 		// MariaDB'deki gerçek DB'leri kaldır (CASCADE FK sadece panel DB metadata'sını siler)
 		_ = hesaplar.MySQLDropAllForDomain(db, id)
 		// Ek (addon) alan adları: vhost + sertifika + günlük + bölge + satır; Deprovision'ın
@@ -34,10 +39,6 @@ func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, i
 		}
 		_ = kaynaklimit.SystemdSliceSil(sk)
 		redis.KapatDomain(db, id, sk)
-		// Korumalı yardımcı: boş sk'de ham RemoveAll kök dizine çözülürdü.
-		if e := backups.RemoveDomainBackups(sk); e != nil {
-			log.Printf("yedek dizini silinemedi (%s): %v", sk, e)
-		}
 	}
 
 	// Orphan temizliği: bu tablolarda FK cascade yok (mevcut kurulumlar için).

@@ -29,7 +29,7 @@ const RES_EN: Record<string, string> = {
   "oluşturuldu.": "created.",
   "Emin misiniz?": "Are you sure?",
   "bayisi silinsin mi?": "be deleted?",
-  "Bayinin tüm hosting hesapları (siteler, dosyalar, veritabanları, e-posta, yedekler) ve müşteri kullanıcıları da KALICI olarak silinir. Geri alınamaz.": "All of the reseller's hosting accounts (sites, files, databases, email, backups) and customer users will also be PERMANENTLY deleted. This cannot be undone.",
+  "Bayinin tüm hosting hesapları (siteler, dosyalar, veritabanları, e-posta) ve müşteri kullanıcıları KALICI olarak silinir; geri alınamaz. Yedekler silinmez: ayarlanan süre boyunca saklanır (Backup Yöneticisi → Silinmiş hesap yedekleri).": "All of the reseller's hosting accounts (sites, files, databases, email) and customer users will be PERMANENTLY deleted and this cannot be undone. Backups are NOT deleted: they are kept for the configured period (Backup Manager → Deleted account backups).",
   "Bayi silindi.": "Reseller deleted.",
   "Silinemedi": "Could not delete",
   "Anasayfa": "Home",
@@ -92,7 +92,6 @@ const RES_EN: Record<string, string> = {
   "Arka planda sürdür": "Continue in background",
   "Kapat": "Close",
   "Bu pencereyi kapatabilirsiniz; silme sunucuda devam eder. Sayfayı yenilerseniz ilerleme yeniden gösterilir.": "You can close this window; deletion continues on the server. If you reload the page the progress is shown again.",
-  "Yedekleri bırakarak sil": "Delete, leaving the backups",
   "Silme devam ediyor": "Deletion in progress",
   "İlerlemeyi göster": "Show progress",
   "Başka bir toplu işlem çalışıyor; bitmesini bekleyin.": "Another bulk operation is running; wait for it to finish.",
@@ -136,7 +135,7 @@ export default function ResellerlarPage() {
   const [form, setForm] = useState<BayiForm>(bos)
   const [kaydet, setKaydet] = useState(false)
   const [silinen, setSilinen] = useState<number | null>(null)
-  // Arka plan silme işi: is = cp_toplu_isler kimliği, bayi = silinen bayi (yedekleri bırakarak yeniden deneme için).
+  // Arka plan silme işi: is = cp_toplu_isler kimliği, bayi = silinen bayi.
   const [silIs, setSilIs] = useState<{ is: number; bayi: Reseller | null } | null>(null)
   const [silModal, setSilModal] = useState(false)
 
@@ -192,14 +191,14 @@ export default function ResellerlarPage() {
   }
 
   async function sil(x: Reseller) {
-    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}\n\n${cevir("Bayinin tüm hosting hesapları (siteler, dosyalar, veritabanları, e-posta, yedekler) ve müşteri kullanıcıları da KALICI olarak silinir. Geri alınamaz.")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
-    await silBaslat(x, false)
+    if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}\n\n${cevir("Bayinin tüm hosting hesapları (siteler, dosyalar, veritabanları, e-posta) ve müşteri kullanıcıları KALICI olarak silinir; geri alınamaz. Yedekler silinmez: ayarlanan süre boyunca saklanır (Backup Yöneticisi → Silinmiş hesap yedekleri).")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
+    await silBaslat(x)
   }
 
-  async function silBaslat(x: Reseller, yedekleriBirak: boolean) {
+  async function silBaslat(x: Reseller) {
     setSilinen(x.id)
     try {
-      const r = await api.delete<{ is_id: number }>(`/resellers/${x.id}${yedekleriBirak ? '?uzagi_yoksay=1' : ''}`)
+      const r = await api.delete<{ is_id: number }>(`/resellers/${x.id}`)
       setSilIs({ is: r.data.is_id, bayi: x }); setSilModal(true)
     } catch (err) {
       const m = apiHata(err, cevir('Silinemedi'))
@@ -279,8 +278,7 @@ export default function ResellerlarPage() {
       {silIs && silModal && (
         <BayiSilModal isID={silIs.is} bayi={silIs.bayi}
           onGizle={() => setSilModal(false)}
-          onBitti={() => { setSilIs(null); setSilModal(false); yukle() }}
-          onYedekleriBirak={(b) => { setSilIs(null); setSilModal(false); void silBaslat(b, true) }} />
+          onBitti={() => { setSilIs(null); setSilModal(false); yukle() }} />
       )}
       <Modal acik={!!modal} baslik={modal === 'yeni' ? cevir('Yeni Bayi') : modal ? cevirT(cevir("Bayi Düzenle — {0}"), modal.kullanici) : ''}
         onKapat={() => setModal(null)} kapatilamaz={kaydet} genislik="lg"
@@ -411,9 +409,9 @@ type BayiSilDurum = {
   aktif_domain: string; detaylar?: string[]
 }
 
-function BayiSilModal({ isID, bayi, onGizle, onBitti, onYedekleriBirak }: {
+function BayiSilModal({ isID, onGizle, onBitti }: {
   isID: number; bayi: Reseller | null
-  onGizle: () => void; onBitti: () => void; onYedekleriBirak: (b: Reseller) => void
+  onGizle: () => void; onBitti: () => void
 }) {
   const [d, setD] = useState<BayiSilDurum | null>(null)
   useEffect(() => {
@@ -436,13 +434,9 @@ function BayiSilModal({ isID, bayi, onGizle, onBitti, onYedekleriBirak }: {
   const ton: 'basari' | 'tehlike' | 'uyari' | 'bilgi' = !bitti ? 'bilgi' : d!.durum === 'tamam' ? 'basari' : d!.durum === 'kismi' ? 'uyari' : 'tehlike'
   const baslik = !bitti ? cevir('Bayi siliniyor') : d!.durum === 'tamam' ? cevir('Bayi silindi')
     : d!.durum === 'kismi' ? cevir('Bayi silme kısmen tamamlandı') : cevir('Bayi silinemedi')
-  const yedekSorunu = bitti && d!.durum === 'hata' && (d!.detaylar || []).some(x => x.includes('uzagi_yoksay'))
   return (
     <Modal acik baslik={baslik} ton={ton} genislik="md" kapatilamaz={!bitti} onKapat={bitti ? onBitti : onGizle}
       alt={bitti ? (<>
-        {yedekSorunu && bayi && (
-          <Button type="button" color="error" variant="soft" ikon={I.cop} onClick={() => onYedekleriBirak(bayi)}>{cevir("Yedekleri bırakarak sil")}</Button>
-        )}
         <Button type="button" color="primary" ikon={I.onay} onClick={onBitti}>{cevir("Kapat")}</Button>
       </>) : (
         <Button type="button" variant="outlined" ikon={I.kapat} onClick={onGizle}>{cevir("Arka planda sürdür")}</Button>

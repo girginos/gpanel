@@ -25,22 +25,6 @@ import (
 
 const BackupRoot = "/var/backups/girginospanel"
 
-// RemoveDomainBackups: bir domainin per-domain backup dizinini kaldırır.
-// ÖNEMLİ: Domain silme akışından ÇAĞRILMAZ — müşteri yanlışlıkla silmiş olabilir,
-// yedekler kurtarma için kasıtlı saklanır. Bu sadece operatörün açıkça istediği
-// manuel temizlik (ör. "silinmiş domain yedeğini kalıcı kaldır") için bir yardımcıdır.
-// Guard: sk mutlaka "c_" ile başlamalı ve yol BackupRoot altında olmalı (path-escape koruması).
-func RemoveDomainBackups(sk string) error {
-	if !strings.HasPrefix(sk, "c_") {
-		return fmt.Errorf("geçersiz kullanıcı: %q", sk)
-	}
-	dir := filepath.Join(BackupRoot, sk)
-	if dir == BackupRoot || !strings.HasPrefix(dir, BackupRoot+"/") {
-		return fmt.Errorf("güvensiz backup yolu: %q", dir)
-	}
-	return os.RemoveAll(dir)
-}
-
 type Yedek struct {
 	// Mevcut — "yerel" | "uzak" | "yok". Dosyasi hicbir yerde bulunmayan
 	// kayitlar arayuzde gecerli yedek gibi gorunmemeli.
@@ -571,53 +555,6 @@ func yedekBitir(id int64) {
 	yedekMu.Lock()
 	delete(yedekAktif, id)
 	yedekMu.Unlock()
-}
-
-// DomainYedekleriniTemizle — bir domainin TUM yedeklerinin UZAK kopyalarini
-// siler. Domain silinmeden ONCE cagrilmalidir.
-//
-// 🔴 SIRA HAYATI: `domains` satiri silininde `backup_destinations` FK cascade
-// ile gider — yani FTP host/kullanici/PAROLA da gider. Ondan sonra uzak
-// depoyu temizlemek IMKANSIZDIR: ne dosyalarin listesi ne baglanacak kimlik
-// kalir. 2 yillik bir hosting silindiginde yuzlerce GB arsiv uzak depoda
-// KALICI olarak yetim kaliyordu ve panelde izi bile yoktu.
-//
-// Yerel dosyalari SILMEZ (cagiran dizini komple kaldiriyor) ve DB kaydina
-// dokunmaz (cascade halledecek). Isi yalniz uzak kopyalar.
-//
-// Doner: temizlenemeyen dosya sayisi + ilk hata.
-func DomainYedekleriniTemizle(ctx context.Context, db *sql.DB, domainID int64) (kalan int, ilkHata error) {
-	rows, err := db.QueryContext(ctx, `SELECT dosya FROM backups WHERE domain_id=?`, domainID)
-	if err != nil {
-		return 0, err
-	}
-	var dosyalar []string
-	for rows.Next() {
-		var d string
-		if rows.Scan(&d) == nil && strings.TrimSpace(d) != "" {
-			dosyalar = append(dosyalar, d)
-		}
-	}
-	rows.Close()
-
-	for _, d := range dosyalar {
-		if e := YedekUzaktanSil(ctx, db, domainID, d); e != nil {
-			// 🔴 lftp YOKLUGU ENGELLEYICI DEGIL — yorum bunu soyluyordu ama
-			// kod `kalan++` yapip 409 uretiyordu: lftp kurulu olmayan bir
-			// kurulumda HICBIR domain silinemez hale geliyordu. Tek yedek
-			// silme yolu bunu dogru ele aliyordu; iki yol yine ayrismisti.
-			if errors.Is(e, ErrLftpYok) {
-				log.Printf("domain %d silme: lftp yok — %s uzak kopyasi temizlenemedi (engellenmedi)", domainID, d)
-				continue
-			}
-			kalan++
-			if ilkHata == nil {
-				ilkHata = e
-			}
-			log.Printf("domain %d silme: %s uzak kopyasi temizlenemedi: %v", domainID, d, e)
-		}
-	}
-	return kalan, ilkHata
 }
 
 // yedekKaydiniYokEt — bir yedegi UCUNDEN de temizler: uzak kopya, yerel
