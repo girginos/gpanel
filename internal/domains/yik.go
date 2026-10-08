@@ -24,10 +24,12 @@ import (
 // Dönen kapsam, satır gitmeden ÖNCE çözülen domains.reseller_id'dir (denetim için).
 // İstemci kopsa da yıkım yarım kalmasın diye çağıran context.WithoutCancel vermelidir.
 func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, isDemo int) (kapsam int64, err error) {
+	var iz *backups.SilinenIz
 	if isDemo == 0 {
 		// Yedekler silme akışından BAĞIMSIZDIR: dizine/uzak kopyalara dokunulmaz, yedek yüzünden
-		// silme başarısız olmaz. Yalnız best-effort DB izi (hata vermez), satır gitmeden önce.
-		backups.SilinenIsaretle(ctx, db, id, alanAdi, sk)
+		// silme başarısız olmaz. Yalnız best-effort DB izi: bilgi şimdi toplanır (domains satırı
+		// gidince kaybolur), iz satır SİLİNDİKTEN sonra yazılır.
+		iz = backups.SilinenIzHazirla(ctx, db, id, alanAdi, sk)
 		// MariaDB'deki gerçek DB'leri kaldır (CASCADE FK sadece panel DB metadata'sını siler)
 		_ = hesaplar.MySQLDropAllForDomain(db, id)
 		// Ek (addon) alan adları: vhost + sertifika + günlük + bölge + satır; Deprovision'ın
@@ -61,6 +63,7 @@ func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, i
 	if _, err = db.ExecContext(ctx, `DELETE FROM domains WHERE id=?`, id); err != nil {
 		return kapsam, err
 	}
+	iz.Yaz(ctx, db)
 	return kapsam, nil
 }
 

@@ -72,7 +72,12 @@ func tickOnce(db *sql.DB) {
 	if currentHour == 4 {
 		verifyYedekBozulma(db)
 		// Silinen hesapların saklama süresi dolan yedekleri (bkz. silinen.go).
-		SilinenSupur(ctx, db)
+		// Ayrı goroutine + kendi süresi: ölü bir uzak hedef bu turun yedeklerini tüketmesin.
+		go func() {
+			sctx, iptal := context.WithTimeout(context.Background(), 20*time.Minute)
+			defer iptal()
+			SilinenSupur(sctx, db)
+		}()
 	}
 
 	// ANA SALTER + DISK KAPISI (yedek YAZMADAN once).

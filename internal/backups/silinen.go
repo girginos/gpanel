@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"girginospanel/internal/gizli"
@@ -68,40 +69,67 @@ func silinenSaklamaGunu(ayar string, slot int) int {
 	return slot
 }
 
-// SilinenIsaretle — hosting silindiğinde (HostingYik'in SON adımlarından, DB satırı gitmeden ÖNCE)
-// saklama izini yazar. YALNIZ DB okur/yazar: dizine dokunmaz, hata VERMEZ (panik dahil yutulur);
-// başarısızlığı silmeyi etkilemez, yalnız yedeğin otomatik süresi izlenemez (dizin yine yerinde durur).
-func SilinenIsaretle(ctx context.Context, db *sql.DB, domainID int64, alanAdi, sk string) {
+// SilinenIz — silinecek hostingin saklama izi (DB'den önceden toplanır, silme BAŞARILI olunca yazılır).
+type SilinenIz struct {
+	alanAdi, sk                        string
+	domainID, resellerID               int64
+	slot                               int
+	dosyalar                           []string
+	hTip, hHost, hKul, hParola, hDizin string
+	hPort                              int
+}
+
+// SilinenIzHazirla — domains satırı gitmeden ÖNCE çağrılır; YALNIZ DB okur (dizine dokunmaz).
+// Geçersiz sk ya da hatada nil döner; nil iz Yaz'da yok sayılır. Panik yutulur.
+func SilinenIzHazirla(ctx context.Context, db *sql.DB, domainID int64, alanAdi, sk string) (iz *SilinenIz) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("silinen yedek iz: panik (%s): %v", alanAdi, r)
+			log.Printf("silinen yedek iz hazırlama: panik (%s): %v", alanAdi, r)
+			iz = nil
 		}
 	}()
 	if !silinenSKGecerli(sk) {
-		return
+		return nil
 	}
-	var resellerID int64
-	var slot int
+	ctx, iptal := context.WithTimeout(ctx, 10*time.Second)
+	defer iptal()
+	iz = &SilinenIz{alanAdi: alanAdi, sk: sk, domainID: domainID, slot: 7, dosyalar: []string{}}
 	_ = db.QueryRowContext(ctx, `SELECT COALESCE(reseller_id,0), COALESCE(backup_retention,7) FROM domains WHERE id=?`, domainID).
-		Scan(&resellerID, &slot)
-
-	dosyalar := []string{}
+		Scan(&iz.resellerID, &iz.slot)
 	if rows, err := db.QueryContext(ctx, `SELECT dosya FROM backups WHERE domain_id=? ORDER BY id`, domainID); err == nil {
 		for rows.Next() {
 			var d string
 			if rows.Scan(&d) == nil && strings.TrimSpace(d) != "" {
-				dosyalar = append(dosyalar, d)
+				iz.dosyalar = append(iz.dosyalar, d)
 			}
 		}
 		rows.Close()
 	}
-	var hTip, hHost, hKul, hParola, hDizin string
-	var hPort int
 	_ = db.QueryRowContext(ctx, `SELECT tip, host, port, kullanici, parola, uzak_dizin FROM backup_destinations WHERE domain_id=?`, domainID).
-		Scan(&hTip, &hHost, &hPort, &hKul, &hParola, &hDizin)
-	js, _ := json.Marshal(dosyalar)
+		Scan(&iz.hTip, &iz.hHost, &iz.hPort, &iz.hKul, &iz.hParola, &iz.hDizin)
+	return iz
+}
 
-	gun := silinenSaklamaGunu(silinenAyar(ctx, db), slot)
+// Yaz — izi DB'ye yazar. Hosting satırı SİLİNDİKTEN sonra çağrılır (silme başarısızsa iz bırakılmaz).
+// Hata vermez/engellemez; aynı alan için zaten 'saklaniyor' kaydı varsa yinelemez.
+func (iz *SilinenIz) Yaz(ctx context.Context, db *sql.DB) {
+	if iz == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("silinen yedek iz: panik (%s): %v", iz.alanAdi, r)
+		}
+	}()
+	ctx, iptal := context.WithTimeout(ctx, 10*time.Second)
+	defer iptal()
+	var var_ int
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM cp_silinen_yedek WHERE eski_domain_id=? AND durum='saklaniyor'`, iz.domainID).Scan(&var_)
+	if var_ > 0 {
+		return
+	}
+	js, _ := json.Marshal(iz.dosyalar)
+	gun := silinenSaklamaGunu(silinenAyar(ctx, db), iz.slot)
 	var sonKullanma any // NULL = otomatik silme yok
 	if gun > 0 {
 		sonKullanma = gun
@@ -110,11 +138,19 @@ func SilinenIsaretle(ctx context.Context, db *sql.DB, domainID int64, alanAdi, s
 		`INSERT INTO cp_silinen_yedek (alan_adi, sistem_kullanici, eski_domain_id, reseller_id, son_kullanma, dizin,
 		   dosyalar, dosya_sayisi, hedef_tip, hedef_host, hedef_port, hedef_kullanici, hedef_parola, hedef_dizin)
 		 VALUES (?,?,?,?, IF(? IS NULL, NULL, DATE_ADD(NOW(), INTERVAL ? DAY)), ?, ?,?,?,?,?,?,?,?)`,
-		alanAdi, sk, domainID, resellerID, sonKullanma, sonKullanma, sk,
-		string(js), len(dosyalar), hTip, hHost, hPort, hKul, hParola, hDizin); err != nil {
-		log.Printf("silinen yedek iz yazılamadı (%s, yedekler yerinde duruyor): %v", alanAdi, err)
+		iz.alanAdi, iz.sk, iz.domainID, iz.resellerID, sonKullanma, sonKullanma, iz.sk,
+		string(js), len(iz.dosyalar), iz.hTip, iz.hHost, iz.hPort, iz.hKul, iz.hParola, iz.hDizin); err != nil {
+		log.Printf("silinen yedek iz yazılamadı (%s, yedekler yerinde duruyor): %v", iz.alanAdi, err)
 	}
 }
+
+// SilinenIsaretle — Hazirla + Yaz (testler ve satır silme sonrası çağıranlar için).
+func SilinenIsaretle(ctx context.Context, db *sql.DB, domainID int64, alanAdi, sk string) {
+	SilinenIzHazirla(ctx, db, domainID, alanAdi, sk).Yaz(ctx, db)
+}
+
+// silinenSupurKilit: aynı anda tek süpürme.
+var silinenSupurKilit sync.Mutex
 
 var silinenSKRe = regexp.MustCompile(`^c_[a-z0-9_]{1,40}$`)
 
@@ -155,7 +191,9 @@ func silinenDosyalari(ctx context.Context, db *sql.DB, sk string, silinme time.T
 		if err != nil || !fi.Mode().IsRegular() {
 			continue
 		}
-		if sahipID > 0 && !silinme.IsZero() && fi.ModTime().After(silinme) {
+		// Silinmeden SONRA yazılan dosya hesabın sonraki "hayatına" aittir (alan adı yeniden açılıp
+		// tekrar silinmiş olabilir: o dosyalar bu kayda değil, sonraki kayda ait). Pay: sürmekte olan yedek.
+		if !silinme.IsZero() && fi.ModTime().After(silinme.Add(10*time.Minute)) {
 			continue
 		}
 		out[ad] = fi.Size()
@@ -275,6 +313,9 @@ func SilinenTemizleBir(ctx context.Context, db *sql.DB, id int64, uzagiYoksay bo
 		}
 		if kalan > 0 {
 			msg := fmt.Sprintf("%d yedeğin uzak kopyası silinemedi: %v", kalan, ilk)
+			if d != nil && len(d.Parola) >= 3 {
+				msg = strings.ReplaceAll(msg, d.Parola, "***")
+			}
 			if len(msg) > 900 {
 				msg = msg[:900]
 			}
@@ -304,6 +345,10 @@ func SilinenTemizleBir(ctx context.Context, db *sql.DB, id int64, uzagiYoksay bo
 
 // SilinenSupur — süresi dolanları temizler (günde bir, 04:00 turu).
 func SilinenSupur(ctx context.Context, db *sql.DB) {
+	if !silinenSupurKilit.TryLock() {
+		return // zaten çalışıyor (elle tetiklenen tur + saatlik tur çakışmasın)
+	}
+	defer silinenSupurKilit.Unlock()
 	rows, err := db.QueryContext(ctx,
 		`SELECT id FROM cp_silinen_yedek WHERE durum='saklaniyor' AND son_kullanma IS NOT NULL AND son_kullanma<=NOW() ORDER BY id LIMIT 200`)
 	if err != nil {
@@ -319,6 +364,10 @@ func SilinenSupur(ctx context.Context, db *sql.DB) {
 	}
 	rows.Close()
 	for _, id := range ids {
+		if ctx.Err() != nil {
+			log.Printf("silinen yedek süpürme: süre doldu, kalanı yarın")
+			break
+		}
 		if e := SilinenTemizleBir(ctx, db, id, false); e != nil {
 			log.Printf("silinen yedek %d temizlenemedi (yarın tekrar denenir): %v", id, e)
 		} else {

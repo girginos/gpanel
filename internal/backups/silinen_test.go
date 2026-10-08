@@ -108,11 +108,13 @@ func TestSilinenIsaretle_AyarSureyiBelirler(t *testing.T) {
 	if g, n := gunOku(); n || g != 14 {
 		t.Fatalf("slot: gun=%d null=%v", g, n)
 	}
+	g113_exec(t, db, `DELETE FROM cp_silinen_yedek`) // Yaz aynı domain için yinelemez
 	g113_exec(t, db, `INSERT INTO cp_ayarlar (anahtar, deger) VALUES ('silinen_yedek_gun','30') ON DUPLICATE KEY UPDATE deger='30'`)
 	SilinenIsaretle(ctx, db, 9102, "silinen2.test", "c_silinen2")
 	if g, n := gunOku(); n || g != 30 {
 		t.Fatalf("sabit: gun=%d null=%v", g, n)
 	}
+	g113_exec(t, db, `DELETE FROM cp_silinen_yedek`)
 	g113_exec(t, db, `UPDATE cp_ayarlar SET deger='0' WHERE anahtar='silinen_yedek_gun'`)
 	SilinenIsaretle(ctx, db, 9102, "silinen2.test", "c_silinen2")
 	if _, n := gunOku(); !n {
@@ -228,4 +230,37 @@ func TestSilinenDosyalari_SadeceTarGzVeYolKacisiYok(t *testing.T) {
 			t.Errorf("%q kabul edildi: %v", sk, d)
 		}
 	}
+}
+
+// İkinci silmeden sonra eski kayıt, yeni "hayatın" (silinmeden sonra yazılan) dosyalarına dokunmaz.
+func TestSilinenDosyalari_SonrakiHayatinDosyalariHaric(t *testing.T) {
+	db := silinenDB(t)
+	kok := silinenOrtam(t)
+	silinenDosya(t, kok, "c_iki", "c_iki-birinci.tar.gz", 20*24*time.Hour)
+	silinenDosya(t, kok, "c_iki", "c_iki-ikinci.tar.gz", 2*24*time.Hour) // 10 gün önce silinen kayıttan SONRA yazıldı
+	silinme := time.Now().Add(-10 * 24 * time.Hour)
+	dos, _ := silinenDosyalari(context.Background(), db, "c_iki", silinme) // sahip YOK (ikinci kez de silinmiş)
+	if _, ok := dos["c_iki-birinci.tar.gz"]; !ok || len(dos) != 1 {
+		t.Fatalf("yalnız birinci hayatın dosyası: %v", dos)
+	}
+}
+
+// Silme başarısız olursa (iz Yaz'a hiç gelmez) kayıt açılmaz; başarılıysa yinelenmez.
+func TestSilinenIz_YazSadeceBirKez(t *testing.T) {
+	db := silinenDB(t)
+	silinenOrtam(t)
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9131,'iz.test','c_iz')`)
+	iz := SilinenIzHazirla(context.Background(), db, 9131, "iz.test", "c_iz")
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM cp_silinen_yedek`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("Hazirla kayıt açmamalı (silme henüz başarılı değil): %d", n)
+	}
+	iz.Yaz(context.Background(), db)
+	iz.Yaz(context.Background(), db)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM cp_silinen_yedek`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("Yaz idempotent olmalı, n=%d", n)
+	}
+	(*SilinenIz)(nil).Yaz(context.Background(), db) // nil iz: panik yok
 }
