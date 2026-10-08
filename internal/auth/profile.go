@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	destekiptal "girginospanel/internal/destek/iptal"
@@ -47,6 +48,17 @@ func (h *Handlers) claims(r *http.Request) *Claims {
 		return nil
 	}
 	return c
+}
+
+// denemeKilitli: hesap bu uçta hatalı-deneme kilidindeyse 429 yazar ve true döner.
+func denemeKilitli(w http.ResponseWriter, islem string, uid int64) bool {
+	izin, kalan := denemeIzin(islem, uid)
+	if izin {
+		return false
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(kalan.Seconds())+1))
+	httpx.WriteError(w, http.StatusTooManyRequests, "çok fazla hatalı deneme — biraz sonra tekrar deneyin")
+	return true
 }
 
 // PUT /me — profil bilgileri (ad soyad + e-posta + tercihler)
@@ -108,6 +120,11 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "yeni parola en az 8 karakter olmalı")
 		return
 	}
+	// 🔴 "Mevcut parola" doğrulaması çalınmış bir JWT ile sınırsız denenemesin (yöneticide
+	// bu, root sistem parolasına çevrimiçi kaba kuvvettir) — bkz. deneme_siniri.go.
+	if denemeKilitli(w, "parola", c.UserID) {
+		return
+	}
 	// 🔴 BAYI: sistem root parolasina DOKUNMAZ — kendi bcrypt parolasini degistirir.
 	if c.Role != "admin" {
 		var mevcutHash string
@@ -117,6 +134,7 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(mevcutHash), []byte(b.Mevcut)) != nil {
+			denemeHata("parola", c.UserID)
 			writeAudit(h.DB, c.UserID, c.Username, httpx.ClientIP(r), "auth.parola", c.Username, false, kapsamRol(c))
 			httpx.WriteError(w, http.StatusUnauthorized, "mevcut parola hatalı")
 			return
@@ -143,6 +161,7 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !rootParolaDogrula(b.Mevcut) {
+		denemeHata("parola", c.UserID)
 		writeAudit(h.DB, c.UserID, c.Username, httpx.ClientIP(r), "auth.parola", c.Username, false, kapsamRol(c))
 		httpx.WriteError(w, http.StatusUnauthorized, "mevcut parola hatalı")
 		return
@@ -213,6 +232,18 @@ func (h *Handlers) TwoFAEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.Secret = strings.TrimSpace(b.Secret)
+	// 🔴 2FA zaten etkinken secret DEĞİŞTİRİLEMEZ: aksi halde yalnız oturum jetonuna sahip
+	// biri (mevcut kodu bilmeden) kendi secret'ını yazıp gerçek sahibinin 2FA'sını ele
+	// geçirir. Değiştirmek için önce mevcut kodla kapatılır (TwoFADisable).
+	var etkin int
+	if err := h.DB.QueryRow(`SELECT totp_enabled FROM users WHERE id=?`, c.UserID).Scan(&etkin); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "2FA durumu doğrulanamadı")
+		return
+	}
+	if etkin == 1 {
+		httpx.WriteError(w, http.StatusConflict, "2FA zaten etkin — değiştirmek için önce mevcut kodla kapatın")
+		return
+	}
 	adim, ok := TOTPVerifyAdim(b.Secret, b.Kod, -1)
 	if !ok {
 		httpx.WriteError(w, http.StatusBadRequest, "kod doğrulanamadı — uygulamadaki 6 haneli kodu girin")
@@ -241,10 +272,15 @@ func (h *Handlers) TwoFADisable(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
+	// 🔴 6 haneli kod çalınmış jetonla sınırsız denenemesin (deneme_siniri.go).
+	if denemeKilitli(w, "2fa-kapat", c.UserID) {
+		return
+	}
 	var secret string
 	_ = h.DB.QueryRow(`SELECT totp_secret FROM users WHERE id=?`, c.UserID).Scan(&secret)
 	secret = gizli.CozBagli(secret, "totp")
 	if !TOTPVerify(secret, b.Kod) {
+		denemeHata("2fa-kapat", c.UserID)
 		httpx.WriteError(w, http.StatusBadRequest, "kod doğrulanamadı")
 		return
 	}
