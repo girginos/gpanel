@@ -262,8 +262,8 @@ function SunucuLoglari() {
     setYuk(true); setHata(null)
     const _n = ++yukleNesli.current
     api.get('/admin/system/loglar', { params: { kaynak: k, son: n } })
-      .then((r: any) => { if (_n !== yukleNesli.current) return; setSatirlar(r.data.satirlar || []); if (r.data.kaynaklar) setKaynaklar(r.data.kaynaklar) })
-      .catch((e: any) => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .then((r) => { if (_n !== yukleNesli.current) return; setSatirlar(r.data.satirlar || []); if (r.data.kaynaklar) setKaynaklar(r.data.kaynaklar) })
+      .catch((e) => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => { if (_n === yukleNesli.current) setYuk(false) })
   }
   useEffect(() => { yukle(kaynak, son); return () => { yukleNesli.current++ } /* eslint-disable-next-line */ }, [kaynak, son])

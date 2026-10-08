@@ -89,8 +89,8 @@ export default function DomainSubdomainYonetPage() {
   const navigate = useNavigate()
   const [d, setD] = useState<Detay | null>(null)
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [ok, setOk] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setOk] = useState<string | null>(null)
 
   const [phpler, setPhpler] = useState<PHPVer[]>([])
   const [yeniPHP, setYeniPHP] = useState('')

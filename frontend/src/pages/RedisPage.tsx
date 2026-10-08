@@ -75,8 +75,8 @@ export default function RedisPage() {
   const [d, setD] = useState<Durum | null>(null)
   const [yuk, setYuk] = useState(true)
   const [mesgul, setMesgul] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [kopyalandi, setKopyalandi] = useState<string | null>(null)
   // Snippet karti: WP otomatik baglandiysa varsayilan KATLI acilir (bilgi SILINMEZ).
   // null = kullanici dokunmadi -> varsayilani otoBagli belirler.

@@ -197,13 +197,6 @@ const AYAR_YOLU: Record<string, string> = {
 // paketinde durduğu için burada süzülür; sunucu /eklenti/whitelabel/* yollarını 404'ler.
 const EMEKLI = new Set(['whitelabel'])
 
-function tarih(s: string): string {
-  if (!s) return ''
-  const d = new Date(s)
-  if (isNaN(d.getTime())) return s
-  return d.toLocaleDateString(i18n.language === 'en' ? 'en-US' : 'tr-TR', { day: '2-digit', month: 'long', year: 'numeric' })
-}
-
 function kurulumSuruyor(k: KatalogYanit | null): boolean {
   return !!k?.urunler?.some(u => u.kurulum?.durum === 'calisiyor')
 }
@@ -436,18 +429,6 @@ export default function EklentilerPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
   const { slug } = useParams()
-  // Panoya kopyalama izin/güvenli-bağlam nedeniyle başarısız olabilir — sessizce
-  // cevir("kopyalandı") DEMEZ; butonda gerçek sonucu gösterir.
-  const [kopyaDurum, setKopyaDurum] = useState<'bos' | 'ok' | 'hata'>('bos')
-  const kodKopyala = useCallback(async (kod: string) => {
-    try {
-      await navigator.clipboard.writeText(kod)
-      setKopyaDurum('ok')
-    } catch {
-      setKopyaDurum('hata')
-    }
-    window.setTimeout(() => setKopyaDurum('bos'), 2500)
-  }, [])
   const [katalog, setKatalog] = useState<KatalogYanit | null>(null)
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)

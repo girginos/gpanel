@@ -18,6 +18,8 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import PHPSurumleriPage, { SurumSecim } from './PHPSurumleriPage'
 import PHPModuleriPage, { Secim } from './PHPModuleriPage'
 
+type PhpSurum = { surum: string; yuklu?: boolean }
+
 type Adim = { key: string; ad: string; aciklama: string }
 const ADIMLAR: Adim[] = [
   { key: 'surumler', ad: 'PHP Sürümleri', aciklama: 'Sunucuya PHP sürümü ekle/kaldır' },
@@ -302,7 +304,7 @@ function WebSunucuAdim() {
     let iptal = false
     api.get('/php-surumler').then(r => {
       if (iptal) return
-      const yuklu = (r.data?.surumler || []).filter((s: any) => s.yuklu).length
+      const yuklu = (r.data?.surumler || []).filter((s: PhpSurum) => s.yuklu).length
       setDurum({ nginx: true, fpm_sayisi: yuklu })
     }).catch(() => { if (!iptal) setDurum({ nginx: true }) })
     return () => { iptal = true }
@@ -342,7 +344,7 @@ function DurumKart({ etiket, deger, ok }: { etiket: string; deger: string; ok?: 
 // için mevcut async PECL-Kur akışı sırayla çalışır, canlı ilerleme gösterilir.
 type Toplu = { tip: 'surum' | 'eklenti' | 'runtime'; anahtar: string; ad: string; surum: string; kaynak?: string; durum: 'bekliyor' | 'kuruluyor' | 'tamam' | 'hata'; mesaj?: string }
 function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }: { secilenler: Secim[]; secilenSurumler: SurumSecim[]; secilenRuntimeler: RuntimeSecim[]; onTemizle: () => void }) {
-  const [surumler, setSurumler] = useState<any[]>([])
+  const [surumler, setSurumler] = useState<PhpSurum[]>([])
   const [calisiyor, setCalisiyor] = useState(false)
   const [durumlar, setDurumlar] = useState<Toplu[]>([])
   const [aktifAdim, setAktifAdim] = useState<{ ad: string; adim: string; yuzde: number } | null>(null)
@@ -355,7 +357,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
 
   useEffect(() => {
     let iptal = false
-    api.get('/php-surumler').then(r => { if (iptal) return; setSurumler((r.data?.surumler || []).filter((s: any) => s.yuklu)) }).catch(() => {})
+    api.get('/php-surumler').then(r => { if (iptal) return; setSurumler((r.data?.surumler || []).filter((s: PhpSurum) => s.yuklu)) }).catch(() => {})
     return () => { iptal = true }
   }, [])
 
@@ -409,7 +411,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
           for (let t = 0; t < 45; t++) {
             if (ctrl.signal.aborted) throw new DOMException('iptal edildi', 'AbortError')
             const chk = await api.get('/php-surumler', { signal: ctrl.signal })
-            if ((chk.data?.surumler || []).some((x: any) => x.surum === s.surum && x.yuklu)) { yuklendi = true; break }
+            if ((chk.data?.surumler || []).some((x: PhpSurum) => x.surum === s.surum && x.yuklu)) { yuklendi = true; break }
             setAktifAdim({ ad: s.ad, adim: cevir("Doğrulanıyor…"), yuzde: 95 })
             await new Promise(r => setTimeout(r, 2000))
           }
@@ -466,7 +468,7 @@ function OzetAdim({ secilenler, secilenSurumler, secilenRuntimeler, onTemizle }:
       <div>
         <div className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-500 mb-2">{cevir("Kurulu PHP sürümleri")}</div>
         <div className="flex flex-wrap gap-2">
-          {surumler.length === 0 ? <span className="text-sm text-slate-500">—</span> : surumler.map((s: any) => (
+          {surumler.length === 0 ? <span className="text-sm text-slate-500">—</span> : surumler.map((s) => (
             <span key={s.surum} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-dark-600/60 text-sm font-mono text-slate-800 dark:text-slate-200">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />PHP {s.surum}
             </span>

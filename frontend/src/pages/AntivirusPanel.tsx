@@ -301,8 +301,8 @@ export default function AntivirusPanel() {
   })
   function sekmeSec(k: Sekme) { setSekme(k); try { localStorage.setItem('gosp.av.sekme', k) } catch { /* yoksay */ } }
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [bilgi, setBilgi] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBilgi] = useState<string | null>(null)
   const [mesgul, setMesgul] = useState<string | null>(null) // hangi aksiyon calisiyor
   const [gelismis, setGelismis] = useState(false)
   const [inceleModal, setInceleModal] = useState<{ ad: string; icerik: string; kesik?: boolean } | null>(null)
@@ -325,27 +325,27 @@ export default function AntivirusPanel() {
   // taraVeBekle — bir domaini tarar ve BİTENE kadar bekler (Promise). Toplu
   // tarama bunları SIRAYLA çağırır: sunucuda tek-tarama kilidi var, paralel
   // gönderilse 409 alırdı.
-  function taraVeBekle(id: number): Promise<void> {
-    return new Promise(async (resolve) => {
-      try {
-        const { data } = await api.post<{ scan_id: number }>(`/antivirus/domainler/${id}/tara`, {})
-        const sid = data.scan_id
-        let deneme = 0
-        // 🔴 poll'u ref'te tut (unmount'ta temizlenir) + zaman aşımı (~9dk >
-        // backend 8dk context timeout): durum kalıcı 'calisiyor' kalırsa (sunucu
-        // yeniden başlarsa) UI sonsuza dek asılı kalmasın.
-        let t: ReturnType<typeof setInterval>
-        const bit = () => { clearInterval(t); pollRef.current.delete(t); resolve() }
-        t = setInterval(async () => {
-          deneme++
-          if (deneme > 220) { const z = cevir("Tarama durumu güncellenmedi (zaman aşımı)."); setHata(z); toast.hata(cevir("İşlem başarısız"), z); bit(); return }
-          try {
-            const { data: st } = await api.get<{ durum: string }>(`/antivirus/domainler/${id}/tara/${sid}`)
-            if (st.durum !== 'calisiyor') bit()
-          } catch { bit() }
-        }, 2500)
-        pollRef.current.add(t)
-      } catch (e) { const m = apiHata(e, cevir("Tarama başlatılamadı (başka tarama sürüyor olabilir)")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); resolve() }
+  async function taraVeBekle(id: number): Promise<void> {
+    let sid: number
+    try {
+      const { data } = await api.post<{ scan_id: number }>(`/antivirus/domainler/${id}/tara`, {})
+      sid = data.scan_id
+    } catch (e) { const m = apiHata(e, cevir("Tarama başlatılamadı (başka tarama sürüyor olabilir)")); setHata(m); toast.hata(cevir("İşlem başarısız"), m); return }
+    return new Promise<void>((resolve) => {
+      let deneme = 0
+      // 🔴 poll'u ref'te tut (unmount'ta temizlenir) + zaman aşımı (~9dk >
+      // backend 8dk context timeout): durum kalıcı 'calisiyor' kalırsa (sunucu
+      // yeniden başlarsa) UI sonsuza dek asılı kalmasın.
+      const bit = () => { clearInterval(t); pollRef.current.delete(t); resolve() }
+      const t = setInterval(async () => {
+        deneme++
+        if (deneme > 220) { const z = cevir("Tarama durumu güncellenmedi (zaman aşımı)."); setHata(z); toast.hata(cevir("İşlem başarısız"), z); bit(); return }
+        try {
+          const { data: st } = await api.get<{ durum: string }>(`/antivirus/domainler/${id}/tara/${sid}`)
+          if (st.durum !== 'calisiyor') bit()
+        } catch { bit() }
+      }, 2500)
+      pollRef.current.add(t)
     })
   }
   async function domainTara(dm: Domain) {
@@ -366,7 +366,7 @@ export default function AntivirusPanel() {
     }
     setSecili(new Set()); durumYukle()
   }
-  function secToggle(id: number) { setSecili(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n }) }
+  function secToggle(id: number) { setSecili(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n }) }
   useEffect(() => { durumYukle(); ayarYukle() }, [])
   useEffect(() => () => { pollRef.current.forEach((t: ReturnType<typeof setInterval>) => clearInterval(t)); pollRef.current.clear() }, [])
   useEffect(() => {
@@ -374,7 +374,7 @@ export default function AntivirusPanel() {
     if (sekme === 'domainler') domainlerYukle()
   }, [sekme])
 
-  const set = (k: keyof Ayar, v: any) => setAyar(a => a ? { ...a, [k]: v } : a)
+  const set = (k: keyof Ayar, v: Ayar[keyof Ayar]) => setAyar(a => a ? { ...a, [k]: v } : a)
   function yogunluk(p: 'dusuk' | 'dengeli' | 'yuksek') {
     const on = p === 'dusuk' ? { cpu_yuzde: 25, is_parcacigi: 1, dosya_hiz_sn: 200, yuk_esigi: 50 }
       : p === 'dengeli' ? { cpu_yuzde: 0, is_parcacigi: 0, dosya_hiz_sn: 0, yuk_esigi: 80 }
@@ -529,7 +529,7 @@ export default function AntivirusPanel() {
               <div className="flex flex-wrap items-center gap-2">
                 <input type="search" value={filtreMetin} onChange={e => setFiltreMetin(e.target.value)} placeholder={cevir("Domain / kullanıcı ara…")}
                   className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-slate-800 dark:text-slate-100 w-48" />
-                <select value={filtreDurum} onChange={e => setFiltreDurum(e.target.value as any)}
+                <select value={filtreDurum} onChange={e => setFiltreDurum(e.target.value as typeof filtreDurum)}
                   className="px-2.5 py-1.5 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-dark-800 text-slate-800 dark:text-slate-100">
                   <option value="hepsi">{cevir("Tümü")}</option>
                   <option value="enfekte">{cevir("Enfekte")}</option>

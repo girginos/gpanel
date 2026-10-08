@@ -208,11 +208,6 @@ function boyut(b: number) {
   if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
   return `${(mb / 1024).toFixed(1)} GB`
 }
-function guicluParola(uzunluk = 16) {
-  const alfabe = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%*-_'
-  const arr = new Uint32Array(uzunluk); crypto.getRandomValues(arr)
-  let s = ''; for (let i = 0; i < uzunluk; i++) s += alfabe[arr[i] % alfabe.length]; return s
-}
 
 // Tek-tık kopyalanabilir değer satırı (entegrasyon kartı).
 function KopyaSatir({ etiket, deger }: { etiket: string; deger: string }) {
@@ -243,8 +238,8 @@ export default function MailKutuDetayPage() {
   const [domain, setDomain] = useState<Domain | null>(null)
   const [mailDomain, setMailDomain] = useState<MailDomain | null>(null)
   const [kutu, setKutu] = useState<Kutu | null | undefined>(undefined) // undefined=yükleniyor
-  const [hata, setHata] = useState<string | null>(null)
-  const [bildirim, setBildirim] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBildirim] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
   const [sekme, setSekme] = useState<'genel' | 'oto' | 'iletim' | 'tasima' | 'aktar'>('genel')
 

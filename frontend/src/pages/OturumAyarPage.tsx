@@ -60,8 +60,8 @@ export default function OturumAyarPage() {
   const [taslak, setTaslak] = useState<string>('')
   const [yukleniyor, setYukleniyor] = useState(true)
   const [gonderiliyor, setGonderiliyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [mesaj, setMesaj] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setMesaj] = useState<string | null>(null)
   const toast = useToast()
 
   useEffect(() => { void yukle() }, [])

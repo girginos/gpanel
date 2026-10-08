@@ -68,10 +68,10 @@ export default function IstatistiklerPage() {
   function yukle() {
     api.get<Usage>('/system/usage').then(r => setU(r.data)).catch(e => setHata(apiHata(e)))
     api.get('/domains').then(dr => {
-      const domains = (dr.data as any[]) || []
+      const domains = (dr.data as Array<{ durum?: string }>) || []
       setS({
         domain: domains.length,
-        domain_aktif: domains.filter((d: any) => d.durum === 'aktif').length,
+        domain_aktif: domains.filter((d) => d.durum === 'aktif').length,
       })
     }).catch(hataYakala(cevir("Alan adı istatistikleri alınamadı")))
   }
@@ -161,7 +161,7 @@ function Metrik({ baslik, deger, alt, renk, oran }: { baslik: string; deger: str
   )
 }
 
-function Satir({ e, d }: { e: string; d: any }) {
+function Satir({ e, d }: { e: string; d: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 py-1 border-b border-slate-50 dark:border-dark-600 last:border-0">
       <span className="text-xs text-slate-500 dark:text-slate-500 shrink-0">{e}</span>

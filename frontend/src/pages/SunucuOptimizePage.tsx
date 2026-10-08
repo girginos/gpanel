@@ -12,6 +12,9 @@ import { Button, Badge } from '@/components/ui'
 import { useDialog } from '@/components/Dialog'
 import { UyariKutusu } from '@/components/UyariKutusu'
 
+// Axios hata gövdesinden sunucu mesajını güvenle çıkarır.
+const hataMesaji = (e: unknown): string | undefined => (e as { response?: { data?: { hata?: string } } })?.response?.data?.hata
+
 /*
  * Sunucu Optimize v2 — sistem panosu + servis-bazlı analiz + öneri + uygula + yedek/rollback.
  * Endpoint'ler: /optimize/analiz, /optimize/uygula, /optimize/yedekler, /optimize/rollback.
@@ -115,7 +118,7 @@ export default function SunucuOptimizePage() {
   const [rapor, setRapor] = useState<AnalizRaporu | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
   const [aktif, setAktif] = useState<string>('mariadb')
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const toast = useToast()
 
   const yukle = async () => {
@@ -125,8 +128,8 @@ export default function SunucuOptimizePage() {
       // Servisleri sabit sıraya diz
       const ordered = SERVIS_SIRA.map(k => r.data.servisler.find((s: ServisAnaliz) => s.kod === k)).filter(Boolean) as ServisAnaliz[]
       setRapor({ ...r.data, servisler: ordered })
-    } catch (e: any) {
-      const m = e?.response?.data?.hata || cevir("Analiz alınamadı")
+    } catch (e) {
+      const m = hataMesaji(e) || cevir("Analiz alınamadı")
       setHata(m)
       toast.hata(cevir("İşlem başarısız"), m)
     } finally {
@@ -218,10 +221,10 @@ export default function SunucuOptimizePage() {
 function SistemPanosu({ s, toplamOneri }: { s: Sistem; toplamOneri: number }) {
   const ramKullanimPct = s.ram_toplam_mb > 0 ? Math.round((s.ram_kullan_mb / s.ram_toplam_mb) * 100) : 0
   const loadPct = Math.round((s.load1 / s.cpu_cekirdek) * 100)
-  const swapRenk: any = s.swap_kullanim_yuzde > 50 ? 'red' : s.swap_kullanim_yuzde > 20 ? 'amber' : 'emerald'
-  const ramRenk: any = ramKullanimPct > 85 ? 'red' : ramKullanimPct > 65 ? 'amber' : 'emerald'
-  const loadRenk: any = loadPct > 80 ? 'red' : loadPct > 40 ? 'amber' : 'emerald'
-  const diskRenk: any = s.disk_yuzde > 85 ? 'red' : s.disk_yuzde > 70 ? 'amber' : 'emerald'
+  const swapRenk: Renk = s.swap_kullanim_yuzde > 50 ? 'red' : s.swap_kullanim_yuzde > 20 ? 'amber' : 'emerald'
+  const ramRenk: Renk = ramKullanimPct > 85 ? 'red' : ramKullanimPct > 65 ? 'amber' : 'emerald'
+  const loadRenk: Renk = loadPct > 80 ? 'red' : loadPct > 40 ? 'amber' : 'emerald'
+  const diskRenk: Renk = s.disk_yuzde > 85 ? 'red' : s.disk_yuzde > 70 ? 'amber' : 'emerald'
 
   return (
     <section>
@@ -248,7 +251,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
   const [secili, setSecili] = useState<Set<string>>(new Set())
   const [uyguluyor, setUyguluyor] = useState(false)
   const [geriAlId, setGeriAlId] = useState<number | null>(null)
-  const [sonuc, setSonuc] = useState<string | null>(null)
+  const [, setSonuc] = useState<string | null>(null)
   const toast = useToast()
   const { onay } = useDialog()
 
@@ -258,7 +261,7 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
 
   const tumunuSec = () => setSecili(new Set(sirali.map(o => o.id)))
   const tumunuBirak = () => setSecili(new Set())
-  const toggle = (id: string) => setSecili(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggle = (id: string) => setSecili(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   const geriAlUygulama = async (yedekID: number, ozet: string) => {
     if (!(await onay({
@@ -272,8 +275,8 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
       setSonuc(cevir("Geri alındı — yeniden analiz ediliyor"))
       toast.basari(cevir("Geri alındı — yeniden analiz ediliyor"))
       await yenile()
-    } catch (e: any) {
-      const m = cevir("Rollback hatası:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen"))
+    } catch (e) {
+      const m = cevir("Rollback hatası:") + ' ' + (hataMesaji(e) || cevir("bilinmeyen"))
       setSonuc(m)
       toast.hata(cevir("İşlem başarısız"), m)
     } finally { setGeriAlId(null) }
@@ -287,14 +290,14 @@ function ServisDetay({ analiz, yenile }: { analiz: ServisAnaliz; yenile: () => P
     }))) return
     setUyguluyor(true); setSonuc(null)
     try {
-      const r = await api.post<any>('/optimize/uygula', { servis: analiz.kod, oneri_id: Array.from(secili) })
+      const r = await api.post<{ mesaj?: string }>('/optimize/uygula', { servis: analiz.kod, oneri_id: Array.from(secili) })
       const ok = r.data?.mesaj || cevir("Uygulandı")
       setSonuc(ok)
       toast.basari(cevir("Kaydedildi"), ok)
       setSecili(new Set())
       await yenile()
-    } catch (e: any) {
-      const m = cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen"))
+    } catch (e) {
+      const m = cevir("Hata:") + ' ' + (hataMesaji(e) || cevir("bilinmeyen"))
       setSonuc(m)
       toast.hata(cevir("İşlem başarısız"), m)
     } finally { setUyguluyor(false) }
@@ -447,7 +450,7 @@ function YedeklerBolumu() {
     try {
       await api.post('/optimize/rollback', { yedek_id: id })
       await yukle()
-    } catch (e: any) { await bilgi({ baslik: cevir("İşlem başarısız"), mesaj: cevir("Hata:") + ' ' + (e?.response?.data?.hata || cevir("bilinmeyen")), ton: 'tehlike' }) }
+    } catch (e) { await bilgi({ baslik: cevir("İşlem başarısız"), mesaj: cevir("Hata:") + ' ' + (hataMesaji(e) || cevir("bilinmeyen")), ton: 'tehlike' }) }
     finally { setGeriId(null) }
   }
 

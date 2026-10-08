@@ -135,7 +135,7 @@ export default function PanelHostPage() {
   useTranslation() // dil re-render aboneligi
   const [d, setD] = useState<Durum | null>(null)
   const [yukleniyor, setYukleniyor] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [taslak, setTaslak] = useState('')
   const [dnsSonuc, setDnsSonuc] = useState<{ cozulen: string[]; eslesme: boolean; sunucu_ip4: string[] } | null>(null)
   const [dnsKontrol, setDnsKontrol] = useState(false)
@@ -209,8 +209,8 @@ export default function PanelHostPage() {
     setHata(null); setYeniLink(null)
     // 1) DNS kontrol
     setDnsSonuc(null); setDnsKontrol(true)
-    let dnsR: any
-    try { dnsR = (await api.post('/panel-host/dns', { hostname: taslak })).data; setDnsSonuc(dnsR) }
+    let dnsR: { cozulen: string[]; eslesme: boolean; sunucu_ip4: string[] } | undefined
+    try { dnsR = (await api.post('/panel-host/dns', { hostname: taslak })).data; setDnsSonuc(dnsR ?? null) }
     catch (e) {
       const m = apiHata(e, cevir("DNS kontrol hatası"))
       setHata(m); toast.hata(cevir("İşlem başarısız"), m)

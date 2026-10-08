@@ -112,7 +112,7 @@ export default function ServicePlansPage() {
   const [items, setItems] = useState<Plan[]>([])
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [modal, setModal] = useState<Plan | null>(null)
   const [silinecek, setSilinecek] = useState<Plan | null>(null)
   const [sinirNesli, setSinirNesli] = useState(0)
@@ -306,7 +306,7 @@ function PlanModal({ plan, surumler, sinir, onKapat, onKayit }: { plan: Plan; su
     olusturulma: '',
   })
   const [isleniyor, setIsleniyor] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const toast = useToast()
   // Mail eklentisi aktif+ödemeli ise plandaki mail kotası alanlarını göster.
   // DomainPlanPage/PaketDetayPage ile AYNI kapı — lisans kalkınca alanlar

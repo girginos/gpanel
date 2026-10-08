@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 // gosp-dark-swept
 // gosp-dark-swept-v2
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Ikon, I } from '@/components/Ikon'
+import { I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
 import Breadcrumb from '@/components/Breadcrumb'
 import { useDialog } from '@/components/Dialog'
@@ -79,8 +79,8 @@ export default function PHPSurumleriPage({ gomulu, secilenSurumler, setSecilenSu
   const toast = useToast()
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [aktifOp, setAktifOp] = useState<AktifOp | null>(null)
   const [opLog, setOpLog] = useState('')
   const [filtre, setFiltre] = useState<'tumu' | 'yuklu' | 'yuklenebilir'>('tumu')

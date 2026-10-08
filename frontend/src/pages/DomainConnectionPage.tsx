@@ -84,7 +84,7 @@ function panoYaz(text: string): boolean {
     const ok = document.execCommand('copy')
     document.body.removeChild(ta)
     if (ok) return true
-  } catch {}
+  } catch { /* yoksay: bir sonraki yönteme düş */ }
   // 3) Son çare: prompt — kullanıcı Ctrl+C ile manuel kopyalar
   try {
     window.prompt(cevir("Otomatik kopyalanamadı. Ctrl+C basıp Enter'a tıklayın:"), text)
@@ -276,7 +276,7 @@ function ParolaSifirlaModal({ tip, domainId, ftpUser, dbUser, onKapat }:
         await api.put(`/domains/${domainId}/ftp/password`, { parola })
       } else {
         // İlk DB id'sini al
-        const dbs = await api.get<any[]>(`/domains/${domainId}/databases`)
+        const dbs = await api.get<Array<{ id: number }>>(`/domains/${domainId}/databases`)
         const main = (dbs.data || [])[0]
         if (!main) throw new Error(cevir("veritabanı yok"))
         await api.put(`/databases/${main.id}/password`, { parola })

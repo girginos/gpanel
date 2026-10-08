@@ -163,7 +163,7 @@ export default function PaketDetayPage() {
   const [surumler, setSurumler] = useState<Surum[]>([])
   const [yuk, setYuk] = useState(true)
   const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
   // Mail eklentisi aktif+odemeli ise posta limiti alanlari gorunur.
   // DomainPlanPage ile AYNI kapi -- lisans kalkinca alanlar kendiliginden gizlenir.
