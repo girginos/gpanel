@@ -237,16 +237,58 @@ ssl_session_cache shared:GOSPSSL:50m;
 ssl_session_timeout 1d;
 # Ticket anahtari rotasyonu olmadan PFS zayiflar → kapali.
 ssl_session_tickets off;
-# OCSP stapling: el sikismayi hizlandirir, istemcinin CA'ya gitmesini onler.
-ssl_stapling on;
-ssl_stapling_verify on;
+# OCSP stapling KAPALI (bilerek). Let's Encrypt 2025'te OCSP'yi kapatti (sertifikalarda
+# OCSP URL'i yok); kendinden imzali ve CA'siz sertifikalarda da yok. Global "on" her
+# nginx -t/reload'unda sertifika basina "ssl_stapling ignored, no OCSP responder URL"
+# uyarisi basiyor ve ise yaramiyordu. Stapling gerekirse vhost'ta ac (ssl_stapling on).
+ssl_stapling off;
 resolver 1.1.1.1 8.8.8.8 valid=300s ipv6=off;
 resolver_timeout 5s;
 `
 	if b, err := os.ReadFile(yol); err == nil && strings.Contains(string(b), "GOSPSSL") {
+		// Mevcut kurulum: eski "stapling on" politikasini kapat (idempotent; ayri dosya
+		// degisimi icin nginx -t + geri alma + reload).
+		if yeni, degisti := staplingKapat(string(b)); degisti {
+			if e := os.WriteFile(yol, []byte(yeni), 0o644); e != nil {
+				log.Printf("tls global: stapling kapatilamadi: %v", e)
+				return
+			}
+			if o, e := exec.Command("nginx", "-t").CombinedOutput(); e != nil {
+				_ = os.WriteFile(yol, b, 0o644) // GERI YUKLE
+				log.Printf("tls global: nginx -t basarisiz, stapling degisimi geri alindi: %s", strings.TrimSpace(string(o)))
+				return
+			}
+			if o, e := exec.Command("systemctl", "reload", "nginx").CombinedOutput(); e != nil {
+				log.Printf("tls global: nginx reload: %s", strings.TrimSpace(string(o)))
+				return
+			}
+			log.Printf("tls global: ssl_stapling kapatildi (OCSP URL'i olmayan sertifika uyarilari bitti)")
+		}
 		return
 	}
 	_ = os.WriteFile(yol, []byte(icerik), 0o644)
+}
+
+// staplingKapat: 00-gosp-tls.conf icinde `ssl_stapling on;` → `off`, `ssl_stapling_verify on;`
+// satirini kaldirir. Baska hicbir satira dokunmaz. degisti=false → zaten kapali.
+func staplingKapat(icerik string) (string, bool) {
+	degisti := false
+	var out []string
+	for _, ln := range strings.Split(icerik, "\n") {
+		t := strings.TrimSpace(ln)
+		switch {
+		case t == "ssl_stapling on;":
+			out = append(out, "# OCSP stapling KAPALI (bilerek): Let's Encrypt OCSP'yi kapatti, kendinden imzalida URL yok;")
+			out = append(out, "# global \"on\" her nginx -t'de sertifika basina uyari basiyordu. Gerekirse vhost'ta ac.")
+			out = append(out, "ssl_stapling off;")
+			degisti = true
+		case t == "ssl_stapling_verify on;":
+			degisti = true // kaldir
+		default:
+			out = append(out, ln)
+		}
+	}
+	return strings.Join(out, "\n"), degisti
 }
 
 // logrotateEnsure: tenant PHP-FPM loglari icin donusum kurali.

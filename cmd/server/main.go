@@ -396,6 +396,8 @@ func main() {
 	// Nabiz AG HATASINDA FAIL-OPEN'dir (bkz. internal/lisans/nabiz.go).
 	lisansH := &lisans.Handlers{DB: d, Surum: version}
 	go lisansH.NabizDongusu(context.Background())
+	// Güncelleme sonrası eklenti bütünlük kaydını (güvenli koşullarda) yenile — bkz. lisans/guncelleme_kayit.go
+	go lisansH.GuncellemeKayitDongusu(context.Background(), d)
 	// Telegram destek (panel tarafı; ajan AYRI hizmet — cmd/server/destek.go).
 	destekKur(d)
 	// Kurulu eklenti ikilisinin imzali paket basligiyla tutarliligi.
