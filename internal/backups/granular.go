@@ -872,6 +872,39 @@ func arsivUyeListesi(abs string) ([]string, error) {
 	return uyeler, nil
 }
 
+// arsivManifestHome: arsivin __db__/manifest.json "home" alanini (yedegin sk'si) okur.
+// Yoksa, okunamazsa ya da sk bicimine uymuyorsa "". Salt-okunur; diske cikarmaz. Manifest
+// tar'in SONUNDADIR (__db__ en son eklenir) → tum akisi gezer; bu yuzden yalniz kimligin baska
+// kaynagi olmayan (<sk> dizini yok) arsivlerde cagrilir (bkz. arsivSKKontrol).
+func arsivManifestHome(abs string) string {
+	f, err := os.Open(abs)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return ""
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hd, e := tr.Next()
+		if e != nil {
+			return ""
+		}
+		if strings.TrimPrefix(hd.Name, "./") != "__db__/manifest.json" || hd.Typeflag != tar.TypeReg {
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(tr, 64<<10))
+		var m arsivManifest
+		if json.Unmarshal(b, &m) != nil || !reSKGuvenli.MatchString(m.Home) {
+			return ""
+		}
+		return m.Home
+	}
+}
+
 // cikarUyeleri: moda gore arsivden cikarilacak ust-duzey uyeleri hesaplar.
 // hasHome → "<sk>", DB icin "__db__" (veya eski format kok .sql'leri).
 func cikarUyeleri(mod, sk string, tumUyeler, yollar []string) []string {
@@ -948,35 +981,78 @@ func arsivUyeCikarRoot(abs, destDir string, uyeler []string) (string, error) {
 	return string(out), nil
 }
 
-// homeGeriYukle: tum home'u geri yukler. temiz=false → EZMEZ (yedekte olmayan aktif
-// dosyalar korunur, yalniz yedektekiler ustune yazilir). temiz=true → rsync --delete
-// (yedekteki tam durum; ESKI davranis, tehlikeli).
 // reSKGuvenli: provisioner.SlugFromDomain uretimi sistem kullanicisi —
 // "c_" oneki + kucuk harf/rakam/altcizgi (BenzersizKullanici sayi eki dahil).
 var reSKGuvenli = regexp.MustCompile(`^c_[a-z0-9_]{1,62}$`)
 
-func homeGeriYukle(tmp, sk string, temiz bool) {
+// homeKok: kiraci ev dizinlerinin koku. Uretimde "/home"; YALNIZ testler gecici dizine
+// cevirir (gercek /home'a ASLA yazilmaz — bkz. restore_sk_test.go).
+var homeKok = "/home"
+
+// homeGeriYukleSonuc hatalari. Metinleri istemciye GIDEBILIR: ham komut ciktisi
+// (rsync/cp stderr'i; yol + ayrinti) ICERMEZ, o yalniz sunucu gunlugune yazilir.
+var (
+	errHomeGecersizSK = errors.New("geçersiz sistem kullanıcısı")
+	// errHomeYedekteYok: cikarilmis kokte <sk> dizini yok (yedekte bu hesabin dosyalari yok).
+	errHomeYedekteYok = errors.New("yedekte bu hesabın dosyaları yok")
+	// errHomeYazilamadi: rsync de, yedegi olan cp -af de basarisiz — HICBIR sey (guvenilir
+	// bicimde) geri yuklenmedi.
+	errHomeYazilamadi = errors.New("ev dizinine yazılamadı (ayrıntı sunucu günlüğünde)")
+	// errHomeTemizYapilamadi: dosyalar yazildi AMA rsync --delete uygulanamadi (rsync
+	// calismadi, cp -af yedegi kullanildi): "yedekte olmayan dosyalar SILINDI" demek yalan olur.
+	errHomeTemizYapilamadi = errors.New("temiz geri yükleme uygulanamadı: yedekte olmayan dosyalar silinmedi")
+)
+
+// homeGeriYukleSonuc: tum home'u geri yukler VE gercekten yazilip yazilmadigini bildirir.
+// temiz=false → EZMEZ (yedekte olmayan aktif dosyalar korunur, yalniz yedektekiler ustune
+// yazilir). temiz=true → rsync --delete (yedekteki tam durum; ESKI davranis, tehlikeli).
+//
+// Donus: nil = istenen anlamda yazildi · errHomeTemizYapilamadi = dosyalar yazildi ama
+// temiz (silme) uygulanamadi · digerleri (errHomeGecersizSK / errHomeYedekteYok /
+// errHomeYazilamadi) = geri yukleme YAPILMADI; cagiran basari mesaji VERMEMELI.
+// 🔴 Eskiden sonuc yoktu: cikarilmis <sk> dizini yoksa ya da rsync+cp ikisi de patlamissa
+// fonksiyon sessizce donuyor, Restore yine "Yedekteki dosyalar uzerine yazildi" diyordu.
+func homeGeriYukleSonuc(tmp, sk string, temiz bool) error {
 	// 🔴 fail-closed sk kapisi: sk DB'den gelir ve cagiranlar "c_" onekini
-	// denetler; ama bu fonksiyon "/home/"+sk yolunu root rsync/cp/chown'a
+	// denetler; ama bu fonksiyon homeKok+sk yolunu root rsync/cp/chown'a
 	// verir — ayrac veya ".." tasiyabilecek bozuk bir deger (DB-tamper
-	// senaryosu) chokepoint'te de kesilir, 4 cagiran birden korunur.
+	// senaryosu) chokepoint'te de kesilir, tum cagiranlar birden korunur.
 	if !reSKGuvenli.MatchString(sk) {
 		log.Printf("backups: homeGeriYukle geçersiz sk reddedildi: %q", sk)
-		return
+		return errHomeGecersizSK
 	}
 	extractedHome := filepath.Join(tmp, sk)
-	if _, err := os.Stat(extractedHome); err != nil {
-		return
+	if fi, err := os.Stat(extractedHome); err != nil || !fi.IsDir() {
+		return errHomeYedekteYok
 	}
+	hedef := filepath.Join(homeKok, sk)
 	args := []string{"-a"}
 	if temiz {
 		args = append(args, "--delete")
 	}
-	args = append(args, extractedHome+"/", "/home/"+sk+"/")
+	args = append(args, extractedHome+"/", hedef+"/")
+	temizUygulandi := true
 	if out, err := exec.Command("rsync", args...).CombinedOutput(); err != nil {
-		_ = out
-		_, _ = exec.Command("cp", "-af", extractedHome+"/.", "/home/"+sk+"/").CombinedOutput()
+		log.Printf("backups: home geri yükleme: rsync başarısız (sk=%s): %v: %s", sk, err, kisaCikti(string(out)))
+		if out2, err2 := exec.Command("cp", "-af", extractedHome+"/.", hedef+"/").CombinedOutput(); err2 != nil {
+			log.Printf("backups: home geri yükleme: cp yedeği de başarısız (sk=%s): %v: %s", sk, err2, kisaCikti(string(out2)))
+			return errHomeYazilamadi
+		}
+		// cp -af yedegi dosyalari yazar ama yedekte olmayanlari SILMEZ.
+		temizUygulandi = !temiz
 	}
-	_, _ = exec.Command("chown", "-R", sk+":"+sk, "/home/"+sk).CombinedOutput()
-	selinuxetiket.Logla("yedek geri yukle (home)", "/home/"+sk)
+	if out, err := exec.Command("chown", "-R", sk+":"+sk, hedef).CombinedOutput(); err != nil {
+		log.Printf("backups: home geri yükleme: chown başarısız (sk=%s): %v: %s", sk, err, kisaCikti(string(out)))
+	}
+	selinuxetiket.Logla("yedek geri yukle (home)", hedef)
+	if !temizUygulandi {
+		return errHomeTemizYapilamadi
+	}
+	return nil
+}
+
+// homeGeriYukle: homeGeriYukleSonuc'un sonucu YOK SAYAN eski bicimi (toplu is yolu;
+// davranis aynen). Sonucu onemseyen cagiranlar homeGeriYukleSonuc kullanmali.
+func homeGeriYukle(tmp, sk string, temiz bool) {
+	_ = homeGeriYukleSonuc(tmp, sk, temiz)
 }

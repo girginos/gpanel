@@ -160,11 +160,20 @@ func geriYukleCekirdek(db *sql.DB, domainID, backupID int64, mod string, temiz b
 	if !strings.HasPrefix(sk, "c_") {
 		return "", fmt.Errorf("güvenlik")
 	}
-	abs, hazirErr := YerelDosyaHazirla(context.Background(), db, sk, dosya)
+	abs, hazirErr := yedekHazirla(context.Background(), db, sk, dosya)
 	if hazirErr != nil {
 		return "", hazirErr
 	}
-	uyeListesi, _ := arsivUyeListesi(abs)
+	uyeListesi, listeErr := arsivUyeListesi(abs)
+	if listeErr != nil {
+		return "", fmt.Errorf("yedek arşivi okunamadı: %w", listeErr)
+	}
+	// 🔴 sk KAPISI (Restore ile ORTAK; bkz. restore.go "sk kapısı"): yedek bu hostinge ait değilse
+	// HİÇBİR çıkarma/yazma/DB işlemi yapılmaz. Bu yol yalnız yönetici içindir → ayrıntılı metin.
+	if ret := arsivSKKontrol(abs, mod, sk, uyeListesi); ret != nil {
+		log.Printf("toplu geri yükleme: sk kapısı reddetti (domain=%d yedek=%d mod=%s): %s", domainID, backupID, mod, ret.Admin)
+		return "", errors.New(ret.Admin)
+	}
 	uyeler := cikarUyeleri(mod, sk, uyeListesi, nil)
 	if len(uyeler) == 0 {
 		return "", fmt.Errorf("bu mod için içerik yok")

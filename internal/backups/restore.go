@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +81,175 @@ func hazirlikHatasi(r *http.Request, domainID int64, err error) string {
 		return err.Error()
 	}
 	return "yedek dosyası hazırlanamadı (uzak yedek deposundan alınamadı) — ayrıntı sunucu günlüğüne yazıldı; sorun sürerse yöneticinize başvurun"
+}
+
+// ---- sk kapısı: bu yedek bu hostinge ait mi? ----
+//
+// 🔴 Arşivde domain_id YOKTUR. Kimlik = sk (üst-seviye "<sk>/" home dizini) + DB adları
+// (__db__/<ad>.sql, __db__/manifest.json {home: sk}). sk alan adının İLK ETİKETİNDEN türer
+// (provisioner.SlugFromDomain: girgin.com → c_girgin) ve çakışmada sayı eki alır
+// (c_girgin2): girgin.com silinip girgin.net (başka müşteri) açılırsa AYNI c_girgin alınır;
+// aynı alan adı yeniden açılırken c_girgin doluysa c_girgin2 alınır. Restore bu kimliği
+// hostingin sk'sıyla KARŞILAŞTIRMIYORDU:
+//   - mod=tam: hostingin sk'sına ait home üyesi arşivde yoksa cikarUyeleri yalnız __db__
+//     döner, homeGeriYukle SESSİZCE hiçbir şey yapmaz ama yanıt "Yedekteki dosyalar üzerine
+//     yazıldı" derdi (sessiz kısmi restore + yanlış başarı mesajı);
+//   - mod=veritabani/db: arşivdeki başka sk'ya ait DB adları, DBAdiBaskaKiracininMi'den
+//     geçerse "kurtarma yolu" ile bu hostinge kaydedilip import edilebilirdi (başka hesabın
+//     verisi bu hesaba).
+//
+// Kapı TÜM modlarda ve HERHANGİ bir çıkarma/yazma/DB işleminden ÖNCE çalışır (arşiv çıkarılmaz).
+// Tek hosting (Restore) ve toplu iş (geriYukleCekirdek) AYNI kapıyı kullanır.
+const (
+	// kodSKUyusmuyor: ön yüzün metin eşleştirmeden tanıdığı makine okunur hata kodu.
+	kodSKUyusmuyor = "sk_uyusmuyor"
+	// skGenelMesaj: yönetici OLMAYANA (bayi/müşteri) gösterilen TEK metin — başka kiracının
+	// sk'sını (ve neden uyuşmadığını) sızdırmaz.
+	skGenelMesaj = "Bu yedek bu hesaba ait değil — yöneticinize başvurun."
+	// skDosyaYokMesaj: dosya geri yükleyen modlarda arşivde hiç home dizini yok.
+	skDosyaYokMesaj = "yedekte bu hesabın dosyaları yok"
+)
+
+// skRet: arşivin kimliği yüzünden geri yüklemenin reddi (nil = kapı geçildi).
+type skRet struct {
+	Durum int    // 409 (uyuşmuyor/belirsiz) | 400 (yedekte bu hesabın dosyaları yok)
+	Kod   string // makine okunur kod; yalnız 409'da (kodSKUyusmuyor)
+	Neden string // kısa, sk İÇERMEYEN neden (denetim kaydı bayiye de görünür)
+	Admin string // yönetici metni: iki sk'yı + çözüm ipucunu içerir
+	Genel string // yönetici OLMAYAN metni: sk İÇERMEZ
+}
+
+// mesaj: çağıranın rolüne uygun metin. Yönetici olmayan başka kiracının sk'sını GÖRMEZ.
+func (e *skRet) mesaj(admin bool) string {
+	if admin {
+		return e.Admin
+	}
+	return e.Genel
+}
+
+// arsivUstSKler: arşiv üyelerinin ÜST-SEVİYE adlarından sk biçimli (reSKGuvenli) olanlar —
+// tekilleştirilmiş, sıralı. "__db__" ve sk biçimine uymayan (dosya/dizin) adlar sayılmaz.
+// Üye adı path.Clean'den geçer: "./c_a/x" → c_a, "c_a/../c_b/x" etkin olarak c_b'dir.
+func arsivUstSKler(uyeler []string) []string {
+	goruldu := map[string]bool{}
+	var out []string
+	for _, m := range uyeler {
+		ilk, _, _ := strings.Cut(path.Clean(m), "/")
+		if !reSKGuvenli.MatchString(ilk) || goruldu[ilk] {
+			continue
+		}
+		goruldu[ilk] = true
+		out = append(out, ilk)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// skListe: mesajda gösterilecek sk listesi (crafted arşivde binlerce ad olabilir → kısaltılır).
+func skListe(sklar []string) string {
+	const en = 5
+	if len(sklar) <= en {
+		return strings.Join(sklar, ", ")
+	}
+	return strings.Join(sklar[:en], ", ") + fmt.Sprintf(" … (+%d)", len(sklar)-en)
+}
+
+// skUyusmuyor: arşiv başka bir hesaba ait.
+func skUyusmuyor(arsivSK, hostSK string) *skRet {
+	return &skRet{
+		Durum: http.StatusConflict, Kod: kodSKUyusmuyor, Neden: "sk uyuşmuyor",
+		Admin: fmt.Sprintf("Bu yedek farklı bir hesaba (%s) ait; bu hosting %s. Yedek yalnız aynı sistem kullanıcılı (sk) hostinge bağlanıp geri yüklenebilir — doğru hostingin yedek listesinden geri yükleyin.", arsivSK, hostSK),
+		Genel: skGenelMesaj,
+	}
+}
+
+// skKarar: kapının SAF karar mantığı (G/Ç yok → tablo testi).
+//
+//	sklar      : arşivin üst-seviye sk dizinleri (arsivUstSKler)
+//	manifestSK : __db__/manifest.json "home" (yalnız sklar boşken ve DB modunda okunur; yoksa "")
+func skKarar(mod, hostSK string, sklar []string, manifestSK string) *skRet {
+	switch {
+	case len(sklar) > 1:
+		// Birden çok hesabın dizini: hangisine ait olduğu BELİRSİZ → reddet.
+		return &skRet{
+			Durum: http.StatusConflict, Kod: kodSKUyusmuyor, Neden: "birden çok hesabın dizini",
+			Admin: fmt.Sprintf("Yedek birden çok hesabın dizinini içeriyor (%s); hangisine ait olduğu belirlenemediği için geri yüklenmedi (bu hosting: %s).", skListe(sklar), hostSK),
+			Genel: skGenelMesaj,
+		}
+	case len(sklar) == 1 && sklar[0] != hostSK:
+		return skUyusmuyor(sklar[0], hostSK)
+	case len(sklar) == 1:
+		return nil // eşleşti
+	}
+	// Arşivde hiç sk (c_*) home dizini yok.
+	if manifestSK != "" && manifestSK != hostSK {
+		return skUyusmuyor(manifestSK, hostSK)
+	}
+	switch mod {
+	case "tam", "dosyalar", "dosya":
+		// Dosya geri yükleyen modlar home üyesi OLMADAN anlamsız (eskiden sessiz kısmi restore).
+		return &skRet{Durum: http.StatusBadRequest, Neden: "ev dizini yok", Admin: skDosyaYokMesaj, Genel: skDosyaYokMesaj}
+	}
+	return nil // DB-only modlar: legacy arşivler (kökte *.sql) eskisi gibi
+}
+
+// arsivSKKontrol: Restore (tek hosting) ve geriYukleCekirdek (toplu iş) için ORTAK kapı.
+// uyeler: arsivUyeListesi çıktısı. nil = geçti; aksi halde çağıran HİÇBİR çıkarma/yazma/DB
+// işlemi yapmadan reddi iletir.
+func arsivSKKontrol(abs, mod, hostSK string, uyeler []string) *skRet {
+	sklar := arsivUstSKler(uyeler)
+	manifestSK := ""
+	// Manifest YALNIZ kimliğin başka kaynağı yokken (sk dizini yok) ve kararı değiştirebileceği
+	// DB modlarında okunur: tüm akışı bir kez daha gezer (manifest tar'ın sonundadır); ev
+	// dizinli (olağan) arşivlerde ek maliyet YOK.
+	if len(sklar) == 0 && (mod == "veritabani" || mod == "db") {
+		manifestSK = arsivManifestHome(abs)
+	}
+	return skKarar(mod, hostSK, sklar, manifestSK)
+}
+
+// skReddet: kapının reddini yanıta yazar. Yönetici iki sk'yı görür; bayi/müşteri GENEL metni.
+// 🔴 İlerleme kaydı (/backups/ilerleme) ve denetim kaydı başka roller tarafından da okunur:
+// onlara yönetici metni (başka kiracının sk'sı) YAZILMAZ; ayrıntı yalnız sunucu günlüğünde.
+func (h *Handlers) skReddet(w http.ResponseWriter, r *http.Request, ret *skRet, id int64, alanAdi, mod, dosya string) {
+	log.Printf("restore: sk kapısı reddetti (domain=%d mod=%s dosya=%s): %s", id, mod, dosya, ret.Admin)
+	if ret.Kod != "" { // güvenlik reddi (400 "dosya yok" sıradan bir doğrulama hatasıdır)
+		uid, kul := middleware.Aktor(r)
+		httpx.DenetimDomain(h.DB, r, uid, kul, "yedek.geriyukle", alanAdi,
+			"mod="+mod+" dosya="+dosya+" reddedildi: "+ret.Neden, id, false)
+	}
+	IlerlemeBitir(id, "", errors.New(ret.Genel))
+	msg := ret.mesaj(middleware.RolFrom(r) == "admin")
+	if ret.Kod != "" {
+		httpx.WriteJSON(w, ret.Durum, map[string]any{"ok": false, "kod": ret.Kod, "hata": msg})
+		return
+	}
+	httpx.WriteError(w, ret.Durum, msg)
+}
+
+// homeGeriYukleYaniti: tam/dosyalar modunda dosyaları geri yükler; YAZILAMADIYSA yanıtı
+// (ok:false) KENDİSİ yazar ve ok=false döner → çağıran hemen çıkar, başarı mesajı VERİLMEZ.
+// ok=true iken uyari dosyalar için DÜRÜST metindir (temiz yapılamadıysa "SİLİNDİ" denmez).
+// dbNotu: hata metnine eklenir (tam modda "veritabanına dokunulmadı": DB'ye geçilmez).
+func homeGeriYukleYaniti(w http.ResponseWriter, id int64, tmpDir, sk string, temiz bool, dbNotu string) (string, bool) {
+	err := homeGeriYukleSonuc(tmpDir, sk, temiz)
+	switch {
+	case err == nil:
+		return ezmeUyari(temiz), true
+	case errors.Is(err, errHomeTemizYapilamadi):
+		return "Dosyalar geri yüklendi ancak TEMİZ geri yükleme uygulanamadı (rsync kullanılamadı): yedekte olmayan dosyalar SİLİNMEDİ, yedektekiler üzerine yazıldı.", true
+	}
+	log.Printf("restore: dosyalar geri yüklenemedi (domain=%d sk=%s): %v", id, sk, err)
+	durum, msg := http.StatusBadRequest, skDosyaYokMesaj // sk kapısının ikinci katı: AYNI yanıt
+	if !errors.Is(err, errHomeYedekteYok) {
+		durum, msg = http.StatusInternalServerError, "dosyalar geri yüklenemedi: "+err.Error()
+		if dbNotu != "" {
+			msg += " — " + dbNotu
+		}
+	}
+	IlerlemeBitir(id, "", errors.New(msg))
+	httpx.WriteJSON(w, durum, map[string]any{"ok": false, "hata": msg})
+	return "", false
 }
 
 // restoreIstek: geri yükleme gövdesi (tüm alanlar opsiyonel; boş gövde = mod "tam").
@@ -169,7 +340,19 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	// Kota-dostu sahneleme: SADECE moda göre gereken üyeleri ROOT olarak /var/tmp'e
 	// çıkar (tenant home'unun tam kopyası tenant kotasını aşmadan). Güvenlik: üye
 	// ön-taraması arsivUyeCikarRoot içinde (archivex.Tara → jail-escape reddi).
-	uyeListesi, _ := arsivUyeListesi(abs)
+	uyeListesi, listeErr := arsivUyeListesi(abs)
+	if listeErr != nil {
+		// Açılamayan/gzip olmayan arşivde "yedekte bu hesabın dosyaları yok" demek yanlış olur.
+		log.Printf("restore: arşiv üye listesi okunamadı (domain=%d): %v", id, listeErr)
+		httpx.WriteError(w, http.StatusInternalServerError, "yedek arşivi okunamadı")
+		return
+	}
+	// 🔴 sk KAPISI: yedek bu hostinge mi ait? TÜM modlarda, HERHANGİ bir çıkarma/yazma/DB
+	// işleminden ÖNCE (arşiv çıkarılmaz; ayrıntı: yukarıdaki "sk kapısı" bloğu).
+	if ret := arsivSKKontrol(abs, req.Mod, sk, uyeListesi); ret != nil {
+		h.skReddet(w, r, ret, id, alanAdi, req.Mod, dosya)
+		return
+	}
 	uyeler := cikarUyeleri(req.Mod, sk, uyeListesi, req.Yollar)
 	if len(uyeler) == 0 {
 		httpx.WriteError(w, http.StatusBadRequest, "bu mod için yedekte uygun içerik bulunamadı")
@@ -191,12 +374,16 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 	switch req.Mod {
 	case "tam":
 		IlerlemeAsama(id, "dosyalar geri yükleniyor", 0)
-		homeGeriYukle(tmpDir, sk, req.Temiz)
+		// 🔴 Dosyalar yazılamadıysa DB'ye GEÇİLMEZ ve başarı mesajı verilmez (homeGeriYukleYaniti).
+		dosyaUyari, ok := homeGeriYukleYaniti(w, id, tmpDir, sk, req.Temiz, "veritabanına dokunulmadı")
+		if !ok {
+			return
+		}
 		IlerlemeAsama(id, "veritabanı içe aktarılıyor", 0)
 		dbSonuc := tumDBGeriYukle(h.DB, id, tmpDir, sk, "")
 		sonuc["db"] = dbSonuc
 		y, a, hn, m := DBSonucOzeti(dbSonuc)
-		uyari := ezmeUyari(req.Temiz)
+		uyari := dosyaUyari
 		// Dosyalar geri geldi; DB tarafi eksikse bunu SOYLE (sessizce "tamam" deme).
 		if hn > 0 || (y == 0 && a > 0) {
 			uyari = strings.TrimSpace(uyari + " ⚠ Dosyalar geri yüklendi ancak veritabanı tarafında sorun var: " + m)
@@ -206,8 +393,11 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 		sonuc["uyari"] = uyari
 
 	case "dosyalar":
-		homeGeriYukle(tmpDir, sk, req.Temiz)
-		sonuc["uyari"] = ezmeUyari(req.Temiz)
+		uyari, ok := homeGeriYukleYaniti(w, id, tmpDir, sk, req.Temiz, "")
+		if !ok {
+			return
+		}
+		sonuc["uyari"] = uyari
 
 	case "veritabani":
 		IlerlemeAsama(id, "veritabanı içe aktarılıyor", 0)
@@ -243,13 +433,24 @@ func (h *Handlers) Restore(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// 🔴 Hiçbir öğe kopyalanamadıysa (ör. kota dolu, kiracı komutu patladı) "klasörüne açıldı"
+		// demek yalan olur: başarı mesajı verilmez.
+		if n == 0 {
+			msg := "seçilen dosyalar geri yüklenemedi (hiçbiri kopyalanamadı)"
+			IlerlemeBitir(id, "", errors.New(msg))
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "hata": msg})
+			return
+		}
 		sonuc["dosya_sayisi"] = n
+		uyari := "Seçilen dosyalar orijinal konumlarına yazıldı."
 		if klasor != "" {
 			sonuc["hedef_klasor"] = klasor
-			sonuc["uyari"] = "Seçilen dosyalar ‘" + klasor + "/’ klasörüne açıldı — mevcut dosyalar korundu."
-		} else {
-			sonuc["uyari"] = "Seçilen dosyalar orijinal konumlarına yazıldı."
+			uyari = "Seçilen dosyalar ‘" + klasor + "/’ klasörüne açıldı — mevcut dosyalar korundu."
 		}
+		if n < len(uyeler) { // kısmi: bazı öğeler kopyalanamadı — eksik yazıldığı söylenir
+			uyari += fmt.Sprintf(" ⚠ %d seçimden yalnız %d tanesi geri yüklenebildi.", len(uyeler), n)
+		}
+		sonuc["uyari"] = uyari
 
 	case "db":
 		if strings.TrimSpace(req.DB) == "" {
