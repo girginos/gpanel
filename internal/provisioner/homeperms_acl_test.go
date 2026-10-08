@@ -40,6 +40,18 @@ func aclOrtamiHazirMi(t *testing.T, dizin string) {
 	_ = os.Remove(deneme)
 }
 
+// aclSatiriVar: getfacl çıktısında TAM bu giriş var mı (satır başı eşleşmesi; "#effective:" soneki yok sayılır).
+// 🔴 strings.Contains KULLANILMAZ: "user:nginx:r-x", "default:user:nginx:r-x" satırının içinde de geçer →
+// erişim ACL'i hiç konmasa da test yeşil kalırdı (negatif kontrol bunu yakaladı).
+func aclSatiriVar(acl, giris string) bool {
+	for _, satir := range strings.Split(acl, "\n") {
+		if f := strings.Fields(satir); len(f) > 0 && f[0] == giris {
+			return true
+		}
+	}
+	return false
+}
+
 func getfaclCikti(t *testing.T, yol string) string {
 	t.Helper()
 	out, err := exec.Command("getfacl", "-p", "-c", yol).CombinedOutput()
@@ -90,12 +102,12 @@ func TestHardenHomePerms_NginxACLGercektenKonur(t *testing.T) {
 
 	acl := getfaclCikti(t, ph)
 	for _, bek := range []string{"user:nginx:r-x", "default:user:nginx:r-x"} {
-		if !strings.Contains(acl, bek) {
+		if !aclSatiriVar(acl, bek) {
 			t.Fatalf("public_html ACL'inde %q YOK — yeni hosting nginx'ten 404 alır.\ngetfacl:\n%s", bek, acl)
 		}
 	}
 	// home'a nginx yalnız traverse (--x) verilir.
-	if hacl := getfaclCikti(t, home); !strings.Contains(hacl, "user:nginx:--x") {
+	if hacl := getfaclCikti(t, home); !aclSatiriVar(hacl, "user:nginx:--x") {
 		t.Fatalf("home ACL'inde user:nginx:--x YOK:\n%s", hacl)
 	}
 }
@@ -114,10 +126,10 @@ func TestHardenHomePermsRecursive_ACLIcerigeUygulanir(t *testing.T) {
 	}
 	hardenHomePermsRecursive(ph)
 
-	if acl := getfaclCikti(t, dosya); !strings.Contains(acl, "user:nginx:r--") {
+	if acl := getfaclCikti(t, dosya); !aclSatiriVar(acl, "user:nginx:r--") {
 		t.Fatalf("iç dosyada nginx ACL'i YOK:\n%s", acl)
 	}
-	if acl := getfaclCikti(t, alt); !strings.Contains(acl, "default:user:nginx:r-x") {
+	if acl := getfaclCikti(t, alt); !aclSatiriVar(acl, "default:user:nginx:r-x") {
 		t.Fatalf("alt dizinde default nginx ACL'i YOK:\n%s", acl)
 	}
 }
