@@ -121,6 +121,30 @@ else
   POOL="/etc/php-fpm-tenant/$SK/pool.conf"
   [ -f "$POOL" ]                         && ok "per-tenant FPM havuzu yazildi"   || no "FPM havuzu YOK"
 
+  # 🔴 4ea7bac regresyonu (gercek VPS provasinda bulundu): hardenHomePerms public_html'e nginx ACL'i koyamayinca
+  # dizin + vhost + havuz + zone HEPSI "var" gorunur ama site nginx'ten 404 verir. Yalnizca varliga bakmak yetmez:
+  # nginx'ten GERCEK istek + PHP-FPM calistirma (basari sinyali degil ETKI).
+  printf '<?php echo "E2E-OKUNDU-", 6*7;' | install -o "$SK" -g "$SK" -m 0644 /dev/stdin "/home/$SK/public_html/e2e-kontrol.php" 2>/dev/null
+  restorecon -R "/home/$SK/public_html" 2>/dev/null
+  GOVDE=""
+  for _i in 1 2 3 4 5 6; do
+    GOVDE=$(curl -s -m 10 --resolve "$DOM:80:127.0.0.1" "http://$DOM/e2e-kontrol.php" 2>/dev/null)
+    [ "$GOVDE" = "E2E-OKUNDU-42" ] && break
+    sleep 1
+  done
+  if [ "$GOVDE" = "E2E-OKUNDU-42" ]; then
+    ok "yeni hosting nginx + PHP-FPM'den GERCEK cevap veriyor (E2E-OKUNDU-42)"
+  else
+    no "yeni hosting siteyi SUNMUYOR: 'E2E-OKUNDU-42' beklenir, gelen: $(printf '%s' "$GOVDE" | head -c 60 | tr -d '\n') (public_html nginx ACL/izin?)"
+  fi
+  if runuser -u nginx -- test -r "/home/$SK/public_html" 2>/dev/null; then
+    ok "nginx public_html'i okuyabiliyor"
+  else
+    no "nginx public_html'i OKUYAMIYOR (hardenHomePerms ACL/grup) - yeni siteler 404 verir"
+  fi
+  # Sonraki bloklar (WP kurulumu) bos belge koku bekler: test dosyasini kaldir.
+  rm -f "/home/$SK/public_html/e2e-kontrol.php"
+
   if [ -f "$POOL" ]; then
     PLAN=$(mysql -N -B panel -e "SELECT COALESCE(p.ram_mb,0), COALESCE(p.disk_kota_mb,0) FROM domains d LEFT JOIN service_plans p ON p.id=d.plan_id WHERE d.id=$DID;" 2>/dev/null)
     PRAM=$(echo "$PLAN" | awk '{print $1}'); PDISK=$(echo "$PLAN" | awk '{print $2}')
