@@ -30,6 +30,7 @@ package files
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +44,26 @@ import (
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 )
+
+// kiraciKomut: harici aracı KİRACI kimliğinde (runuser -u <sk>) kurar. 🔴 Ev ağacı
+// kiracının denetimindedir; kök yol dizgesiyle zip/tar/du/find/setfacl/gunzip çalıştırırsa
+// kontrol (jailJoinStrict) ile çalıştırma arasında ara bileşeni symlink'e takas eden
+// kiracı kökü jail dışına yönlendirir (kök dosya okuma / keyfi yere kök sahipli yazma /
+// ACL). Kiracı kimliğinde çekirdek DAC'ı her erişimde uygular → pencere etkisiz.
+// Seam: testler gerçek runuser yerine sıradan komut verir.
+var kiraciKomut = func(ctx context.Context, sk string, argv ...string) (*exec.Cmd, error) {
+	return kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
+}
+
+// tenantSil: arşiv çıktısını KİRACI kimliğinde siler (kök os.Remove(yol) bir ara
+// bileşen takasıyla jail dışı dosya silerdi).
+func tenantSil(sk, yol string) {
+	if c, err := kiraciKomut(context.Background(), sk, "rm", "-f", "--", yol); err == nil {
+		_ = c.Run()
+	}
+}
 
 // arsivIs: asenkron arşivleme işinin ilerleme durumu.
 type arsivIs struct {
@@ -179,7 +199,9 @@ func (h *Handlers) Archive(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusConflict, "bu adda bir dosya zaten var")
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(ciktiAbs), 0755); err != nil {
+	// 🔴 Kök os.MkdirAll(string) ara bileşen takasında jail dışına kök sahipli dizin
+	// açardı; openat2/O_NOFOLLOW tabanlı mkdirAllBeneath symlink'i reddeder.
+	if err := mkdirAllBeneath(home, filepath.Dir(relClean(req.CiktiYol)), sk); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "hedef dizin: "+err.Error())
 		return
 	}
@@ -317,16 +339,24 @@ func arsivYurut(is *arsivIs, basarisiz func(string), format, ciktiAbs, calisma s
 	is.Toplam = toplam
 	is.mu.Unlock()
 
+	// 🔴 zip/tar KİRACI kimliğinde koşar (bkz. kiraciKomut): kuyrukta bekleme ya da
+	// uzun arşivleme sırasında cmd.Dir/kaynak/çıktı bileşeni symlink'e takas edilse bile
+	// kök kimliği olmadığı için jail dışı okuma/yazma olmaz.
 	var cmd *exec.Cmd
+	var kerr error
 	if format == "zip" {
 		// -@ : dosya adlarını STDIN'den oku (argv'ye konmaz → seçenek enjeksiyonu yok)
 		// -y : sembolik bağı İZLEME, bağ olarak sakla (jail dışı içerik sızmasın)
 		// -q YOK: "adding: <yol>" satırlarını sayarak ilerleme çıkarıyoruz.
-		cmd = exec.Command("zip", "-r", "-y", ciktiAbs, "-@")
+		cmd, kerr = kiraciKomut(context.Background(), sk, "zip", "-r", "-y", ciktiAbs, "-@")
 	} else {
 		// --verbatim-files-from: listedeki satır "-" ile başlasa bile ad sayılır.
 		// (Bu bayrak olmadan --files-from girdisi seçenek olarak yorumlanır.)
-		cmd = exec.Command("tar", "-czvf", ciktiAbs, "--verbatim-files-from", "--files-from=-")
+		cmd, kerr = kiraciKomut(context.Background(), sk, "tar", "-czvf", ciktiAbs, "--verbatim-files-from", "--files-from=-")
+	}
+	if kerr != nil {
+		basarisiz(format + ": kiracı komutu kurulamadı: " + kerr.Error())
+		return
 	}
 	cmd.Dir = calisma
 	cmd.Stdin = strings.NewReader(strings.Join(adlar, "\n") + "\n")
@@ -440,12 +470,14 @@ func arsivYurut(is *arsivIs, basarisiz func(string), format, ciktiAbs, calisma s
 			msg = err.Error()
 		}
 		// Yarım kalan arşiv bırakma: bozuk dosya "yedeğim var" yanılgısı yaratır.
-		_ = os.Remove(ciktiAbs)
+		tenantSil(sk, ciktiAbs)
 		basarisiz(format + ": " + msg)
 		return
 	}
 
-	_, _ = exec.Command("chown", sk+":"+sk, ciktiAbs).CombinedOutput()
+	// chown KALDIRILDI: çıktıyı zaten kiracı kimliği yarattı (kök yol-tabanlı chown
+	// symlink izleyip jail dışı dosyayı kiracıya devrederdi). restorecon yalnız
+	// varsayılan SELinux etiketini uygular.
 	_, _ = exec.Command("restorecon", ciktiAbs).CombinedOutput()
 
 	var boyut int64

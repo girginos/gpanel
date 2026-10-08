@@ -5,6 +5,7 @@ package files
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -355,7 +356,13 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 			// yaz — eski os.OpenFile(O_NOFOLLOW) yalniz LEAF symlink'ini korurdu,
 			// ara-bilesen symlink'i takip edilirdi (keyfi root yazma).
 			var eb bytes.Buffer
-			gzc := exec.Command("gunzip", "-k", "-c", abs)
+			// 🔴 gunzip KİRACI kimliğinde: kök yol dizgesiyle açarsa abs bileşeni
+			// jail dışı bir .gz'ye takas edilip kök okuması sızdırılabilirdi.
+			gzc, gkErr := kiraciKomut(context.Background(), sk, "gunzip", "-k", "-c", "--", abs)
+			if gkErr != nil {
+				basarisiz("extract: " + gkErr.Error())
+				return
+			}
 			gzc.Stderr = &eb
 			gzPipe, pErr := gzc.StdoutPipe()
 			if pErr != nil {
@@ -423,13 +430,21 @@ func (h *Handlers) Extract(w http.ResponseWriter, r *http.Request) {
 		// Per-user izin modeli (FIX 1): çıkarılan içeriğe nginx okuma-ACL'ini teyit et. docroot'un
 		// default-ACL'i genelde bunu zaten miras verir; hedef docroot-dışıysa/ACL yoksa garanti.
 		// setfacl yoksa (acl paketi eksik) sessiz atlanır — dosyalar tenant'ta, site diğer yolla servis edilir.
+		// 🔴 setfacl KİRACI kimliğinde (kendi inode'larının sahibi ACL koyabilir): kök
+		// `setfacl -R <hedefAbs>` çıkarma süresince hedef dizin symlink'e takas
+		// edilirse (setfacl varsayılan olarak argüman symlink'ini İZLER) /etc gibi
+		// bir ağaca nginx/apache okuma ACL'i yazardı.
 		if _, err := exec.LookPath("setfacl"); err == nil {
-			_, _ = exec.Command("setfacl", "-R", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
-			_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:nginx:rX", hedefAbs).CombinedOutput()
-			// Apache backend modundaki siteler icin de ayni erisim (apache yoksa
-			// setfacl hata doner, yutulur — zararsiz).
-			_, _ = exec.Command("setfacl", "-R", "-m", "u:apache:rX", hedefAbs).CombinedOutput()
-			_, _ = exec.Command("setfacl", "-R", "-d", "-m", "u:apache:rX", hedefAbs).CombinedOutput()
+			for _, a := range [][]string{
+				{"-R", "-m", "u:nginx:rX"}, {"-R", "-d", "-m", "u:nginx:rX"},
+				// Apache backend modundaki siteler icin de ayni erisim (apache yoksa
+				// setfacl hata doner, yutulur — zararsiz).
+				{"-R", "-m", "u:apache:rX"}, {"-R", "-d", "-m", "u:apache:rX"},
+			} {
+				if c, kerr := kiraciKomut(context.Background(), sk, append(append([]string{"setfacl"}, a...), "--", hedefAbs)...); kerr == nil {
+					_, _ = c.CombinedOutput()
+				}
+			}
 		}
 		is.mu.Lock()
 		is.Durum = "tamam"
@@ -552,7 +567,7 @@ func (h *Handlers) YeniDosya(w http.ResponseWriter, r *http.Request) {
 // ----- Boyut hesapla (du -sb) -----
 
 func (h *Handlers) BoyutHesapla(w http.ResponseWriter, r *http.Request) {
-	home, _, err := h.home(r)
+	home, sk, err := h.home(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
@@ -563,7 +578,17 @@ func (h *Handlers) BoyutHesapla(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	out, err := exec.Command("du", "-sb", abs).CombinedOutput()
+	// 🔴 du KİRACI kimliğinde + istek bağlamıyla (iptal/zaman aşımı): kök du, abs
+	// bileşeni takas edilirse jail dışı ağacın boyutunu sızdırır; bağlamsız du ise
+	// dev bir ağaçta istek bittikten sonra da koşmaya devam ederdi.
+	dctx, dcancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer dcancel()
+	duCmd, kerr := kiraciKomut(dctx, sk, "du", "-sb", "--", abs)
+	if kerr != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "du: "+kerr.Error())
+		return
+	}
+	out, err := duCmd.CombinedOutput()
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "du: "+strings.TrimSpace(string(out)))
 		return
@@ -589,7 +614,7 @@ func (h *Handlers) BoyutHesapla(w http.ResponseWriter, r *http.Request) {
 // ----- Arama (recursive find by name pattern) -----
 
 func (h *Handlers) Ara(w http.ResponseWriter, r *http.Request) {
-	home, _, err := h.home(r)
+	home, sk, err := h.home(r)
 	if err != nil {
 		httpx.WriteError(w, statusFromErr(err), err.Error())
 		return
@@ -614,7 +639,14 @@ func (h *Handlers) Ara(w http.ResponseWriter, r *http.Request) {
 	q = strings.ReplaceAll(q, "?", "")
 	pattern := "*" + q + "*"
 
-	out, _ := exec.Command("find", baseAbs, "-iname", pattern, "-printf", "%p\t%s\t%y\t%T@\n").Output()
+	// 🔴 find KİRACI kimliğinde + zaman aşımı (bağlamsız find dev ağaçta sonsuza dek
+	// koşabilir; kök kimliği symlink takasında jail dışını listelerdi).
+	fctx, fcancel := context.WithTimeout(r.Context(), time.Minute)
+	defer fcancel()
+	var out []byte
+	if fc, kerr := kiraciKomut(fctx, sk, "find", baseAbs, "-iname", pattern, "-printf", "%p\t%s\t%y\t%T@\n"); kerr == nil {
+		out, _ = fc.Output()
+	}
 	results := []Entry{}
 	for _, ln := range strings.Split(string(out), "\n") {
 		if ln == "" {
