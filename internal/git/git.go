@@ -140,6 +140,9 @@ func gecerliSK(sk string) bool { return reSK.MatchString(sk) }
 // kirlenmesin). stdin nil değilse komuta verilir. Testte kaydedici sahteyle değiştirilir.
 var kiraciCalistir = kiraciCalistirGercek
 
+// gitZamanAsimi: tek bir kiracı komutunun (git clone/fetch dâhil) azami süresi.
+var gitZamanAsimi = 15 * time.Minute
+
 // dilimSK — kiracının kaynak dilimini belirleyen panel adı (sk). Üretimde sk'nın
 // kendisi; testler ayrıcalıksız gerçek bir kullanıcıyı (nobody) c_ biçimli bir
 // dilim adına eşler (dilim adı yalnız panel biçimli kiracıda üretilir).
@@ -152,8 +155,12 @@ var dilimSK = func(sk string) string { return sk }
 // env_reset'i sudoers'a bağlıydı, yedek yol da ortamı elle kuruyordu. Kimlik düşürülemezse
 // (kullanıcı yok / uid 0 / biçim dışı sk) komut ASLA root olarak çalışmaz: ErrKomut.
 func kiraciCalistirGercek(sk, cwd string, stdin []byte, argv ...string) (string, string, error) {
+	// 🔴 Zaman aşımı: bağlamsız git clone/fetch yavaş-ölü bir uzak depoda (tarpit) süreci ve
+	// bekleyen istek/webhook goroutine'ini SONSUZA DEK tutardı; her tetik yenisini biriktirirdi.
+	ctx, iptal := context.WithTimeout(context.Background(), gitZamanAsimi)
+	defer iptal()
 	cmd, err := kiraci.Kiraci{Kul: sk, Ev: evDizini(sk), Dilim: true, DilimSK: dilimSK(sk)}.
-		Komut(context.Background(), argv...)
+		Komut(ctx, argv...)
 	if err != nil {
 		return "", "", err
 	}

@@ -19,7 +19,6 @@ import (
 	"crypto/md5" //nolint:gosec // G501: WordPress dosya-butunluk checksum (WP.org MD5 yayinlar) — guvenlik hash'i degil
 	"encoding/hex"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -67,7 +66,7 @@ func wpButunlukKontrol(yol, wpKok string, kaynak SaglamaKaynagi) (string, int, b
 	if kayitli {
 		// Kapsam TABLODAN: tabloda anahtarı olan HER yol (670 wp-content
 		// çekirdek dosyası dahil), yalnız wp-includes/wp-admin değil.
-		f, err := os.Open(yol)
+		f, _, err := acDuz(yol)
 		if err != nil {
 			return "", 0, false
 		}

@@ -27,11 +27,13 @@
 package avmotor
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 // Seviye — bulgunun ciddiyeti.
@@ -122,8 +124,9 @@ func (m *Motor) Uretim() string   { return m.set.Uretim }
 func (m *Motor) TaraDosya(yol string, wpKok string, wpSaglama SaglamaKaynagi) (Bulgu, bool) {
 	b := Bulgu{Dosya: yol}
 
-	fi, err := os.Stat(yol)
-	if err != nil || fi.IsDir() {
+	// Lstat: symlink izlenmez (yürüyüş zaten yalnız düzenli dosyaları kuyruğa alır).
+	fi, err := os.Lstat(yol)
+	if err != nil || !fi.Mode().IsRegular() {
 		return b, false
 	}
 
@@ -290,15 +293,11 @@ func icerirStr(l []string, s string) bool {
 
 // okuKuyruk — dosyanın SON n baytını okur (append tipi enjeksiyon için).
 func okuKuyruk(yol string, n int64) ([]byte, error) {
-	f, err := os.Open(yol)
+	f, fi, err := acDuz(yol)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
 	off := fi.Size() - n
 	if off < 0 {
 		off = 0
@@ -311,10 +310,32 @@ func okuKuyruk(yol string, n int64) ([]byte, error) {
 
 // okuSinirli — en fazla n bayt okur. Büyük dosyada belleği patlatmamak için.
 func okuSinirli(yol string, n int64) ([]byte, error) {
-	f, err := os.Open(yol)
+	f, _, err := acDuz(yol)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	return io.ReadAll(io.LimitReader(f, n))
+}
+
+// acDuz — yolu symlink İZLEMEDEN, bloklamadan açar ve YALNIZ düzenli dosyaya izin verir.
+// 🔴 Motor kök olarak kiracı dosyası okur; yürüyüşte düz görünen yol okuma anında FIFO'ya
+// (os.Open yazarsız sonsuza dek bloklar → tarama işçisi kalıcı takılır) ya da kök dosyasını
+// gösteren symlink'e (kök okuması) takas edilebilir. O_NOFOLLOW + O_NONBLOCK + fstat
+// düzenli-dosya denetimi bunu kapatır.
+func acDuz(yol string) (*os.File, os.FileInfo, error) {
+	f, err := os.OpenFile(yol, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		f.Close()
+		return nil, nil, fmt.Errorf("düzenli dosya değil: %s", yol)
+	}
+	return f, fi, nil
 }
