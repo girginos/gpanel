@@ -20,7 +20,13 @@ var (
 // ('oto', eski bash 'planli') ve kök toplu işi (job_id dolu). Müşterinin (ya da
 // panelden elle alınan) manuel yedekleri tip='tam', job_id NULL olarak yazılır ve
 // UZAĞA GİTMEZ (backups.yedekKaynagi ile aynı kural).
+//
+// 🔴 'kurtarma' (silinmiş hesaptan domaine bağlanan eski yedek) job_id taşısa bile ASLA aday değildir:
+// eski yedeği kullanıcı istemeden uzağa itmek ve ardından yerel kopyayı silmek (yerel-silme) beklenmedik olur.
 func KokYedegiMi(tip string, jobIDVar bool) bool {
+	if tip == "kurtarma" {
+		return false
+	}
 	return tip == "oto" || tip == "planli" || jobIDVar
 }
 

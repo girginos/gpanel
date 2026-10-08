@@ -246,7 +246,7 @@ func (k *yerelKayit) siniflandir(kokDizin string, tut int, simdi time.Time) {
 // alan adı. Ağa ÇIKMAZ.
 func yerelKayitlari(ctx context.Context, db *sql.DB, kok string, tut int, domainID int64) ([]*yerelKayit, error) {
 	q := `SELECT b.id, b.domain_id, d.alan_adi, d.sistem_kullanici, b.dosya, b.boyut_b, b.sha256,
-	        (b.tip IN ('oto','planli') OR b.job_id IS NOT NULL), (b.yerel_yok IS NOT NULL),
+	        (b.tip<>'kurtarma' AND (b.tip IN ('oto','planli') OR b.job_id IS NOT NULL)), (b.yerel_yok IS NOT NULL),
 	        COALESCE(k.id,0), COALESCE(k.hedef_id,0), COALESCE(k.uzak_ad,''), COALESCE(k.manifest_ad,''), COALESCE(k.sha256_duz,''),
 	        COALESCE(k.boyut_duz,0), COALESCE(k.boyut_b,0), (k.id IS NOT NULL AND k.son_dogrulama IS NOT NULL)
 	      FROM backups b JOIN domains d ON d.id=b.domain_id

@@ -494,6 +494,21 @@ func (i *Isci) isle(ctx context.Context, is *isSatir, ayar Ayar) *isHatasi {
 }
 
 func (i *Isci) yerelYol(ctx context.Context, is *isSatir) (string, *isHatasi) {
+	// 🔴 Yedek satırı hâlâ BU iş kaydındaki domaine ait mi? Silinen hesabın yedeği yetim olunca
+	// backups.domain_id=0 olur (domain id'si sonradan yeniden kullanılsa bile işin domain_id'si başka
+	// müşterinin dizinine çözülmesin).
+	if is.yedekID.Valid {
+		var sahip int64
+		if err := i.DB.QueryRowContext(ctx, `SELECT domain_id FROM backups WHERE id=?`, is.yedekID.Int64).Scan(&sahip); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", &isHatasi{kalici: true, sade: "yedek kaydı bulunamadı"}
+			}
+			return "", &isHatasi{sade: "yedek kaydı okunamadı", ic: err}
+		}
+		if sahip != is.domainID {
+			return "", &isHatasi{kalici: true, sade: "yedek artık bu alan adına ait değil (silinmiş hesabın yetim yedeği)"}
+		}
+	}
 	var sk string
 	if err := i.DB.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, is.domainID).Scan(&sk); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
