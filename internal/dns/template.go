@@ -338,6 +338,14 @@ func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
 		return
 	}
+	// Şablon satırları müşteri zone'larına SeedDefaults ile yazılır: bayi
+	// satırındaki satır sonu/'$' yönergesi başkasının zone'una enjekte olur.
+	for _, t := range req.Kayitlar {
+		if err := KayitAlanlariGecerli(t.Ad, t.Deger); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "şablon satırı geçersiz: "+err.Error())
+			return
+		}
+	}
 	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())

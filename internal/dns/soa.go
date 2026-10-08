@@ -123,6 +123,10 @@ func (h *Handlers) PutSOA(w http.ResponseWriter, r *http.Request) {
 	if s.TTL <= 0 {
 		s.TTL = d.TTL
 	}
+	if err := SOAAlanlariGecerli(s.PrimaryNS, s.Hostmaster); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
 		 VALUES(?,?,?,?,?,?,?,?)
