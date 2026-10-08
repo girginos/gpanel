@@ -36,3 +36,22 @@ resolver_timeout 5s;
 		t.Error("ikinci çalıştırmada yine değişti (idempotent değil)")
 	}
 }
+
+// Elle düzenlenmiş biçimler de yakalanır (fazla boşluk, satır sonu yorumu); yorum satırı ve
+// vhost'a özgü satırlar korunur.
+func TestStaplingKapat_BicimVaryantlari(t *testing.T) {
+	girdi := "ssl_stapling   on ;  # elle\n  ssl_stapling_verify  on;\n# ssl_stapling on;\n"
+	yeni, degisti := staplingKapat(girdi)
+	if !degisti {
+		t.Fatal("varyantlar yakalanmadı")
+	}
+	if strings.Contains(yeni, "ssl_stapling_verify") {
+		t.Errorf("verify kalmış:\n%s", yeni)
+	}
+	if !strings.Contains(yeni, "\nssl_stapling off;") && !strings.HasPrefix(yeni, "# OCSP") {
+		t.Errorf("off satırı yok:\n%s", yeni)
+	}
+	if !strings.Contains(yeni, "# ssl_stapling on;") {
+		t.Errorf("yorum satırı değişmemeliydi:\n%s", yeni)
+	}
+}

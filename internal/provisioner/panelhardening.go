@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"girginospanel/internal/httpx"
@@ -249,8 +250,16 @@ resolver_timeout 5s;
 		// Mevcut kurulum: eski "stapling on" politikasini kapat (idempotent; ayri dosya
 		// degisimi icin nginx -t + geri alma + reload).
 		if yeni, degisti := staplingKapat(string(b)); degisti {
-			if e := os.WriteFile(yol, []byte(yeni), 0o644); e != nil {
+			// Atomik yaz (gecici dosya + rename): surec yazarken olurse yarim 00-gosp-tls.conf
+			// nginx'i bozmasin.
+			tmp := yol + ".yeni"
+			if e := os.WriteFile(tmp, []byte(yeni), 0o644); e != nil {
 				log.Printf("tls global: stapling kapatilamadi: %v", e)
+				return
+			}
+			if e := os.Rename(tmp, yol); e != nil {
+				_ = os.Remove(tmp)
+				log.Printf("tls global: stapling kapatilamadi (rename): %v", e)
 				return
 			}
 			if o, e := exec.Command("nginx", "-t").CombinedOutput(); e != nil {
@@ -269,6 +278,11 @@ resolver_timeout 5s;
 	_ = os.WriteFile(yol, []byte(icerik), 0o644)
 }
 
+var (
+	staplingOnRe       = regexp.MustCompile(`^ssl_stapling\s+on\s*;\s*(#.*)?$`)
+	staplingVerifyOnRe = regexp.MustCompile(`^ssl_stapling_verify\s+on\s*;\s*(#.*)?$`)
+)
+
 // staplingKapat: 00-gosp-tls.conf icinde `ssl_stapling on;` → `off`, `ssl_stapling_verify on;`
 // satirini kaldirir. Baska hicbir satira dokunmaz. degisti=false → zaten kapali.
 func staplingKapat(icerik string) (string, bool) {
@@ -277,12 +291,12 @@ func staplingKapat(icerik string) (string, bool) {
 	for _, ln := range strings.Split(icerik, "\n") {
 		t := strings.TrimSpace(ln)
 		switch {
-		case t == "ssl_stapling on;":
+		case staplingOnRe.MatchString(t):
 			out = append(out, "# OCSP stapling KAPALI (bilerek): Let's Encrypt OCSP'yi kapatti, kendinden imzalida URL yok;")
 			out = append(out, "# global \"on\" her nginx -t'de sertifika basina uyari basiyordu. Gerekirse vhost'ta ac.")
 			out = append(out, "ssl_stapling off;")
 			degisti = true
-		case t == "ssl_stapling_verify on;":
+		case staplingVerifyOnRe.MatchString(t):
 			degisti = true // kaldir
 		default:
 			out = append(out, ln)
