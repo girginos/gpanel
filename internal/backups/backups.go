@@ -60,6 +60,9 @@ func (h *Handlers) lookupDomain(r *http.Request) (id int64, alanAdi, sk string, 
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	// Silinmiş aynı hesabın (aynı alan adı + aynı sahip + aynı sk) yetim yedekleri bu domaine bağlanır;
+	// böylece Restore/İndir/Sil akışları (hepsi JOIN domains) değişmeden çalışır (bkz. silinen.go).
+	yetimleriOtoBagla(r.Context(), h.DB, id)
 	rows, err := h.DB.QueryContext(r.Context(),
 		`SELECT b.id, b.domain_id, b.tip, b.dosya, b.boyut_b, b.notlar, DATE_FORMAT(b.created_at,'%Y-%m-%d %H:%i'), b.job_id,
 		        EXISTS(SELECT 1 FROM backup_uzak_kopyalar k WHERE k.backup_id=b.id AND k.kaynak='hedef' AND k.durum='tamam')
@@ -574,7 +577,7 @@ func yedekKaydiniYokEt(ctx context.Context, db *sql.DB, domainID int64, sk, dosy
 	if e := YedekUzaktanSil(ctx, db, domainID, dosya); e != nil {
 		return "", e
 	}
-	if e := os.Remove(filepath.Join(BackupRoot, sk, dosya)); e != nil && !os.IsNotExist(e) {
+	if e := os.Remove(filepath.Join(yedekKok, sk, dosya)); e != nil && !os.IsNotExist(e) {
 		yerelHata = e.Error()
 	}
 	if _, e := db.ExecContext(ctx, `DELETE FROM backups WHERE id=?`, bid); e != nil {

@@ -26,4 +26,8 @@ func TestHostingYik_FKsizTablolariTemizler(t *testing.T) {
 	if !s.Yurutuldu("DELETE FROM domains WHERE id=? | 42") {
 		t.Error("domains satırı silinmedi")
 	}
+	// Demo hesabın yedeği saklanmaz: backups FK'si (eski CASCADE) kalktığı için satırlar elle silinir.
+	if !s.Yurutuldu("DELETE FROM backups WHERE domain_id=? | 42") {
+		t.Error("demo hesabın yedek satırları silinmedi (FK kalktı, yetim kalırdı)")
+	}
 }

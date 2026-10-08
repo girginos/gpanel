@@ -250,6 +250,7 @@ func TopluAdaylar(ctx context.Context, db *sql.DB, n int) ([]int64, TopluOnizlem
 		`SELECT t.id, t.domain_id, t.boyut_b FROM (
 		   SELECT b.id, b.domain_id, b.boyut_b, ROW_NUMBER() OVER (PARTITION BY b.domain_id ORDER BY b.id DESC) rn
 		   FROM backups b WHERE (b.tip IN ('oto','planli') OR b.job_id IS NOT NULL)
+		     AND EXISTS (SELECT 1 FROM domains dd WHERE dd.id=b.domain_id)
 		 ) t
 		 WHERE t.rn <= ? AND NOT EXISTS (
 		   SELECT 1 FROM backup_uzak_kopyalar k WHERE k.backup_id=t.id AND k.kaynak='hedef' AND k.hedef_id=? AND k.durum NOT IN ('hata','iptal'))

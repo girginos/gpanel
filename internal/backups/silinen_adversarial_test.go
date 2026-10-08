@@ -1,36 +1,35 @@
 package backups
 
-// silinen_adversarial_test.go — silinen yedekler (silinen.go) için KIRMA denemeleri.
+// silinen_adversarial_test.go — yetim yedek uçları ve süpürmesi için KIRMA denemeleri: symlink,
+// yol kaçışı, sk regex, sahiplik, uzak hata, limit, ctx iptali, eşzamanlı süpürme.
 // Gerçek BackupRoot'a YAZILMAZ (yedekKok geçici dizin). Geçici MariaDB gerekir.
-// Kuralı çiğneyen testler üretim kodunda gerçek hata gösterir; test adında HHATA etiketi var.
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
-// advRouter: AdminOnly'siz ham handler rotaları. Aktor boş bağlamda ("anonim") çalışır.
-func advRouter(t *testing.T, db interface{ SetMaxOpenConns(int) }, h *Handlers) http.Handler {
-	t.Helper()
-	db.SetMaxOpenConns(8) // Liste: satırlar açıkken ikinci sorgu (g113_db tek bağlantı verir)
+// advRouter: AdminOnly'siz ham handler rotaları (main.go ile AYNI yollar).
+func advRouter(db interface{ SetMaxOpenConns(int) }, h *Handlers) http.Handler {
+	db.SetMaxOpenConns(8)
 	r := chi.NewRouter()
 	r.Get("/s", h.SilinenListe)
 	r.Get("/s/ayar", h.SilinenAyarGet)
 	r.Put("/s/ayar", h.SilinenAyarSet)
-	r.Get("/s/{id}/indir", h.SilinenIndir)
-	r.Delete("/s/{id}", h.SilinenSil)
+	r.Get("/s/yedek/{bid}/indir", h.SilinenIndir)
+	r.Post("/s/{sk}/bagla", h.SilinenBagla)
+	r.Delete("/s/{sk}", h.SilinenSil)
 	return r
 }
 
@@ -41,538 +40,391 @@ func advIstek(r http.Handler, method, yol, govde string) (int, string) {
 	return rec.Code, rec.Body.String()
 }
 
-func advKayitID(t *testing.T, h *Handlers, eskiDomain int64) int64 {
-	t.Helper()
-	var id int64
-	if err := h.DB.QueryRow(`SELECT id FROM cp_silinen_yedek WHERE eski_domain_id=? ORDER BY id DESC LIMIT 1`, eskiDomain).Scan(&id); err != nil {
-		t.Fatal(err)
-	}
-	return id
-}
+// ---------------------------------------------------------------- indir
 
-func advVar(yol string) bool { _, err := os.Lstat(yol); return err == nil }
-
-func lookPathLftp() (string, error) { return exec.LookPath("lftp") }
-
-// ---------------------------------------------------------------- 1) dosya symlink'i
-
-func TestAdv1_DosyaSymlinki_ListelenmezIndirilmezHedefSilinmez(t *testing.T) {
+func TestAdvIndir_YalnizYetimDuzDosya(t *testing.T) {
 	db := silinenDB(t)
 	kok := silinenOrtam(t)
 	h := &Handlers{DB: db}
-	r := advRouter(t, db, h)
+	r := advRouter(db, h)
 
 	gizli := filepath.Join(t.TempDir(), "gizli.txt")
-	if err := os.WriteFile(gizli, []byte("ROOT-SIRRI"), 0o600); err != nil {
+	_ = os.WriteFile(gizli, []byte("ROOT-SIRRI"), 0o600)
+	silinenDosya(t, kok, "c_x", "c_x-20261001-000000.tar.gz")
+	if err := os.Symlink(gizli, filepath.Join(kok, "c_x", "c_x-20261002-000000.tar.gz")); err != nil {
 		t.Fatal(err)
 	}
-	silinenDosya(t, kok, "c_x", "c_x-0.tar.gz", 20*24*time.Hour) // meşru dosya
-	link := filepath.Join(kok, "c_x", "c_x-1.tar.gz")
-	if err := os.Symlink(gizli, link); err != nil {
-		t.Fatal(err)
-	}
-	silinenKayit(t, db, 9201, "x.test", "c_x", true)
-	id := advKayitID(t, h, 9201)
+	ok := silinenYetim(t, db, 9301, "x.test", "c_x", "c_x-20261001-000000.tar.gz", 0, "NULL")
+	lnk := silinenYetim(t, db, 9301, "x.test", "c_x", "c_x-20261002-000000.tar.gz", 0, "NULL")
+	gez := silinenYetim(t, db, 9301, "x.test", "c_x", "../gizli.txt", 0, "NULL")
+	gez2 := silinenYetim(t, db, 9301, "x.test", "c_x", "a/b.tar.gz", 0, "NULL")
+	yok := silinenYetim(t, db, 9301, "x.test", "c_x", "c_x-20261003-000000.tar.gz", 0, "NULL")
 
-	dos, _ := silinenDosyalari(context.Background(), db, "c_x", time.Now())
-	if _, var_ := dos["c_x-1.tar.gz"]; var_ {
-		t.Errorf("symlink listelenmemeli: %v", dos)
+	if kod, g := advIstek(r, "GET", fmt.Sprintf("/s/yedek/%d/indir", ok), ""); kod != 200 || g != "12345" {
+		t.Fatalf("pozitif kontrol: yetim düz dosya inmeli: %d %q", kod, g)
 	}
-	kod, g := advIstek(r, "GET", fmt.Sprintf("/s/%d/indir?dosya=c_x-1.tar.gz", id), "")
-	if kod == 200 || strings.Contains(g, "ROOT-SIRRI") {
-		t.Fatalf("symlink üzerinden hedef dosya SIZDI: %d %s", kod, g)
+	for ad, id := range map[string]int64{"symlink dosya": lnk, "../ kaçışı": gez, "alt dizin": gez2, "diskte yok": yok, "olmayan id": 999999} {
+		if kod, g := advIstek(r, "GET", fmt.Sprintf("/s/yedek/%d/indir", id), ""); kod == 200 || strings.Contains(g, "ROOT-SIRRI") {
+			t.Errorf("%s: indirilmemeli: %d %q", ad, kod, g)
+		}
 	}
-	kod, g = advIstek(r, "GET", fmt.Sprintf("/s/%d/indir?dosya=c_x-0.tar.gz", id), "")
-	if kod != 200 || g != "12345" {
-		t.Fatalf("pozitif kontrol: meşru dosya inmeli: %d %q", kod, g)
+	// YAŞAYAN domainin yedeği (yetim değil) bu uçtan inmez.
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9302,'canli.test','c_canli')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici, silinme) VALUES (9302,'c_canli-20261001-000000.tar.gz','c_canli',NOW())`)
+	silinenDosya(t, kok, "c_canli", "c_canli-20261001-000000.tar.gz")
+	if kod, _ := advIstek(r, "GET", fmt.Sprintf("/s/yedek/%d/indir", satirID(t, db, 9302)), ""); kod == 200 {
+		t.Error("domaini canlı olan satır (silinme dolu olsa bile) yetim sayılmamalı")
 	}
-
-	if err := SilinenTemizleBir(context.Background(), db, id, false); err != nil {
-		t.Fatal(err)
+	if kod, _ := advIstek(r, "GET", "/s/yedek/abc/indir", ""); kod == 200 {
+		t.Error("geçersiz id")
 	}
-	if b, err := os.ReadFile(gizli); err != nil || string(b) != "ROOT-SIRRI" {
-		t.Fatalf("symlink HEDEFİ silindi/bozuldu: %v", err)
-	}
-	if advVar(filepath.Join(kok, "c_x", "c_x-0.tar.gz")) {
-		t.Error("meşru dosya silinmeliydi")
-	}
-	t.Logf("not: temizlik sonrası symlink dizinde kalıyor=%v (kayıt temizlendi, dizin boş değil)", advVar(link))
 }
 
-// ---------------------------------------------------------------- 2) dizin symlink'i
-
-func TestAdv2_HHATA_DizinSymlinki_DisariyaCikmamali(t *testing.T) {
+func TestAdvIndir_DizinSymlinkiDisariyaCikmaz(t *testing.T) {
 	db := silinenDB(t)
 	kok := silinenOrtam(t)
-	h := &Handlers{DB: db}
-	r := advRouter(t, db, h)
-
+	r := advRouter(db, &Handlers{DB: db})
 	disari := t.TempDir()
-	if err := os.WriteFile(filepath.Join(disari, "baska-musteri.tar.gz"), []byte("BASKA"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-20 * 24 * time.Hour)
-	_ = os.Chtimes(filepath.Join(disari, "baska-musteri.tar.gz"), old, old)
+	_ = os.WriteFile(filepath.Join(disari, "c_lnk-20261001-000000.tar.gz"), []byte("BASKA"), 0o600)
 	if err := os.Symlink(disari, filepath.Join(kok, "c_lnk")); err != nil {
 		t.Fatal(err)
 	}
-	silinenKayit(t, db, 9202, "lnk.test", "c_lnk", true)
-	id := advKayitID(t, h, 9202)
-
-	dos, _ := silinenDosyalari(context.Background(), db, "c_lnk", time.Now())
-	if len(dos) != 0 {
-		t.Errorf("sk symlink ise dışarıdaki dosyalar listelenmemeli: %v", dos)
-	}
-	kod, g := advIstek(r, "GET", fmt.Sprintf("/s/%d/indir?dosya=baska-musteri.tar.gz", id), "")
-	if kod == 200 {
+	id := silinenYetim(t, db, 9310, "lnk.test", "c_lnk", "c_lnk-20261001-000000.tar.gz", 0, "DATE_SUB(NOW(), INTERVAL 1 DAY)")
+	if kod, g := advIstek(r, "GET", fmt.Sprintf("/s/yedek/%d/indir", id), ""); kod == 200 {
 		t.Errorf("dizin symlink'i üzerinden dışarıdaki dosya indirildi: %q", g)
 	}
-	_ = SilinenTemizleBir(context.Background(), db, id, false)
-	if !advVar(filepath.Join(disari, "baska-musteri.tar.gz")) {
-		t.Error("dizin symlink'i takip edilip BackupRoot DIŞINDAKİ dosya silindi")
+	if _, g := advIstek(r, "GET", "/s", ""); strings.Contains(g, `"yerel":true`) {
+		t.Errorf("symlink dizindeki dosya yerel görünmemeli: %s", g)
+	}
+	// Süpürme ve DELETE dışarıdaki dosyaya DOKUNMAZ, satır korunur.
+	SilinenSupur(context.Background(), db)
+	if kod, _ := advIstek(r, "DELETE", "/s/c_lnk", ""); kod != 409 {
+		t.Errorf("güvensiz dizin: 409 beklenirdi: %d", kod)
+	}
+	if !varMi(filepath.Join(disari, "c_lnk-20261001-000000.tar.gz")) {
+		t.Fatal("dizin symlink'i takip edilip BackupRoot DIŞINDAKİ dosya silindi")
+	}
+	if !satirVarMi(t, db, id) {
+		t.Error("güvensiz dizinde satır silinmemeli")
 	}
 }
 
-// ---------------------------------------------------------------- 3) aynı sk, iki silinmiş kayıt
+// ---------------------------------------------------------------- liste
 
-func TestAdv3_HHATA_AyniSKIkiKayit_IlkinTemizligiIkinciyiBozmamali(t *testing.T) {
+func TestAdvListe_GrupluYalnizYetimEnYeniOnce(t *testing.T) {
 	db := silinenDB(t)
 	kok := silinenOrtam(t)
-	silinenDosya(t, kok, "c_cift", "c_cift-hayat1.tar.gz", 25*24*time.Hour) // 1. hayat
-	silinenDosya(t, kok, "c_cift", "c_cift-hayat2.tar.gz", 5*24*time.Hour)  // 2. hayat (A silindikten SONRA yazıldı)
-	g113_exec(t, db, `INSERT INTO cp_silinen_yedek (id, alan_adi, sistem_kullanici, eski_domain_id, silinme, son_kullanma, dizin, dosyalar)
-		VALUES (9301,'cift.test','c_cift',9301, DATE_SUB(NOW(), INTERVAL 20 DAY), DATE_SUB(NOW(), INTERVAL 1 HOUR),'c_cift','["c_cift-hayat1.tar.gz"]')`)
-	g113_exec(t, db, `INSERT INTO cp_silinen_yedek (id, alan_adi, sistem_kullanici, eski_domain_id, silinme, son_kullanma, dizin, dosyalar)
-		VALUES (9302,'cift.test','c_cift',9302, DATE_SUB(NOW(), INTERVAL 2 DAY), DATE_ADD(NOW(), INTERVAL 5 DAY),'c_cift','["c_cift-hayat2.tar.gz"]')`)
+	r := advRouter(db, &Handlers{DB: db})
+	silinenDosya(t, kok, "c_a", "c_a-20261001-000000.tar.gz")
+	silinenYetim(t, db, 9401, "a.test", "c_a", "c_a-20261001-000000.tar.gz", 3, "DATE_ADD(NOW(), INTERVAL 5 DAY)")
+	silinenYetim(t, db, 9401, "a.test", "c_a", "c_a-20261002-000000.tar.gz", 3, "DATE_ADD(NOW(), INTERVAL 5 DAY)")
+	g113_exec(t, db, `UPDATE backups SET silinme=DATE_SUB(NOW(), INTERVAL 2 DAY)`)
+	silinenYetim(t, db, 9402, "b.test", "c_b", "c_b-20261001-000000.tar.gz", 0, "NULL")
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9403,'a2.test','c_a')`) // aynı sk'li canlı domain
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9404,'canli.test','c_canli')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, silinme) VALUES (9404,'c_canli-20261001-000000.tar.gz',NOW())`)
 
-	var silA time.Time
-	_ = db.QueryRow(`SELECT silinme FROM cp_silinen_yedek WHERE id=9301`).Scan(&silA)
-	dos, _ := silinenDosyalari(context.Background(), db, "c_cift", silA)
-	if _, ok := dos["c_cift-hayat2.tar.gz"]; ok {
-		t.Errorf("A silindikten SONRA yazılan dosya A'ya ait sayılmamalı: %v", dos)
+	kod, g := advIstek(r, "GET", "/s", "")
+	if kod != 200 {
+		t.Fatalf("%d %s", kod, g)
 	}
+	var out []struct {
+		SK        string `json:"sk"`
+		Alan      string `json:"alan_adi"`
+		Rid       int64  `json:"reseller_id"`
+		Sonk      string `json:"son_kullanma"`
+		N         int    `json:"dosya_sayisi"`
+		Boyut     int64  `json:"boyut_b"`
+		YerelVar  bool   `json:"yerel_var"`
+		Baglanabi *int64 `json:"baglanabilir_domain_id"`
+		Yedekler  []struct {
+			ID    int64 `json:"id"`
+			Yerel bool  `json:"yerel"`
+		} `json:"yedekler"`
+	}
+	if err := json.Unmarshal([]byte(g), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("2 grup (c_b en yeni, c_a), canlı domain listelenmemeli: %s", g)
+	}
+	if out[0].SK != "c_b" || out[0].Sonk != "" || out[0].Baglanabi != nil || out[0].YerelVar {
+		t.Errorf("c_b grubu: %+v", out[0])
+	}
+	a := out[1]
+	if a.SK != "c_a" || a.N != 2 || a.Boyut != 10 || a.Rid != 3 || !a.YerelVar || a.Baglanabi == nil || *a.Baglanabi != 9403 || a.Sonk == "" {
+		t.Errorf("c_a grubu: %+v", a)
+	}
+	yerelSay := 0
+	for _, y := range a.Yedekler {
+		if y.Yerel {
+			yerelSay++
+		}
+	}
+	if yerelSay != 1 {
+		t.Errorf("yalnız diskteki 1 dosya yerel olmalı: %d", yerelSay)
+	}
+}
+
+// ---------------------------------------------------------------- bağla
+
+func TestAdvBagla(t *testing.T) {
+	db := silinenDB(t)
+	r := advRouter(db, &Handlers{DB: db})
+	a := silinenYetim(t, db, 9501, "a.test", "c_bag", "c_bag-20261001-000000.tar.gz", 8, "NULL") // farklı sahip de olsa YÖNETİCİ bağlar
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (9502,'yeni.test','c_bag',9)`)
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9503,'baska.test','c_baska')`)
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9504,'diger.test','c_bag2')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici) VALUES (9504,'c_bag-20261201-000000.tar.gz','c_bag')`) // canlı domainin satırı
+	canliSatir := satirID(t, db, 9504)
+
+	if kod, _ := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9503}`); kod != 400 {
+		t.Errorf("sk uyuşmazlığı 400 olmalı: %d", kod)
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND silinme IS NOT NULL`, a) != 1 {
+		t.Fatal("reddedilen bağlamada satır değişti")
+	}
+	if kod, _ := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":424242}`); kod != 404 {
+		t.Errorf("olmayan domain 404: %d", kod)
+	}
+	for _, govde := range []string{`{}`, `{"domain_id":0}`, `{"domain_id":-1}`, `bozuk`} {
+		if kod, _ := advIstek(r, "POST", "/s/c_bag/bagla", govde); kod != 400 {
+			t.Errorf("%s: 400 beklenirdi: %d", govde, kod)
+		}
+	}
+	if kod, _ := advIstek(r, "POST", "/s/BAD..sk/bagla", `{"domain_id":9502}`); kod != 400 {
+		t.Errorf("geçersiz sk: %d", kod)
+	}
+	kod, g := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9502}`)
+	if kod != 200 || !strings.Contains(g, `"baglanan":1`) {
+		t.Fatalf("bağlama: %d %s", kod, g)
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=9502 AND silinme IS NULL AND son_kullanma IS NULL`, a) != 1 {
+		t.Error("satır bağlanmadı / silinme temizlenmedi")
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=9504`, canliSatir) != 1 {
+		t.Error("domaini canlı olan (yetim olmayan) satır başka domaine TAŞINDI")
+	}
+	if _, g := advIstek(r, "POST", "/s/c_bag/bagla", `{"domain_id":9502}`); !strings.Contains(g, `"baglanan":0`) {
+		t.Errorf("ikinci bağlama 0 olmalı: %s", g)
+	}
+}
+
+// ---------------------------------------------------------------- DELETE {sk}
+
+func TestAdvSil_UzakYoksa_DosyaSatirVeBosDizinGider_DigerlerineDokunmaz(t *testing.T) {
+	db := silinenDB(t)
+	kok := silinenOrtam(t)
+	r := advRouter(db, &Handlers{DB: db})
+	y1 := silinenDosya(t, kok, "c_del", "c_del-20261001-000000.tar.gz")
+	diger := silinenDosya(t, kok, "c_diger", "c_diger-20261001-000000.tar.gz")
+	a := silinenYetim(t, db, 9601, "d.test", "c_del", "c_del-20261001-000000.tar.gz", 0, "NULL")
+	b := silinenYetim(t, db, 9601, "d.test", "c_del", "c_del-20261002-000000.tar.gz", 0, "NULL") // dosyası diskte yok
+	d := silinenYetim(t, db, 9602, "o.test", "c_diger", "c_diger-20261001-000000.tar.gz", 0, "NULL")
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici) VALUES (9603,'c_del-20261009-000000.tar.gz','c_del')`) // silme izi yok
+	izsiz := satirID(t, db, 9603)
+
+	if kod, _ := advIstek(r, "DELETE", "/s/c_yok", ""); kod != 404 {
+		t.Errorf("olmayan sk 404: %d", kod)
+	}
+	if kod, _ := advIstek(r, "DELETE", "/s/C_BAD", ""); kod != 400 {
+		t.Errorf("geçersiz sk 400: %d", kod)
+	}
+	kod, g := advIstek(r, "DELETE", "/s/c_del", "")
+	if kod != 200 {
+		t.Fatalf("%d %s", kod, g)
+	}
+	if varMi(y1) || satirVarMi(t, db, a) || satirVarMi(t, db, b) {
+		t.Error("dosya ve satırlar silinmeliydi")
+	}
+	if varMi(filepath.Join(kok, "c_del")) {
+		t.Error("boşalan sk dizini kaldırılmalıydı")
+	}
+	if !varMi(diger) || !satirVarMi(t, db, d) {
+		t.Error("başka sk'ya DOKUNULDU")
+	}
+	if !satirVarMi(t, db, izsiz) {
+		t.Error("silme izi olmayan (yetim sayılmayan) satır silinmemeli")
+	}
+}
+
+func TestAdvSil_CanliHostingAyniSK_DizinVeCanliSatirKorunur(t *testing.T) {
+	db := silinenDB(t)
+	kok := silinenOrtam(t)
+	r := advRouter(db, &Handlers{DB: db})
+	silinenDosya(t, kok, "c_ort", "c_ort-20261001-000000.tar.gz")
+	canliDosya := silinenDosya(t, kok, "c_ort", "c_ort-20261201-000000.tar.gz")
+	yetim := silinenYetim(t, db, 9610, "ort.test", "c_ort", "c_ort-20261001-000000.tar.gz", 0, "NULL")
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9611,'ort2.test','c_ort')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya) VALUES (9611,'c_ort-20261201-000000.tar.gz')`)
+	canli := satirID(t, db, 9611)
+	if kod, g := advIstek(r, "DELETE", "/s/c_ort", ""); kod != 200 {
+		t.Fatalf("%d %s", kod, g)
+	}
+	if satirVarMi(t, db, yetim) || !satirVarMi(t, db, canli) || !varMi(canliDosya) {
+		t.Error("yalnız yetim silinmeli; sk'yı devralan canlı hostingin yedeği KORUNMALI")
+	}
+}
+
+func TestAdvSil_UzakHata_DosyaVeSatirKalir_UzagiYoksayarSiler(t *testing.T) {
+	db := silinenDB(t)
+	kok := silinenOrtam(t)
+	silinenUzakHedef(t, db)
+	r := advRouter(db, &Handlers{DB: db})
+	y := silinenDosya(t, kok, "c_uz", "c_uz-20261001-000000.tar.gz")
+	id := silinenYetim(t, db, 9620, "uz.test", "c_uz", "c_uz-20261001-000000.tar.gz", 0, "NULL")
+
+	for _, lftpYok := range []bool{false, true} { // lftp varsa bağlantı hatası, yoksa ErrLftpYok: ikisi de HATA
+		if lftpYok {
+			t.Setenv("PATH", t.TempDir())
+		}
+		kod, g := advIstek(r, "DELETE", "/s/c_uz", "")
+		if kod != 409 || !strings.Contains(g, `"uzagi_yoksay":true`) || !strings.Contains(g, `"ok":false`) {
+			t.Fatalf("lftpYok=%v: uzak silinemedi → 409 beklenirdi: %d %s", lftpYok, kod, g)
+		}
+		if !varMi(y) || !satirVarMi(t, db, id) {
+			t.Fatalf("lftpYok=%v: uzak silinemediyse yerel dosya + satır KALMALI", lftpYok)
+		}
+		for _, yasak := range []string{kok, "gosp-lftp", "parola", "password"} {
+			if strings.Contains(g, yasak) {
+				t.Errorf("yanıt %q sızdırıyor: %s", yasak, g)
+			}
+		}
+	}
+	if kod, g := advIstek(r, "DELETE", "/s/c_uz?uzagi_yoksay=1", ""); kod != 200 {
+		t.Fatalf("uzagi_yoksay: %d %s", kod, g)
+	}
+	if varMi(y) || satirVarMi(t, db, id) {
+		t.Error("uzagi_yoksay=1 yerel dosya + satırı silmeliydi")
+	}
+}
+
+func TestAdvYetimYedegiSil_GuvensizGirdiler(t *testing.T) {
+	db := silinenDB(t)
+	kok := silinenOrtam(t)
+	disari := filepath.Join(t.TempDir(), "disari.tar.gz")
+	_ = os.WriteFile(disari, []byte("X"), 0o600)
+	silinenDosya(t, kok, "c_g", "c_g-20261001-000000.tar.gz")
+	id := silinenYetim(t, db, 9630, "g.test", "c_g", "../../x", 0, "NULL")
+	ctx := context.Background()
+	for _, c := range []struct{ sk, dosya string }{
+		{"c_g", "../../" + filepath.Base(disari)}, {"c_g", "a/b.tar.gz"}, {"c_g", ""}, {"c_g", ".."}, {"c_g", "x.txt"},
+		{"../c_g", "c_g-20261001-000000.tar.gz"}, {"C_G", "x.tar.gz"}, {"", "x.tar.gz"},
+	} {
+		for _, yoksay := range []bool{false, true} {
+			if yetimYedegiSil(ctx, db, id, 9630, c.sk, c.dosya, yoksay) == nil {
+				t.Errorf("%+v yoksay=%v: reddedilmeliydi", c, yoksay)
+			}
+		}
+	}
+	if !varMi(disari) || !varMi(filepath.Join(kok, "c_g", "c_g-20261001-000000.tar.gz")) {
+		t.Error("güvensiz girdi bir dosyayı sildi")
+	}
+}
+
+// ---------------------------------------------------------------- süpürme
+
+func TestAdvSupur_YalnizSuresiDolanYetimSilinir(t *testing.T) {
+	db := silinenDB(t)
+	kok := silinenOrtam(t)
+	dolan := silinenDosya(t, kok, "c_s", "c_s-20261001-000000.tar.gz")
+	dolmayan := silinenDosya(t, kok, "c_s", "c_s-20261002-000000.tar.gz")
+	suresiz := silinenDosya(t, kok, "c_s", "c_s-20261003-000000.tar.gz")
+	canli := silinenDosya(t, kok, "c_s", "c_s-20261004-000000.tar.gz")
+	a := silinenYetim(t, db, 9701, "s.test", "c_s", "c_s-20261001-000000.tar.gz", 0, "DATE_SUB(NOW(), INTERVAL 1 HOUR)")
+	b := silinenYetim(t, db, 9701, "s.test", "c_s", "c_s-20261002-000000.tar.gz", 0, "DATE_ADD(NOW(), INTERVAL 1 DAY)")
+	c := silinenYetim(t, db, 9701, "s.test", "c_s", "c_s-20261003-000000.tar.gz", 0, "NULL")
+	// Süresi dolmuş görünen ama domaini CANLI olan satır (rebind sonrası artefaktı) silinmemeli.
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9702,'c.test','c_s')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, silinme, son_kullanma) VALUES (9702,'c_s-20261004-000000.tar.gz',NOW(),DATE_SUB(NOW(), INTERVAL 1 DAY))`)
+	d := satirID(t, db, 9702)
+	// Silme izi olmayan (silinme NULL) ve domain'i olmayan satır: otomatik temizlenmez.
+	izsizDosya := silinenDosya(t, kok, "c_iz", "c_iz-20261001-000000.tar.gz")
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici, son_kullanma) VALUES (9703,'c_iz-20261001-000000.tar.gz','c_iz',DATE_SUB(NOW(), INTERVAL 1 DAY))`)
+	e := satirID(t, db, 9703)
 
 	SilinenSupur(context.Background(), db)
 
-	if !advVar(filepath.Join(kok, "c_cift", "c_cift-hayat2.tar.gz")) {
-		t.Error("B (saklama süresi dolmadı) dosyası A'nın temizliğiyle SİLİNDİ")
+	if satirVarMi(t, db, a) || varMi(dolan) {
+		t.Error("süresi dolan yetim silinmeliydi")
 	}
-	if advVar(filepath.Join(kok, "c_cift", "c_cift-hayat1.tar.gz")) {
-		t.Error("A'nın dosyası silinmeliydi")
-	}
-	var dA, dB string
-	_ = db.QueryRow(`SELECT durum FROM cp_silinen_yedek WHERE id=9301`).Scan(&dA)
-	_ = db.QueryRow(`SELECT durum FROM cp_silinen_yedek WHERE id=9302`).Scan(&dB)
-	if dA != "temizlendi" || dB != "saklaniyor" {
-		t.Errorf("durumlar A=%s B=%s", dA, dB)
-	}
-}
-
-// ---------------------------------------------------------------- 4) devralınan sk, kayıtlı eski dosya
-
-func TestAdv4_DevralanHostingKayitliEskiDosyaKorunur(t *testing.T) {
-	db := silinenDB(t)
-	kok := silinenOrtam(t)
-	silinenDosya(t, kok, "c_dev", "c_dev-eski.tar.gz", 30*24*time.Hour)
-	silinenDosya(t, kok, "c_dev", "c_dev-yeni-ama-eski-mtime.tar.gz", 40*24*time.Hour) // mtime silinmeden ÖNCE ama yeni hostingin kaydı
-	silinenKayit(t, db, 9401, "dev.test", "c_dev", true)
-	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9402,'dev.test','c_dev')`)
-	g113_exec(t, db, `INSERT INTO backups (domain_id, tip, dosya, boyut_b) VALUES (9402,'oto','c_dev-yeni-ama-eski-mtime.tar.gz',5)`)
-
-	SilinenSupur(context.Background(), db)
-
-	if !advVar(filepath.Join(kok, "c_dev", "c_dev-yeni-ama-eski-mtime.tar.gz")) {
-		t.Error("devralan hostingin kayıtlı yedeği silindi")
-	}
-	if advVar(filepath.Join(kok, "c_dev", "c_dev-eski.tar.gz")) {
-		t.Error("eski hesabın dosyası silinmeliydi")
-	}
-	if !advVar(filepath.Join(kok, "c_dev")) {
-		t.Error("devralınan dizin silinmemeli")
-	}
-}
-
-// ---------------------------------------------------------------- 5) uzak silme
-
-func advUzakHazirla(t *testing.T, host string) (id int64, dosya string, h *Handlers) {
-	t.Helper()
-	db := silinenDB(t)
-	kok := silinenOrtam(t)
-	silinenDosya(t, kok, "c_uz", "c_uz-1.tar.gz", 20*24*time.Hour)
-	silinenKayit(t, db, 9501, "uz.test", "c_uz", true)
-	g113_exec(t, db, `UPDATE cp_silinen_yedek SET hedef_tip='ftp', hedef_host=?, hedef_port=21, hedef_kullanici='u', hedef_dizin='/x' WHERE eski_domain_id=9501`, host)
-	h = &Handlers{DB: db}
-	return advKayitID(t, h, 9501), filepath.Join(kok, "c_uz", "c_uz-1.tar.gz"), h
-}
-
-func TestAdv5a_UzakHostGecersiz_HataDonerYerelSilinmez(t *testing.T) {
-	if _, err := lookPathLftp(); err != nil {
-		t.Skip("lftp yok: bu yol 5c'de")
-	}
-	id, dosya, h := advUzakHazirla(t, "kotu host;rm -rf /")
-	ctx, iptal := context.WithTimeout(context.Background(), 60*time.Second)
-	defer iptal()
-	if err := SilinenTemizleBir(ctx, h.DB, id, false); err == nil {
-		t.Error("geçersiz host ile hata dönmeli")
-	}
-	if !advVar(dosya) {
-		t.Error("uzak silinemediyse yerel dosya SİLİNMEMELİ")
-	}
-	var durum string
-	_ = h.DB.QueryRow(`SELECT durum FROM cp_silinen_yedek WHERE id=?`, id).Scan(&durum)
-	if durum != "saklaniyor" {
-		t.Errorf("durum=%s", durum)
-	}
-}
-
-func TestAdv5b_UzakHostErisilmez_HataDonerYerelSilinmez(t *testing.T) {
-	if _, err := lookPathLftp(); err != nil {
-		t.Skip("lftp yok: bu yol 5c'de")
-	}
-	id, dosya, h := advUzakHazirla(t, "ornek.invalid")
-	ctx, iptal := context.WithTimeout(context.Background(), 90*time.Second)
-	defer iptal()
-	if err := SilinenTemizleBir(ctx, h.DB, id, false); err == nil {
-		t.Error("erişilemeyen host ile hata dönmeli")
-	}
-	if !advVar(dosya) {
-		t.Error("uzak silinemediyse yerel dosya SİLİNMEMELİ")
-	}
-	var hata string
-	_ = h.DB.QueryRow(`SELECT son_hata FROM cp_silinen_yedek WHERE id=?`, id).Scan(&hata)
-	if hata == "" {
-		t.Error("son_hata yazılmalı")
-	}
-	// uzagiYoksay=true: yerel silinir, kayıt temizlendi
-	if err := SilinenTemizleBir(ctx, h.DB, id, true); err != nil {
-		t.Fatalf("uzagiYoksay=true hata dönmemeli: %v", err)
-	}
-	if advVar(dosya) {
-		t.Error("uzagiYoksay=true iken yerel dosya silinmeli")
-	}
-	var durum, parola string
-	_ = h.DB.QueryRow(`SELECT durum, hedef_parola FROM cp_silinen_yedek WHERE id=?`, id).Scan(&durum, &parola)
-	if durum != "temizlendi" || parola != "" {
-		t.Errorf("durum=%s parola=%q", durum, parola)
-	}
-}
-
-func TestAdv5c_HHATA_LftpYokVeHedefTanimli_UzakKopyaOlduguHaldeYerelSilinmemeli(t *testing.T) {
-	id, dosya, h := advUzakHazirla(t, "ornek.invalid")
-	t.Setenv("PATH", t.TempDir()) // lftp bulunamaz → ErrLftpYok
-	err := SilinenTemizleBir(context.Background(), h.DB, id, false)
-	var durum string
-	_ = h.DB.QueryRow(`SELECT durum FROM cp_silinen_yedek WHERE id=?`, id).Scan(&durum)
-	if err == nil || !advVar(dosya) || durum != "saklaniyor" {
-		t.Errorf("lftp yokken hedef_host dolu: uzak kopya silinemedi ama err=%v yerelVar=%v durum=%s (kayıt 'temizlendi' olup uzak kopya yetim kalıyor)",
-			err, advVar(dosya), durum)
-	}
-}
-
-// ---------------------------------------------------------------- 6) kimlik / parametre sınırları
-
-func TestAdv6_SilIndirKimlikVeDosyaSiniri(t *testing.T) {
-	db := silinenDB(t)
-	kok := silinenOrtam(t)
-	h := &Handlers{DB: db}
-	r := advRouter(t, db, h)
-	silinenDosya(t, kok, "c_idt", "c_idt-1.tar.gz", 20*24*time.Hour)
-	_ = os.WriteFile(filepath.Join(kok, "disarida.tar.gz"), []byte("DISARI"), 0o600)
-	silinenKayit(t, db, 9601, "idt.test", "c_idt", false)
-	id := advKayitID(t, h, 9601)
-
-	for _, kimlik := range []string{"0", "-1", "99999999999999999999", "abc", "1.5", "%20", "9223372036854775807"} {
-		if kod, g := advIstek(r, "GET", "/s/"+kimlik+"/indir?dosya=c_idt-1.tar.gz", ""); kod != 404 {
-			t.Errorf("indir id=%q: %d %s", kimlik, kod, g)
-		}
-		if kod, g := advIstek(r, "DELETE", "/s/"+kimlik, ""); kod != 404 {
-			t.Errorf("sil id=%q: %d %s", kimlik, kod, g)
+	for ad, v := range map[string]struct {
+		id  int64
+		yol string
+	}{"dolmayan": {b, dolmayan}, "süresiz": {c, suresiz}, "canlı": {d, canli}} {
+		if !satirVarMi(t, db, v.id) || (v.yol != "" && !varMi(v.yol)) {
+			t.Errorf("%s silinmemeliydi", ad)
 		}
 	}
-	if !advVar(filepath.Join(kok, "c_idt", "c_idt-1.tar.gz")) {
-		t.Fatal("geçersiz kimliklerle dosya silindi")
-	}
-
-	kotuAd := []string{"", "../disarida.tar.gz", "..", "../c_idt/c_idt-1.tar.gz", "a/b.tar.gz", "/etc/passwd",
-		"%2e%2e", "%2e%2e%2fdisarida.tar.gz", "c_idt-1.tar.gz/", "c_idt-1.tar.gz\x00", strings.Repeat("a", 5000) + ".tar.gz", "c_idt-1.TAR.GZ"}
-	for _, ad := range kotuAd {
-		yol := fmt.Sprintf("/s/%d/indir?dosya=%s", id, url.QueryEscape(ad))
-		if kod, g := advIstek(r, "GET", yol, ""); kod != 404 {
-			t.Errorf("indir dosya=%q: %d (%.60s)", ad, kod, g)
-		}
-	}
-	for _, ham := range []string{"dosya=%2e%2e", "dosya=%252e%252e", "dosya=..%2fdisarida.tar.gz"} {
-		if kod, g := advIstek(r, "GET", fmt.Sprintf("/s/%d/indir?%s", id, ham), ""); kod != 404 {
-			t.Errorf("indir ham %q: %d %s", ham, kod, g)
-		}
-	}
-	if kod, _ := advIstek(r, "GET", fmt.Sprintf("/s/%d/indir?dosya=x&dosya=c_idt-1.tar.gz", id), ""); kod == 500 {
-		t.Error("500")
-	}
-
-	// temizlendi kaydı indirilemez
-	g113_exec(t, db, `UPDATE cp_silinen_yedek SET durum='temizlendi' WHERE id=?`, id)
-	if kod, g := advIstek(r, "GET", fmt.Sprintf("/s/%d/indir?dosya=c_idt-1.tar.gz", id), ""); kod != 404 {
-		t.Errorf("temizlendi kaydı indirilebildi: %d %s", kod, g)
-	}
-	// temizlendi kaydına Sil: dosyaya dokunmaz; 5xx olmamalı
-	kod, _ := advIstek(r, "DELETE", fmt.Sprintf("/s/%d", id), "")
-	if kod >= 500 || !advVar(filepath.Join(kok, "c_idt", "c_idt-1.tar.gz")) {
-		t.Errorf("temizlendi kaydına DELETE: %d, dosya var=%v", kod, advVar(filepath.Join(kok, "c_idt", "c_idt-1.tar.gz")))
+	if !satirVarMi(t, db, e) || !varMi(izsizDosya) {
+		t.Error("silme izi olmayan satır otomatik silinmemeli")
 	}
 }
 
-func TestAdv6b_SilYanitiYolSizdirmaz(t *testing.T) {
-	if _, err := lookPathLftp(); err != nil {
-		t.Skip("lftp yok")
-	}
-	id, _, h := advUzakHazirla(t, "kotu host;x")
-	r := advRouter(t, h.DB, h)
-	kod, g := advIstek(r, "DELETE", fmt.Sprintf("/s/%d", id), "")
-	if kod != http.StatusConflict {
-		t.Fatalf("uzak hata: 409 beklenirdi: %d %s", kod, g)
-	}
-	for _, yasak := range []string{BackupRoot, "gosp-lftp", "parola", "password"} {
-		if strings.Contains(strings.ToLower(g), strings.ToLower(yasak)) {
-			t.Errorf("hata gövdesi %q sızdırıyor: %s", yasak, g)
-		}
-	}
-}
-
-// ---------------------------------------------------------------- 7) ayar
-
-func TestAdv7_AyarSetSinirlari(t *testing.T) {
+func TestAdvSupur_Limit200_CtxIptali_UzakHata(t *testing.T) {
 	db := silinenDB(t)
 	silinenOrtam(t)
-	h := &Handlers{DB: db}
-	r := advRouter(t, db, h)
-	oku := func() (string, bool) {
-		var v string
-		err := db.QueryRow(`SELECT deger FROM cp_ayarlar WHERE anahtar='silinen_yedek_gun'`).Scan(&v)
-		return v, err == nil
+	for i := 0; i < 205; i++ {
+		g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici, silinme, son_kullanma) VALUES (9801,?, 'c_lim', NOW(), DATE_SUB(NOW(), INTERVAL 1 DAY))`,
+			fmt.Sprintf("c_lim-20261001-%06d.tar.gz", i))
 	}
-	reddedilmeli := map[string]string{
-		"eksi":        `{"gun":-1}`,
-		"3651":        `{"gun":3651}`,
-		"string":      `{"gun":"abc"}`,
-		"ondalik":     `{"gun":1.5}`,
-		"dev sayi":    `{"gun":99999999999999999999}`,
-		"bos":         ``,
-		"dizi":        `[]`,
-		"bozuk":       `{"gun":`,
-		"cok buyuk":   `{"gun":5,"x":"` + strings.Repeat("a", 10000) + `"}`,
-		"bool":        `{"gun":true}`,
-		"string sayi": `{"gun":"7"}`,
-	}
-	for ad, govde := range reddedilmeli {
-		if kod, g := advIstek(r, "PUT", "/s/ayar", govde); kod != 400 {
-			t.Errorf("%s: 400 beklenirdi: %d %s", ad, kod, g)
-		}
-	}
-	if _, var_ := oku(); var_ {
-		t.Error("reddedilen istekler ayar yazmamalı")
-	}
-	if kod, _ := advIstek(r, "PUT", "/s/ayar", `{"gun":3650}`); kod != 200 {
-		t.Errorf("3650 sınır geçerli: %d", kod)
-	}
-	if v, _ := oku(); v != "3650" {
-		t.Errorf("v=%q", v)
-	}
-	if kod, _ := advIstek(r, "PUT", "/s/ayar", `{"gun":0}`); kod != 200 {
-		t.Errorf("0 geçerli: %d", kod)
-	}
-	if v, _ := oku(); v != "0" {
-		t.Errorf("v=%q", v)
-	}
-	for _, g := range []string{`{"gun":null}`, `{}`} {
-		_, _ = advIstek(r, "PUT", "/s/ayar", `{"gun":9}`)
-		if kod, _ := advIstek(r, "PUT", "/s/ayar", g); kod != 200 {
-			t.Errorf("%s: 200 beklenirdi: %d", g, kod)
-		}
-		if _, var_ := oku(); var_ {
-			t.Errorf("%s ayarı silmeliydi", g)
-		}
-	}
-	kod, _ := advIstek(r, "PUT", "/s/ayar", `{"gun":5}xyz`)
-	t.Logf("not: sonda çöplü gövde `{\"gun\":5}xyz` -> %d", kod)
-}
-
-// DB'de elle bozulmuş değerler: Get, etkin davranışla (slot) tutarlı olmalı.
-func TestAdv7b_HHATA_AyarGetAralikDisiDegeriGostermemeli(t *testing.T) {
-	db := silinenDB(t)
-	silinenOrtam(t)
-	h := &Handlers{DB: db}
-	r := advRouter(t, db, h)
-	for _, bozuk := range []string{"-5", "99999", "abc"} {
-		g113_exec(t, db, `INSERT INTO cp_ayarlar (anahtar, deger) VALUES ('silinen_yedek_gun',?) ON DUPLICATE KEY UPDATE deger=VALUES(deger)`, bozuk)
-		kod, g := advIstek(r, "GET", "/s/ayar", "")
-		etkin := silinenSaklamaGunu(silinenAyar(context.Background(), db), 14)
-		if kod != 200 {
-			t.Fatalf("%d", kod)
-		}
-		if etkin == 14 && !strings.Contains(g, `"gun":null`) {
-			t.Errorf("ayar=%q: etkin davranış slot ama Get %s", bozuk, g)
-		}
-	}
-}
-
-// ---------------------------------------------------------------- 8) süpürme sınırları
-
-func advToplu(t *testing.T, h *Handlers, n int, ofset int64) {
-	t.Helper()
-	for i := 0; i < n; i++ {
-		g113_exec(t, h.DB, `INSERT INTO cp_silinen_yedek (alan_adi, sistem_kullanici, eski_domain_id, silinme, son_kullanma, dizin, dosyalar)
-			VALUES (?,?,?, DATE_SUB(NOW(), INTERVAL 10 DAY), DATE_SUB(NOW(), INTERVAL 1 HOUR), ?, '[]')`,
-			fmt.Sprintf("t%d.test", i), fmt.Sprintf("c_toplu%d", i), ofset+int64(i), fmt.Sprintf("c_toplu%d", i))
-	}
-}
-
-func TestAdv8_SupurLimit200TurBasinaVeKalanErtesiGun(t *testing.T) {
-	db := silinenDB(t)
-	silinenOrtam(t)
-	h := &Handlers{DB: db}
-	advToplu(t, h, 205, 100000)
-	SilinenSupur(context.Background(), db)
-	var kalan int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM cp_silinen_yedek WHERE durum='saklaniyor'`).Scan(&kalan)
-	if kalan != 5 {
-		t.Fatalf("tur başına 200: kalan 5 olmalı, %d", kalan)
+	iptal, cancel := context.WithCancel(context.Background())
+	cancel()
+	SilinenSupur(iptal, db)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9801`); n != 205 {
+		t.Fatalf("iptal edilmiş ctx ile hiçbir şey silinmemeli: %d", n)
 	}
 	SilinenSupur(context.Background(), db)
-	_ = db.QueryRow(`SELECT COUNT(*) FROM cp_silinen_yedek WHERE durum='saklaniyor'`).Scan(&kalan)
-	if kalan != 0 {
-		t.Fatalf("ikinci tur kalanı bitirmeli: %d", kalan)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9801`); n != 5 {
+		t.Errorf("tur başına en çok 200 silinmeli, 5 kalmalı: %d", n)
 	}
-}
+	SilinenSupur(context.Background(), db)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9801`); n != 0 {
+		t.Errorf("ertesi tur kalanı silmeli: %d", n)
+	}
 
-func TestAdv8b_SupurIptalEdilmisBaglamDokunmaz(t *testing.T) {
-	db := silinenDB(t)
+	// Uzak hedef ulaşılamaz → satır + dosya kalır (ertesi gün tekrar denenir).
 	kok := silinenOrtam(t)
-	silinenDosya(t, kok, "c_ipt", "c_ipt-1.tar.gz", 20*24*time.Hour)
-	silinenKayit(t, db, 9801, "ipt.test", "c_ipt", true)
-	ctx, iptal := context.WithCancel(context.Background())
-	iptal()
-	SilinenSupur(ctx, db)
-	if !advVar(filepath.Join(kok, "c_ipt", "c_ipt-1.tar.gz")) {
-		t.Error("iptal edilmiş bağlamla dosya silindi")
-	}
-	var durum string
-	_ = db.QueryRow(`SELECT durum FROM cp_silinen_yedek WHERE eski_domain_id=9801`).Scan(&durum)
-	if durum != "saklaniyor" {
-		t.Errorf("durum=%s", durum)
+	silinenUzakHedef(t, db)
+	y := silinenDosya(t, kok, "c_uz2", "c_uz2-20261001-000000.tar.gz")
+	id := silinenYetim(t, db, 9802, "uz.test", "c_uz2", "c_uz2-20261001-000000.tar.gz", 0, "DATE_SUB(NOW(), INTERVAL 1 HOUR)")
+	SilinenSupur(context.Background(), db)
+	if !satirVarMi(t, db, id) || !varMi(y) {
+		t.Error("uzak silinemediyse süpürme satırı/dosyayı KORUMALI")
 	}
 }
 
-func TestAdv8c_TemizlenmisKayit180GunSonraSilinir(t *testing.T) {
+func TestAdvSupur_EszamanliTurlar(t *testing.T) {
 	db := silinenDB(t)
 	silinenOrtam(t)
-	ek := func(id int, gun int, durum string) {
-		g113_exec(t, db, `INSERT INTO cp_silinen_yedek (id, alan_adi, sistem_kullanici, eski_domain_id, dizin, dosyalar, durum, temizlenme)
-			VALUES (?, 'k.test','c_k',?, 'c_k','[]',?, DATE_SUB(NOW(), INTERVAL ? DAY))`, id, id, durum, gun)
-	}
-	ek(1, 181, "temizlendi")
-	ek(2, 179, "temizlendi")
-	ek(3, 400, "saklaniyor")
-	g113_exec(t, db, `INSERT INTO cp_silinen_yedek (id, alan_adi, sistem_kullanici, eski_domain_id, dizin, dosyalar, durum) VALUES (4,'k.test','c_k',4,'c_k','[]','temizlendi')`)
-	SilinenSupur(context.Background(), db)
-	var ids []int
-	rows, _ := db.Query(`SELECT id FROM cp_silinen_yedek ORDER BY id`)
-	for rows.Next() {
-		var i int
-		_ = rows.Scan(&i)
-		ids = append(ids, i)
-	}
-	rows.Close()
-	if fmt.Sprint(ids) != "[2 3 4]" {
-		t.Errorf("kalanlar [2 3 4] olmalı: %v", ids)
-	}
-}
-
-// ---------------------------------------------------------------- 9) eşzamanlılık
-
-func TestAdv9_SupurVeSilParalel(t *testing.T) {
-	db := silinenDB(t)
-	kok := silinenOrtam(t)
-	h := &Handlers{DB: db}
-	r := advRouter(t, db, h)
-	var idler []int64
-	for i := 0; i < 8; i++ {
-		sk := fmt.Sprintf("c_par%d", i)
-		for j := 0; j < 5; j++ {
-			silinenDosya(t, kok, sk, fmt.Sprintf("%s-%d.tar.gz", sk, j), 20*24*time.Hour)
-		}
-		silinenKayit(t, db, int64(9900+i), fmt.Sprintf("par%d.test", i), sk, true)
-		idler = append(idler, advKayitID(t, h, int64(9900+i)))
+	for i := 0; i < 40; i++ {
+		g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, sistem_kullanici, silinme, son_kullanma) VALUES (9901,?, 'c_es', NOW(), DATE_SUB(NOW(), INTERVAL 1 DAY))`,
+			fmt.Sprintf("c_es-20261001-%06d.tar.gz", i))
 	}
 	var wg sync.WaitGroup
-	for k := 0; k < 3; k++ {
+	for i := 0; i < 6; i++ {
 		wg.Add(1)
 		go func() { defer wg.Done(); SilinenSupur(context.Background(), db) }()
 	}
-	for _, id := range idler {
-		wg.Add(1)
-		go func(id int64) {
-			defer wg.Done()
-			if kod, g := advIstek(r, "DELETE", fmt.Sprintf("/s/%d", id), ""); kod >= 500 {
-				t.Errorf("paralel sil %d: %d %s", id, kod, g)
-			}
-		}(id)
-	}
 	wg.Wait()
-	for i := 0; i < 8; i++ {
-		if advVar(filepath.Join(kok, fmt.Sprintf("c_par%d", i))) {
-			t.Errorf("c_par%d kaldı", i)
-		}
-	}
-	var n int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM cp_silinen_yedek WHERE durum<>'temizlendi'`).Scan(&n)
-	if n != 0 {
-		t.Errorf("hepsi temizlendi olmalı: %d", n)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9901`); n != 0 {
+		t.Errorf("eşzamanlı turlardan sonra hepsi silinmeli: %d", n)
 	}
 }
 
-func TestAdv9b_ListeVeSilParalel(t *testing.T) {
-	db := silinenDB(t)
-	kok := silinenOrtam(t)
-	h := &Handlers{DB: db}
-	r := advRouter(t, db, h)
-	var idler []int64
-	for i := 0; i < 6; i++ {
-		sk := fmt.Sprintf("c_lp%d", i)
-		silinenDosya(t, kok, sk, sk+"-1.tar.gz", 20*24*time.Hour)
-		silinenKayit(t, db, int64(9950+i), fmt.Sprintf("lp%d.test", i), sk, false)
-		idler = append(idler, advKayitID(t, h, int64(9950+i)))
-	}
-	var wg sync.WaitGroup
-	for _, id := range idler {
-		wg.Add(2)
-		go func(id int64) { defer wg.Done(); advIstek(r, "DELETE", fmt.Sprintf("/s/%d", id), "") }(id)
-		go func() {
-			defer wg.Done()
-			if kod, g := advIstek(r, "GET", "/s", ""); kod != 200 {
-				t.Errorf("liste: %d %s", kod, g)
-			}
-		}()
-	}
-	wg.Wait()
-}
+var _ sql.DB
 
-// 3b) Ters yön: B (sonraki hayat) önce dolarsa A'nın (hâlâ saklanan) eski dosyalarını silmemeli.
-func TestAdv3b_HHATA_AyniSKIkiKayit_IkincininTemizligiBirincininDosyasiniSilmemeli(t *testing.T) {
+func TestAdvSil_CanliHostingAyniSK_BosDizinKorunur(t *testing.T) {
 	db := silinenDB(t)
 	kok := silinenOrtam(t)
-	silinenDosya(t, kok, "c_cift2", "c_cift2-hayat1.tar.gz", 25*24*time.Hour)
-	silinenDosya(t, kok, "c_cift2", "c_cift2-hayat2.tar.gz", 5*24*time.Hour)
-	// A: uzun saklama (dolmadı); B: kısa saklama (doldu)
-	g113_exec(t, db, `INSERT INTO cp_silinen_yedek (id, alan_adi, sistem_kullanici, eski_domain_id, silinme, son_kullanma, dizin, dosyalar)
-		VALUES (9311,'cift2.test','c_cift2',9311, DATE_SUB(NOW(), INTERVAL 20 DAY), DATE_ADD(NOW(), INTERVAL 100 DAY),'c_cift2','["c_cift2-hayat1.tar.gz"]')`)
-	g113_exec(t, db, `INSERT INTO cp_silinen_yedek (id, alan_adi, sistem_kullanici, eski_domain_id, silinme, son_kullanma, dizin, dosyalar)
-		VALUES (9312,'cift2.test','c_cift2',9312, DATE_SUB(NOW(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 1 HOUR),'c_cift2','["c_cift2-hayat2.tar.gz"]')`)
-	SilinenSupur(context.Background(), db)
-	if !advVar(filepath.Join(kok, "c_cift2", "c_cift2-hayat1.tar.gz")) {
-		t.Error("A (saklama süresi dolmadı) dosyası B'nin temizliğiyle SİLİNDİ")
+	r := advRouter(db, &Handlers{DB: db})
+	silinenDosya(t, kok, "c_bos", "c_bos-20261001-000000.tar.gz")
+	silinenYetim(t, db, 9640, "bos.test", "c_bos", "c_bos-20261001-000000.tar.gz", 0, "NULL")
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9641,'bos2.test','c_bos')`)
+	if kod, g := advIstek(r, "DELETE", "/s/c_bos", ""); kod != 200 {
+		t.Fatalf("%d %s", kod, g)
 	}
-	if advVar(filepath.Join(kok, "c_cift2", "c_cift2-hayat2.tar.gz")) {
-		t.Error("B'nin dosyası silinmeliydi")
+	if !varMi(filepath.Join(kok, "c_bos")) {
+		t.Error("sk'yı kullanan canlı hosting varken (boş bile olsa) dizin kaldırılmamalı")
 	}
 }

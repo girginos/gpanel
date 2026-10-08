@@ -332,7 +332,7 @@ func YedekUzaktanSil(ctx context.Context, db *sql.DB, domainID int64, dosyaAdi s
 }
 
 // yedekUzaktanSilHedefle — YedekUzaktanSil'in gövdesi. d = domaine özel FTP/SFTP hedefi
-// (nil olabilir; domains satırı silinmişse silinen-yedek kaydındaki kopyadan kurulur).
+// (nil olabilir; domains satırı silinmişse - yetim yedek - yalnız genel/kök hedef çalışır).
 func yedekUzaktanSilHedefle(ctx context.Context, db *sql.DB, d *Destination, dosyaAdi string) error {
 	var hatalar []string
 	lftpEksik := false

@@ -1,17 +1,26 @@
 package backups
 
-// Silinen hosting/bayi yedekleri ("çöp kutusu").
+// Silinen hosting/bayi yedekleri ("yetim yedek").
 //
 // Karar (kullanıcı, 2026-10-08): hosting/bayi silme YEDEKLERDEN BAĞIMSIZDIR. Silme yolu yedek
-// dizinine/uzak kopyalara hiç dokunmaz ve yedekler yüzünden ASLA başarısız olmaz: yedekler
-// BackupRoot/<sk> altında olduğu yerde kalır. Silme yalnız DB'ye best-effort bir iz bırakır
-// (SilinenIsaretle: alan adı, sk, yedek slotu, dosya adları, domaine özel FTP hedefi); süre
-// dolunca günlük tur (SilinenSupur) yedekleri temizler. Süre cp_ayarlar.silinen_yedek_gun:
-// boş = hostingin yedek slotu (en az 7 gün), 0 = otomatik silme yok, N = sabit gün.
+// dizinine/uzak kopyalara hiç dokunmaz ve yedekler yüzünden ASLA başarısız olmaz/beklemez.
 //
-// 🔴 sk YENİDEN KULLANILABİLİR: aynı alan adı yeniden açılırsa yeni hosting aynı BackupRoot/<sk>
-// dizinini devralır. Bu yüzden listeleme/indirme/temizlik YALNIZ "silinmeden önceki ve canlı
-// hostingin kayıtlarında olmayan" dosyalara dokunur (silinenDosyalari).
+// Tasarım: backups.domain_id → domains(id) FK'si KALKTI (migrations/0217): domain silinince yedeğin
+// DB satırı yerinde kalır, YEDEK SAYFASINDAN geri yüklenebilir. Silme `DELETE FROM domains`
+// başarılı olunca TEK best-effort UPDATE ile satırlara alan_adi / sistem_kullanici / reseller_id /
+// silinme / son_kullanma yazar (SilinenIz.Yaz). Süre cp_ayarlar.silinen_yedek_gun: boş = hostingin
+// yedek slotu (en az 7 gün), 0 = otomatik silme yok, N = sabit gün (≤3650).
+//
+//	Yetim yedek = silinme IS NOT NULL AND NOT EXISTS(SELECT 1 FROM domains WHERE id=backups.domain_id)
+//
+// 🔴 Yetim satırlar HİÇBİR canlı akışa girmemeli ve kendi başına silinmemeli: canlı akışların hepsi
+// ya domain_id bazlıdır ya da JOIN domains yapar (bkz. uzak/otomatik.go TopluAdaylar ve
+// uzak/kuyruk.go SimdiGonder'deki EXISTS(domains) koruması). Yetimi yalnız şunlar siler: 04:00
+// süpürmesi (süresi dolanı), yönetici DELETE ucu.
+//
+// 🔴 Aynı sk/alan adı yeniden açılırsa: AYNI alan adı + AYNI sahip (reseller_id) + AYNI sk ise yetimler
+// domainin yedek sayfası açılınca otomatik bağlanır (yetimleriOtoBagla); farklıysa YALNIZ yönetici
+// elle bağlar (başka müşterinin yedeği sızmasın).
 
 import (
 	"context"
@@ -24,13 +33,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"girginospanel/internal/gizli"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
 
@@ -41,11 +48,17 @@ import (
 var yedekKok = BackupRoot
 
 const (
-	silinenAyarKey    = "silinen_yedek_gun"
-	silinenEnAzGun    = 7
-	silinenEnCokGun   = 3650
-	silinenKayitTutma = 180 // temizlenmiş kaydın günü
+	silinenAyarKey  = "silinen_yedek_gun"
+	silinenEnAzGun  = 7
+	silinenEnCokGun = 3650
+	// silinenSupurLimit: tek turda en çok kaç yetim yedek temizlenir (kalanı ertesi gün).
+	silinenSupurLimit = 200
+	silinenGrupLimit  = 500
+	silinenSatirLimit = 20000
 )
+
+// yetimKosulu: yetim yedek SQL koşulu (backups tablosu "backups" adıyla, takma adsız).
+const yetimKosulu = `silinme IS NOT NULL AND NOT EXISTS (SELECT 1 FROM domains d WHERE d.id=backups.domain_id)`
 
 // silinenAyar: cp_ayarlar'daki ham değer ("" = ayarsız → slot).
 func silinenAyar(ctx context.Context, db *sql.DB) string {
@@ -69,14 +82,57 @@ func silinenSaklamaGunu(ayar string, slot int) int {
 	return slot
 }
 
-// SilinenIz — silinecek hostingin saklama izi (DB'den önceden toplanır, silme BAŞARILI olunca yazılır).
+var silinenSKRe = regexp.MustCompile(`^c_[a-z0-9_]{1,40}$`)
+
+func silinenSKGecerli(sk string) bool { return silinenSKRe.MatchString(sk) }
+
+// yedekDosyaSKRe: yedek dosya adından sk türetme (<sk>-YYYYMMDD-HHMMSS.tar.gz).
+var yedekDosyaSKRe = regexp.MustCompile(`^(c_[a-z0-9_]+)-\d{8}-\d{6}\.tar\.gz$`)
+
+// skDosyaAdindan — silme izi yazılamamış (silinme NULL) eski/yarım satırlar için sk'yı dosya adından
+// türetir. Yalnız tanılama/elle kurtarma içindir: bu satırlar otomatik listelenmez/temizlenmez.
+func skDosyaAdindan(dosya string) (string, bool) {
+	m := yedekDosyaSKRe.FindStringSubmatch(dosya)
+	if m == nil || !silinenSKGecerli(m[1]) {
+		return "", false
+	}
+	return m[1], true
+}
+
+// dosyaAdiGuvenli: yedek dosya adı tek bir yol bileşeni ve .tar.gz mi?
+func dosyaAdiGuvenli(ad string) bool {
+	return ad != "" && ad == filepath.Base(ad) && ad != "." && ad != ".." && strings.HasSuffix(ad, ".tar.gz")
+}
+
+// yedekDizinGuvenli — BackupRoot/<sk> gerçek bir dizin mi (symlink DEĞİL)? Symlink ise dışarıya
+// okuma/silme/indirme açılırdı.
+func yedekDizinGuvenli(sk string) bool {
+	if !silinenSKGecerli(sk) {
+		return false
+	}
+	fi, err := os.Lstat(filepath.Join(yedekKok, sk))
+	return err == nil && fi.IsDir() && fi.Mode()&os.ModeSymlink == 0
+}
+
+// yedekDizinSilinebilir: dizin yok (silinecek dosya zaten yok) ya da güvenli gerçek dizin.
+// Var ama symlink/dosya ise false — üstünden silme dışarıya taşardı.
+func yedekDizinSilinebilir(sk string) bool {
+	if !silinenSKGecerli(sk) {
+		return false
+	}
+	fi, err := os.Lstat(filepath.Join(yedekKok, sk))
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+	return fi.IsDir() && fi.Mode()&os.ModeSymlink == 0
+}
+
+// SilinenIz — silinecek hostingin yetim-işaret bilgisi (domains satırı gitmeden ÖNCE okunur).
 type SilinenIz struct {
-	alanAdi, sk                        string
-	domainID, resellerID               int64
-	slot                               int
-	dosyalar                           []string
-	hTip, hHost, hKul, hParola, hDizin string
-	hPort                              int
+	alanAdi, sk string
+	domainID    int64
+	resellerID  int64
+	slot        int
 }
 
 // SilinenIzHazirla — domains satırı gitmeden ÖNCE çağrılır; YALNIZ DB okur (dizine dokunmaz).
@@ -93,25 +149,14 @@ func SilinenIzHazirla(ctx context.Context, db *sql.DB, domainID int64, alanAdi, 
 	}
 	ctx, iptal := context.WithTimeout(ctx, 10*time.Second)
 	defer iptal()
-	iz = &SilinenIz{alanAdi: alanAdi, sk: sk, domainID: domainID, slot: 7, dosyalar: []string{}}
+	iz = &SilinenIz{alanAdi: alanAdi, sk: sk, domainID: domainID, slot: 7}
 	_ = db.QueryRowContext(ctx, `SELECT COALESCE(reseller_id,0), COALESCE(backup_retention,7) FROM domains WHERE id=?`, domainID).
 		Scan(&iz.resellerID, &iz.slot)
-	if rows, err := db.QueryContext(ctx, `SELECT dosya FROM backups WHERE domain_id=? ORDER BY id`, domainID); err == nil {
-		for rows.Next() {
-			var d string
-			if rows.Scan(&d) == nil && strings.TrimSpace(d) != "" {
-				iz.dosyalar = append(iz.dosyalar, d)
-			}
-		}
-		rows.Close()
-	}
-	_ = db.QueryRowContext(ctx, `SELECT tip, host, port, kullanici, parola, uzak_dizin FROM backup_destinations WHERE domain_id=?`, domainID).
-		Scan(&iz.hTip, &iz.hHost, &iz.hPort, &iz.hKul, &iz.hParola, &iz.hDizin)
 	return iz
 }
 
-// Yaz — izi DB'ye yazar. Hosting satırı SİLİNDİKTEN sonra çağrılır (silme başarısızsa iz bırakılmaz).
-// Hata vermez/engellemez; aynı alan için zaten 'saklaniyor' kaydı varsa yinelemez.
+// Yaz — hosting satırı SİLİNDİKTEN sonra çağrılır (silme başarısızsa iz bırakılmaz): o domainin yedek
+// satırlarını yetim olarak işaretler. Hata vermez/engellemez, 10 sn zaman aşımı, panik yutulur.
 func (iz *SilinenIz) Yaz(ctx context.Context, db *sql.DB) {
 	if iz == nil {
 		return
@@ -121,338 +166,358 @@ func (iz *SilinenIz) Yaz(ctx context.Context, db *sql.DB) {
 			log.Printf("silinen yedek iz: panik (%s): %v", iz.alanAdi, r)
 		}
 	}()
-	ctx, iptal := context.WithTimeout(ctx, 10*time.Second)
-	defer iptal()
-	var var_ int
-	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM cp_silinen_yedek WHERE eski_domain_id=? AND durum='saklaniyor'`, iz.domainID).Scan(&var_)
-	if var_ > 0 {
-		return
-	}
-	js, _ := json.Marshal(iz.dosyalar)
-	gun := silinenSaklamaGunu(silinenAyar(ctx, db), iz.slot)
-	var sonKullanma any // NULL = otomatik silme yok
-	if gun > 0 {
-		sonKullanma = gun
-	}
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO cp_silinen_yedek (alan_adi, sistem_kullanici, eski_domain_id, reseller_id, son_kullanma, dizin,
-		   dosyalar, dosya_sayisi, hedef_tip, hedef_host, hedef_port, hedef_kullanici, hedef_parola, hedef_dizin)
-		 VALUES (?,?,?,?, IF(? IS NULL, NULL, DATE_ADD(NOW(), INTERVAL ? DAY)), ?, ?,?,?,?,?,?,?,?)`,
-		iz.alanAdi, iz.sk, iz.domainID, iz.resellerID, sonKullanma, sonKullanma, iz.sk,
-		string(js), len(iz.dosyalar), iz.hTip, iz.hHost, iz.hPort, iz.hKul, iz.hParola, iz.hDizin); err != nil {
-		log.Printf("silinen yedek iz yazılamadı (%s, yedekler yerinde duruyor): %v", iz.alanAdi, err)
+	if err := iz.yaz(ctx, db); err != nil {
+		log.Printf("silinen yedek iz yazılamadı (%s; yedekler yerinde duruyor, yetim sayılmayacak): %v", iz.alanAdi, err)
 	}
 }
 
-// SilinenIsaretle — Hazirla + Yaz (testler ve satır silme sonrası çağıranlar için).
+func (iz *SilinenIz) yaz(ctx context.Context, db *sql.DB) error {
+	ctx, iptal := context.WithTimeout(ctx, 10*time.Second)
+	defer iptal()
+	gun := silinenSaklamaGunu(silinenAyar(ctx, db), iz.slot)
+	q := `UPDATE backups SET alan_adi=?, sistem_kullanici=?, reseller_id=?, silinme=NOW(), son_kullanma=NULL WHERE domain_id=?`
+	args := []any{iz.alanAdi, iz.sk, iz.resellerID, iz.domainID}
+	if gun > 0 { // 0 = otomatik silme yok (son_kullanma NULL)
+		q = `UPDATE backups SET alan_adi=?, sistem_kullanici=?, reseller_id=?, silinme=NOW(), son_kullanma=DATE_ADD(NOW(), INTERVAL ? DAY) WHERE domain_id=?`
+		args = []any{iz.alanAdi, iz.sk, iz.resellerID, gun, iz.domainID}
+	}
+	_, err := db.ExecContext(ctx, q, args...)
+	return err
+}
+
+// SilinenIsaretle — Hazirla + Yaz (domain satırı ZATEN silindiyse; testler/ara çağıranlar için).
 func SilinenIsaretle(ctx context.Context, db *sql.DB, domainID int64, alanAdi, sk string) {
 	SilinenIzHazirla(ctx, db, domainID, alanAdi, sk).Yaz(ctx, db)
+}
+
+// SilinenIsaretsizTani — domain'i olmayan ama yetim işaretsiz (silinme NULL) satırları sayar:
+// toplam ve dosya adından sk türetilebilen kısmı. Bu satırlar listelenmez/temizlenmez (güvenli
+// taraf); yönetici isterse SQL ile işaretler. Yalnız log için.
+func SilinenIsaretsizTani(ctx context.Context, db *sql.DB) (toplam, turetilebilir int) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT b.dosya FROM backups b WHERE b.silinme IS NULL AND NOT EXISTS (SELECT 1 FROM domains d WHERE d.id=b.domain_id) LIMIT 5000`)
+	if err != nil {
+		return 0, 0
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d string
+		if rows.Scan(&d) != nil {
+			continue
+		}
+		toplam++
+		if _, ok := skDosyaAdindan(d); ok {
+			turetilebilir++
+		}
+	}
+	return toplam, turetilebilir
+}
+
+// yetimleriOtoBagla — domainin alan adı + sahibi (reseller_id) + sk'sı ile BİREBİR aynı olan yetim
+// yedekleri bu domaine bağlar (lazy; yedek sayfası açılınca). Sahip/alan adı farklıysa dokunmaz.
+// Bağlanan sayısını döner; hata sessizce loglanır (liste yine açılır).
+func yetimleriOtoBagla(ctx context.Context, db *sql.DB, domainID int64) int64 {
+	var alan, sk string
+	var rid int64
+	if err := db.QueryRowContext(ctx, `SELECT alan_adi, sistem_kullanici, COALESCE(reseller_id,0) FROM domains WHERE id=?`, domainID).
+		Scan(&alan, &sk, &rid); err != nil || alan == "" || !silinenSKGecerli(sk) {
+		return 0
+	}
+	res, err := db.ExecContext(ctx,
+		`UPDATE backups SET domain_id=?, silinme=NULL, son_kullanma=NULL
+		 WHERE sistem_kullanici=? AND alan_adi=? AND reseller_id=? AND `+yetimKosulu, domainID, sk, alan, rid)
+	if err != nil {
+		log.Printf("yetim yedek otomatik bağlama (domain=%d): %v", domainID, err)
+		return 0
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		log.Printf("yetim yedek otomatik bağlandı: domain=%d sk=%s adet=%d", domainID, sk, n)
+	}
+	return n
+}
+
+// yetimYedegiSil — BİR yetim yedeği kalıcı siler: uzak → yerel dosya → DB satırı (yedekKaydiniYokEt).
+// uzagiYoksay: uzak adımı atlar. Uzak silinemezse satır + dosya KALIR (hata döner).
+// Güvenlik: sk regex, dosya adı tek bileşen + .tar.gz, sk dizini symlink değil.
+func yetimYedegiSil(ctx context.Context, db *sql.DB, bid, domainID int64, sk, dosya string, uzagiYoksay bool) error {
+	if !silinenSKGecerli(sk) || !dosyaAdiGuvenli(dosya) {
+		return fmt.Errorf("yedek %d: güvensiz sk/dosya adı, atlandı", bid)
+	}
+	if !yedekDizinSilinebilir(sk) {
+		return fmt.Errorf("yedek %d: yedek dizini güvenli değil (symlink?), atlandı", bid)
+	}
+	if !uzagiYoksay {
+		_, err := yedekKaydiniYokEt(ctx, db, domainID, sk, dosya, bid)
+		return err
+	}
+	if e := os.Remove(filepath.Join(yedekKok, sk, dosya)); e != nil && !os.IsNotExist(e) {
+		return e
+	}
+	_, err := db.ExecContext(ctx, `DELETE FROM backups WHERE id=? AND `+yetimKosulu, bid)
+	return err
 }
 
 // silinenSupurKilit: aynı anda tek süpürme.
 var silinenSupurKilit sync.Mutex
 
-// yedekDizinGuvenli — BackupRoot/<sk> gerçek bir dizin mi (symlink DEĞİL)? Symlink ise dışarıya
-// okuma/silme/indirme açılırdı.
-func yedekDizinGuvenli(sk string) bool {
-	if !silinenSKGecerli(sk) {
+// SilinenSupur — süresi dolan yetim yedekleri temizler (günde bir, 04:00 turu). Uzak silinemezse
+// satır kalır, ertesi gün tekrar denenir. Tur başına en çok silinenSupurLimit yedek.
+func SilinenSupur(ctx context.Context, db *sql.DB) {
+	if !silinenSupurKilit.TryLock() {
+		return // zaten çalışıyor
+	}
+	defer silinenSupurKilit.Unlock()
+	if top, tur := SilinenIsaretsizTani(ctx, db); top > 0 {
+		log.Printf("yetim yedek tanılama: domain'i olmayıp silme izi olmayan %d yedek satırı var (%d tanesinin sk'sı dosya adından türetilebilir) — otomatik temizlenmez", top, tur)
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, domain_id, sistem_kullanici, dosya FROM backups
+		 WHERE son_kullanma IS NOT NULL AND son_kullanma<=NOW() AND `+yetimKosulu+` ORDER BY id LIMIT ?`, silinenSupurLimit)
+	if err != nil {
+		log.Printf("yetim yedek süpürme: %v", err)
+		return
+	}
+	type kayit struct {
+		id, domainID int64
+		sk, dosya    string
+	}
+	var liste []kayit
+	for rows.Next() {
+		var k kayit
+		if rows.Scan(&k.id, &k.domainID, &k.sk, &k.dosya) == nil {
+			liste = append(liste, k)
+		}
+	}
+	rows.Close()
+	for _, k := range liste {
+		if ctx.Err() != nil {
+			log.Printf("yetim yedek süpürme: süre doldu, kalanı yarın")
+			return
+		}
+		if e := yetimYedegiSil(ctx, db, k.id, k.domainID, k.sk, k.dosya, false); e != nil {
+			log.Printf("yetim yedek %d (%s) temizlenemedi, kayıt korundu (yarın tekrar denenir): %v", k.id, k.dosya, e)
+		} else {
+			log.Printf("yetim yedek %d (%s) süresi doldu, temizlendi", k.id, k.dosya)
+		}
+	}
+}
+
+// ---------------------------------------------------------------- yönetici uçları
+
+type silinenYedekDosya struct {
+	ID        int64  `json:"id"`
+	Dosya     string `json:"dosya"`
+	BoyutB    int64  `json:"boyut_b"`
+	Olusturma string `json:"olusturma"`
+	Yerel     bool   `json:"yerel"`
+}
+
+type silinenGrup struct {
+	SK                   string              `json:"sk"`
+	AlanAdi              string              `json:"alan_adi"`
+	ResellerID           int64               `json:"reseller_id"`
+	Silinme              string              `json:"silinme"`
+	SonKullanma          string              `json:"son_kullanma"` // boş = otomatik silinmez
+	DosyaSayisi          int                 `json:"dosya_sayisi"`
+	BoyutB               int64               `json:"boyut_b"`
+	YerelVar             bool                `json:"yerel_var"`
+	BaglanabilirDomainID *int64              `json:"baglanabilir_domain_id"`
+	Yedekler             []silinenYedekDosya `json:"yedekler"`
+}
+
+// yerelDuzDosya: BackupRoot/<sk>/<dosya> diskte düz dosya mı (dizin ve dosya symlink değil)?
+func yerelDuzDosya(sk, dosya string) bool {
+	if !yedekDizinGuvenli(sk) || !dosyaAdiGuvenli(dosya) {
 		return false
 	}
-	fi, err := os.Lstat(filepath.Join(yedekKok, sk))
-	return err == nil && fi.IsDir() && fi.Mode()&os.ModeSymlink == 0
+	fi, err := os.Lstat(filepath.Join(yedekKok, sk, dosya))
+	return err == nil && fi.Mode().IsRegular()
 }
 
-var silinenSKRe = regexp.MustCompile(`^c_[a-z0-9_]{1,40}$`)
-
-func silinenSKGecerli(sk string) bool { return silinenSKRe.MatchString(sk) }
-
-// silinenDosyalari — kaydın yedek klasöründeki, ŞU AN bu silinmiş hesaba ait sayılabilecek
-// *.tar.gz dosyaları (ad → boyut). sk başka bir canlı hostingce devralındıysa onun kayıtlı
-// yedekleri ve silinme anından sonra yazılanlar HARİÇ tutulur (başka müşterinin yedeği sızmasın/silinmesin).
-func silinenDosyalari(ctx context.Context, db *sql.DB, sk string, silinme time.Time) (map[string]int64, bool) {
-	out := map[string]int64{}
-	if !silinenSKGecerli(sk) {
-		return out, false
-	}
-	var sahipID int64
-	_ = db.QueryRowContext(ctx, `SELECT id FROM domains WHERE sistem_kullanici=? LIMIT 1`, sk).Scan(&sahipID)
-	canli := map[string]bool{}
-	if sahipID > 0 {
-		if rows, err := db.QueryContext(ctx, `SELECT dosya FROM backups WHERE domain_id=?`, sahipID); err == nil {
-			for rows.Next() {
-				var d string
-				if rows.Scan(&d) == nil {
-					canli[d] = true
-				}
-			}
-			rows.Close()
-		}
-	}
-	if !yedekDizinGuvenli(sk) {
-		return out, sahipID > 0
-	}
-	ents, err := os.ReadDir(filepath.Join(yedekKok, sk))
-	if err != nil {
-		return out, sahipID > 0
-	}
-	// Alt sınır: aynı sk'nin ÖNCEKİ silinmiş kaydından (önceki "hayat") eski dosyalar ona aittir.
-	var oncekiSilinme sql.NullTime
-	if !silinme.IsZero() {
-		_ = db.QueryRowContext(ctx, `SELECT MAX(silinme) FROM cp_silinen_yedek WHERE sistem_kullanici=? AND silinme<?`, sk, silinme).Scan(&oncekiSilinme)
-	}
-	for _, e := range ents {
-		ad := e.Name()
-		if e.IsDir() || !strings.HasSuffix(ad, ".tar.gz") || canli[ad] {
-			continue
-		}
-		fi, err := e.Info()
-		if err != nil || !fi.Mode().IsRegular() {
-			continue
-		}
-		// Silinmeden SONRA yazılan dosya hesabın sonraki "hayatına" aittir (alan adı yeniden açılıp
-		// tekrar silinmiş olabilir: o dosyalar bu kayda değil, sonraki kayda ait). Pay: sürmekte olan yedek.
-		if !silinme.IsZero() && fi.ModTime().After(silinme.Add(10*time.Minute)) {
-			continue
-		}
-		if oncekiSilinme.Valid && !fi.ModTime().After(oncekiSilinme.Time.Add(10*time.Minute)) {
-			continue
-		}
-		out[ad] = fi.Size()
-	}
-	return out, sahipID > 0
-}
-
-type silinenSatir struct {
-	ID         int64    `json:"id"`
-	AlanAdi    string   `json:"alan_adi"`
-	Sistem     string   `json:"sistem_kullanici"`
-	ResellerID int64    `json:"reseller_id"`
-	Silinme    string   `json:"silinme"`
-	SonKullan  string   `json:"son_kullanma"` // boş = otomatik silinmez
-	DosyaSayi  int      `json:"dosya_sayisi"`
-	BoyutB     int64    `json:"boyut_b"`
-	Dosyalar   []string `json:"dosyalar"`
-	UzakHedef  bool     `json:"uzak_hedef"`
-	YerelVar   bool     `json:"yerel_var"`
-	Durum      string   `json:"durum"`
-	SonHata    string   `json:"son_hata,omitempty"`
-}
-
-// SilinenListe: GET /admin/silinen-yedekler
+// SilinenListe: GET /admin/silinen-yedekler — sk'ya göre gruplu yetim yedekler.
 func (h *Handlers) SilinenListe(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.DB.QueryContext(r.Context(),
-		`SELECT id, alan_adi, sistem_kullanici, reseller_id, DATE_FORMAT(silinme,'%Y-%m-%d %H:%i'), silinme,
-		        COALESCE(DATE_FORMAT(son_kullanma,'%Y-%m-%d %H:%i'),''), dosyalar,
-		        hedef_host<>'', durum, son_hata
-		 FROM cp_silinen_yedek ORDER BY id DESC LIMIT 500`)
+		`SELECT id, sistem_kullanici, alan_adi, reseller_id, dosya, boyut_b,
+		        DATE_FORMAT(created_at,'%Y-%m-%d %H:%i'), DATE_FORMAT(silinme,'%Y-%m-%d %H:%i'),
+		        COALESCE(DATE_FORMAT(son_kullanma,'%Y-%m-%d %H:%i'),'')
+		 FROM backups WHERE `+yetimKosulu+` ORDER BY silinme DESC, id DESC LIMIT ?`, silinenSatirLimit)
 	if err != nil {
 		log.Printf("silinen yedek: liste: %v", err)
 		httpx.WriteError(w, http.StatusInternalServerError, "liste okunamadı")
 		return
 	}
 	defer rows.Close()
-	out := []silinenSatir{}
+	out := []*silinenGrup{}
+	idx := map[string]*silinenGrup{}
 	for rows.Next() {
-		var s silinenSatir
-		var js string
-		var uzak int
-		var silinme time.Time
-		if rows.Scan(&s.ID, &s.AlanAdi, &s.Sistem, &s.ResellerID, &s.Silinme, &silinme, &s.SonKullan,
-			&js, &uzak, &s.Durum, &s.SonHata) != nil {
+		var y silinenYedekDosya
+		var sk, alan, silinme, sonK string
+		var rid int64
+		if rows.Scan(&y.ID, &sk, &alan, &rid, &y.Dosya, &y.BoyutB, &y.Olusturma, &silinme, &sonK) != nil {
 			continue
 		}
-		s.UzakHedef = uzak == 1
-		_ = json.Unmarshal([]byte(js), &s.Dosyalar)
-		if s.Durum == "saklaniyor" {
-			dos, _ := silinenDosyalari(r.Context(), h.DB, s.Sistem, silinme)
-			s.YerelVar = len(dos) > 0
-			if s.YerelVar {
-				s.Dosyalar = s.Dosyalar[:0]
-				for ad, b := range dos {
-					s.Dosyalar = append(s.Dosyalar, ad)
-					s.BoyutB += b
-				}
-				sort.Strings(s.Dosyalar)
-			}
-			// Yerelde de uzakta da saklanacak bir şey kalmadıysa satırı gösterme (yedeksiz hesap izi).
-			if !s.YerelVar && !s.UzakHedef && len(s.Dosyalar) == 0 {
+		g := idx[sk]
+		if g == nil {
+			if len(out) >= silinenGrupLimit {
 				continue
 			}
+			g = &silinenGrup{SK: sk, AlanAdi: alan, ResellerID: rid, Silinme: silinme, SonKullanma: sonK, Yedekler: []silinenYedekDosya{}}
+			idx[sk] = g
+			out = append(out, g)
 		}
-		s.DosyaSayi = len(s.Dosyalar)
-		out = append(out, s)
+		y.Yerel = yerelDuzDosya(sk, y.Dosya)
+		g.YerelVar = g.YerelVar || y.Yerel
+		g.BoyutB += y.BoyutB
+		g.Yedekler = append(g.Yedekler, y)
+	}
+	rows.Close()
+	for _, g := range out {
+		g.DosyaSayisi = len(g.Yedekler)
+		var did int64
+		if silinenSKGecerli(g.SK) &&
+			h.DB.QueryRowContext(r.Context(), `SELECT id FROM domains WHERE sistem_kullanici=? ORDER BY id LIMIT 1`, g.SK).Scan(&did) == nil {
+			g.BaglanabilirDomainID = &did
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// SilinenTemizleBir — bir silinmiş hesabın saklanan yedeklerini kalıcı siler: önce uzak
-// kopyalar (silinemezse uzagiYoksay olmadıkça HİÇBİR ŞEY silinmez), sonra yerel dosyalar.
-// Yerel silme yalnız silinenDosyalari'nın döndürdüğü dosyalardır; sk'yi başka bir canlı hosting
-// devraldıysa onun dosyalarına dokunulmaz.
-func SilinenTemizleBir(ctx context.Context, db *sql.DB, id int64, uzagiYoksay bool) error {
-	var alanAdi, sk, js, hTip, hHost, hKul, hParola, hDizin, durum string
-	var hPort int
-	var silinme time.Time
-	err := db.QueryRowContext(ctx,
-		`SELECT alan_adi, sistem_kullanici, dosyalar, hedef_tip, hedef_host, hedef_port, hedef_kullanici, hedef_parola, hedef_dizin, durum, silinme
-		 FROM cp_silinen_yedek WHERE id=?`, id).
-		Scan(&alanAdi, &sk, &js, &hTip, &hHost, &hPort, &hKul, &hParola, &hDizin, &durum, &silinme)
-	if err != nil {
-		return err
-	}
-	if durum != "saklaniyor" {
-		return nil
-	}
-	yerel, devralindi := silinenDosyalari(ctx, db, sk, silinme)
-	var dosyalar []string
-	_ = json.Unmarshal([]byte(js), &dosyalar)
-	uzakAdlar := map[string]bool{}
-	for _, f := range dosyalar {
-		if f == filepath.Base(f) {
-			uzakAdlar[f] = true
-		}
-	}
-	for f := range yerel {
-		uzakAdlar[f] = true
-	}
-
-	if !uzagiYoksay && len(uzakAdlar) > 0 {
-		var d *Destination
-		if strings.TrimSpace(hHost) != "" {
-			d = &Destination{Tip: hTip, Host: hHost, Port: hPort, Kullanici: hKul,
-				Parola: gizli.CozBagli(hParola, "yedek"), UzakDizin: hDizin, Aktif: true}
-		}
-		var ilk error
-		kalan := 0
-		for f := range uzakAdlar {
-			// ErrLftpYok da HATA: uzak hedef tanımlıyken lftp yoksa kopya silinemedi demektir; sessizce
-			// geçmek uzak yedeği (ve parolası silineceği için bir daha temizlenemeyecek) yetim bırakırdı.
-			if e := yedekUzaktanSilHedefle(ctx, db, d, f); e != nil {
-				kalan++
-				if ilk == nil {
-					ilk = e
-				}
-			}
-		}
-		if kalan > 0 {
-			msg := fmt.Sprintf("%d yedeğin uzak kopyası silinemedi: %v", kalan, ilk)
-			if d != nil && len(d.Parola) >= 3 {
-				msg = strings.ReplaceAll(msg, d.Parola, "***")
-			}
-			if len(msg) > 900 {
-				msg = msg[:900]
-			}
-			_, _ = db.ExecContext(ctx, `UPDATE cp_silinen_yedek SET son_hata=? WHERE id=?`, msg, id)
-			return errors.New(msg)
-		}
-	}
-	var hata []string
-	for f := range yerel {
-		if e := os.Remove(filepath.Join(yedekKok, sk, f)); e != nil && !os.IsNotExist(e) {
-			hata = append(hata, e.Error())
-		}
-	}
-	if len(hata) > 0 {
-		msg := "yerel dosya silinemedi: " + hata[0]
-		_, _ = db.ExecContext(ctx, `UPDATE cp_silinen_yedek SET son_hata=? WHERE id=?`, msg, id)
-		return errors.New(msg)
-	}
-	// Dizin yalnız sk'yi kimse devralmadıysa ve boşsa kaldırılır (Remove: dolu dizine dokunmaz).
-	if !devralindi {
-		_ = os.Remove(filepath.Join(yedekKok, sk))
-	}
-	_, err = db.ExecContext(ctx,
-		`UPDATE cp_silinen_yedek SET durum='temizlendi', temizlenme=NOW(), son_hata='', hedef_parola='' WHERE id=?`, id)
-	return err
-}
-
-// SilinenSupur — süresi dolanları temizler (günde bir, 04:00 turu).
-func SilinenSupur(ctx context.Context, db *sql.DB) {
-	if !silinenSupurKilit.TryLock() {
-		return // zaten çalışıyor (elle tetiklenen tur + saatlik tur çakışmasın)
-	}
-	defer silinenSupurKilit.Unlock()
-	rows, err := db.QueryContext(ctx,
-		`SELECT id FROM cp_silinen_yedek WHERE durum='saklaniyor' AND son_kullanma IS NOT NULL AND son_kullanma<=NOW() ORDER BY id LIMIT 200`)
-	if err != nil {
-		log.Printf("silinen yedek süpürme: %v", err)
-		return
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
-		}
-	}
-	rows.Close()
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			log.Printf("silinen yedek süpürme: süre doldu, kalanı yarın")
-			break
-		}
-		if e := SilinenTemizleBir(ctx, db, id, false); e != nil {
-			log.Printf("silinen yedek %d temizlenemedi (yarın tekrar denenir): %v", id, e)
-		} else {
-			log.Printf("silinen yedek %d süresi doldu, temizlendi", id)
-		}
-	}
-	_, _ = db.ExecContext(ctx, `DELETE FROM cp_silinen_yedek WHERE durum='temizlendi' AND temizlenme < DATE_SUB(NOW(), INTERVAL ? DAY)`, silinenKayitTutma)
-}
-
-// SilinenSil: DELETE /admin/silinen-yedekler/{id}[?uzagi_yoksay=1] — süreyi beklemeden kalıcı siler.
-func (h *Handlers) SilinenSil(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	yoksay := r.URL.Query().Get("uzagi_yoksay") == "1"
-	var alanAdi string
-	if err := h.DB.QueryRowContext(r.Context(), `SELECT alan_adi FROM cp_silinen_yedek WHERE id=?`, id).Scan(&alanAdi); err != nil {
-		httpx.WriteError(w, http.StatusNotFound, "kayıt bulunamadı")
-		return
-	}
-	kctx, iptal := httpx.KopukBaglam(r, 30*time.Minute)
-	defer iptal()
-	uid, kul := middleware.Aktor(r)
-	if err := SilinenTemizleBir(kctx, h.DB, id, yoksay); err != nil {
-		log.Printf("silinen yedek %d silme: %v", id, err)
-		httpx.WriteJSON(w, http.StatusConflict, map[string]any{"ok": false, "hata": err.Error(), "uzagi_yoksay": true})
-		return
-	}
-	httpx.Denetim(h.DB, r, uid, kul, "silinen-yedek.temizle", alanAdi, fmt.Sprintf("kayıt=%d uzak_yoksay=%v", id, yoksay), 0, true)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// SilinenIndir: GET /admin/silinen-yedekler/{id}/indir?dosya=<ad> — saklanan yedeği indirir.
+// SilinenIndir: GET /admin/silinen-yedekler/yedek/{bid}/indir — YALNIZ yetim satırın düz dosyası.
 func (h *Handlers) SilinenIndir(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	ad := r.URL.Query().Get("dosya")
-	var sk, durum, alanAdi string
-	var silinme time.Time
-	if err := h.DB.QueryRowContext(r.Context(), `SELECT sistem_kullanici, durum, alan_adi, silinme FROM cp_silinen_yedek WHERE id=?`, id).
-		Scan(&sk, &durum, &alanAdi, &silinme); err != nil || durum != "saklaniyor" {
-		httpx.WriteError(w, http.StatusNotFound, "kayıt bulunamadı")
+	bid, _ := strconv.ParseInt(chi.URLParam(r, "bid"), 10, 64)
+	var sk, dosya, alanAdi string
+	if err := h.DB.QueryRowContext(r.Context(),
+		`SELECT sistem_kullanici, dosya, alan_adi FROM backups WHERE id=? AND `+yetimKosulu, bid).
+		Scan(&sk, &dosya, &alanAdi); err != nil {
+		httpx.WriteError(w, http.StatusNotFound, "yedek bulunamadı")
 		return
 	}
-	dos, _ := silinenDosyalari(r.Context(), h.DB, sk, silinme)
-	if _, ok := dos[ad]; !ok || ad != filepath.Base(ad) {
-		httpx.WriteError(w, http.StatusNotFound, "yedek dosyası bulunamadı")
+	if !yerelDuzDosya(sk, dosya) {
+		httpx.WriteError(w, http.StatusNotFound, "yedek dosyası diskte yok")
 		return
 	}
-	f, err := os.Open(filepath.Join(yedekKok, sk, ad))
+	f, err := os.Open(filepath.Join(yedekKok, sk, dosya))
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "yedek dosyası diskte yok")
 		return
 	}
 	defer f.Close()
 	fi, err := f.Stat()
-	if err != nil || fi.IsDir() {
+	if err != nil || !fi.Mode().IsRegular() {
 		httpx.WriteError(w, http.StatusNotFound, "yedek dosyası okunamadı")
 		return
 	}
 	uid, kul := middleware.Aktor(r)
-	httpx.Denetim(h.DB, r, uid, kul, "silinen-yedek.indir", alanAdi, ad, 0, true)
+	httpx.Denetim(h.DB, r, uid, kul, "silinen-yedek.indir", alanAdi, dosya, 0, true)
 	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(ad, `"`, "")+`"`)
-	http.ServeContent(w, r, ad, fi.ModTime(), f)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(dosya, `"`, "")+`"`)
+	http.ServeContent(w, r, dosya, fi.ModTime(), f)
+}
+
+// SilinenSil: DELETE /admin/silinen-yedekler/{sk}[?uzagi_yoksay=1] — o sk'nın yetim yedeklerini
+// süreyi beklemeden kalıcı siler. Uzak silinemeyen satır + dosya KALIR (409).
+func (h *Handlers) SilinenSil(w http.ResponseWriter, r *http.Request) {
+	sk := chi.URLParam(r, "sk")
+	if !silinenSKGecerli(sk) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz sistem kullanıcısı")
+		return
+	}
+	yoksay := r.URL.Query().Get("uzagi_yoksay") == "1"
+	rows, err := h.DB.QueryContext(r.Context(),
+		`SELECT id, domain_id, dosya FROM backups WHERE sistem_kullanici=? AND `+yetimKosulu+` ORDER BY id LIMIT ?`, sk, silinenSatirLimit)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "kayıtlar okunamadı")
+		return
+	}
+	type kayit struct {
+		id, domainID int64
+		dosya        string
+	}
+	var liste []kayit
+	for rows.Next() {
+		var k kayit
+		if rows.Scan(&k.id, &k.domainID, &k.dosya) == nil {
+			liste = append(liste, k)
+		}
+	}
+	rows.Close()
+	if len(liste) == 0 {
+		httpx.WriteError(w, http.StatusNotFound, "silinmiş hesaba ait yedek bulunamadı")
+		return
+	}
+	kctx, iptal := httpx.KopukBaglam(r, 30*time.Minute)
+	defer iptal()
+	uid, kul := middleware.Aktor(r)
+	var ilk error
+	kalan, silinen := 0, 0
+	for _, k := range liste {
+		if e := yetimYedegiSil(kctx, h.DB, k.id, k.domainID, sk, k.dosya, yoksay); e != nil {
+			kalan++
+			if ilk == nil {
+				ilk = e
+			}
+			continue
+		}
+		silinen++
+	}
+	if kalan > 0 {
+		log.Printf("silinen yedek %s silme: %d/%d silinemedi: %v", sk, kalan, len(liste), ilk)
+		httpx.WriteJSON(w, http.StatusConflict, map[string]any{
+			"ok": false, "hata": fmt.Sprintf("%d yedek silinemedi (kayıt ve dosya korundu): %v", kalan, ilk),
+			"silinen": silinen, "uzagi_yoksay": true,
+		})
+		return
+	}
+	// Boşalan sk dizini: yalnız canlı bir hosting sk'yı kullanmıyorsa ve dizin boşsa (os.Remove dolu dizine dokunmaz).
+	var canli int
+	_ = h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM domains WHERE sistem_kullanici=?`, sk).Scan(&canli)
+	if canli == 0 && yedekDizinGuvenli(sk) {
+		_ = os.Remove(filepath.Join(yedekKok, sk))
+	}
+	httpx.Denetim(h.DB, r, uid, kul, "silinen-yedek.temizle", sk, fmt.Sprintf("yedek=%d uzak_yoksay=%v", silinen, yoksay), 0, true)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "silinen": silinen})
+}
+
+// SilinenBagla: POST /admin/silinen-yedekler/{sk}/bagla {"domain_id":N} — yönetici kararıyla yetim
+// yedekleri canlı bir domaine bağlar (sahip koşulu YOK; hedefin sk'sı eşit olmalı).
+func (h *Handlers) SilinenBagla(w http.ResponseWriter, r *http.Request) {
+	sk := chi.URLParam(r, "sk")
+	if !silinenSKGecerli(sk) {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz sistem kullanıcısı")
+		return
+	}
+	var req struct {
+		DomainID int64 `json:"domain_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.DomainID <= 0 {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
+	var hedefSK, alan string
+	if err := h.DB.QueryRowContext(r.Context(), `SELECT sistem_kullanici, alan_adi FROM domains WHERE id=?`, req.DomainID).Scan(&hedefSK, &alan); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
+		} else {
+			httpx.WriteError(w, http.StatusInternalServerError, "domain okunamadı")
+		}
+		return
+	}
+	if hedefSK != sk {
+		httpx.WriteError(w, http.StatusBadRequest, "hedef domainin sistem kullanıcısı yedeklerinkiyle aynı değil")
+		return
+	}
+	res, err := h.DB.ExecContext(r.Context(),
+		`UPDATE backups SET domain_id=?, silinme=NULL, son_kullanma=NULL WHERE sistem_kullanici=? AND `+yetimKosulu, req.DomainID, sk)
+	if err != nil {
+		log.Printf("silinen yedek bağla (%s): %v", sk, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "bağlanamadı")
+		return
+	}
+	n, _ := res.RowsAffected()
+	uid, kul := middleware.Aktor(r)
+	httpx.Denetim(h.DB, r, uid, kul, "silinen-yedek.bagla", alan, fmt.Sprintf("sk=%s baglanan=%d", sk, n), req.DomainID, true)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "baglanan": n})
 }
 
 // SilinenAyarGet: GET /admin/silinen-yedekler/ayar → {gun: null|N}  (null = hostingin yedek slotu)

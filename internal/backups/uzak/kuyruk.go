@@ -58,7 +58,7 @@ func KuyrugaAl(ctx context.Context, db *sql.DB, yedekID int64) (isID int64, yeni
 	var domainID int64
 	var dosya, tip string
 	var jobVar int
-	err = db.QueryRowContext(ctx, `SELECT domain_id, dosya, tip, job_id IS NOT NULL FROM backups WHERE id=?`, yedekID).
+	err = db.QueryRowContext(ctx, `SELECT domain_id, dosya, tip, job_id IS NOT NULL FROM backups b WHERE b.id=? AND EXISTS (SELECT 1 FROM domains d WHERE d.id=b.domain_id)`, yedekID).
 		Scan(&domainID, &dosya, &tip, &jobVar)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, ErrYedekYok

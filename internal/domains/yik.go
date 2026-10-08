@@ -19,7 +19,7 @@ import (
 // orphan tablolar ve domains satırı) YOK eder. Tekil silme (Delete) ile bayi silme
 // zinciri AYNI yolu kullanır: iki yol ayrışırsa biri kalıntı bırakır.
 // 🔴 YEDEKLER SİLME İLE İLGİLENMEZ: yedek dizini ve uzak kopyalar olduğu yerde kalır; silme
-// yalnız best-effort iz bırakır (backups.SilinenIsaretle), süre dolunca günlük tur temizler.
+// yalnız backups satırlarını yetim işaretler (backups.SilinenIz.Yaz; FK yok, satırlar kalır), süre dolunca günlük tur temizler.
 // Çağıran: kilit.Bayi kilidini tutar ve denetim kaydını yazar.
 // Dönen kapsam, satır gitmeden ÖNCE çözülen domains.reseller_id'dir (denetim için).
 // İstemci kopsa da yıkım yarım kalmasın diye çağıran context.WithoutCancel vermelidir.
@@ -27,8 +27,8 @@ func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, i
 	var iz *backups.SilinenIz
 	if isDemo == 0 {
 		// Yedekler silme akışından BAĞIMSIZDIR: dizine/uzak kopyalara dokunulmaz, yedek yüzünden
-		// silme başarısız olmaz. Yalnız best-effort DB izi: bilgi şimdi toplanır (domains satırı
-		// gidince kaybolur), iz satır SİLİNDİKTEN sonra yazılır.
+		// silme başarısız olmaz. Yalnız best-effort yetim işareti: alan adı/sk/bayi/slot şimdi okunur
+		// (domains satırı gidince kaybolur), backups UPDATE'i satır SİLİNDİKTEN sonra yapılır.
 		iz = backups.SilinenIzHazirla(ctx, db, id, alanAdi, sk)
 		// MariaDB'deki gerçek DB'leri kaldır (CASCADE FK sadece panel DB metadata'sını siler)
 		_ = hesaplar.MySQLDropAllForDomain(db, id)
@@ -64,6 +64,10 @@ func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, i
 		return kapsam, err
 	}
 	iz.Yaz(ctx, db)
+	if isDemo != 0 {
+		// Demo hesabın yedeği saklanmaz: FK (eski CASCADE) kalktığı için satırlar elle temizlenir.
+		_, _ = db.ExecContext(ctx, `DELETE FROM backups WHERE domain_id=?`, id)
+	}
 	return kapsam, nil
 }
 
