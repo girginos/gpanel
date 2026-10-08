@@ -139,18 +139,19 @@ fi
 #
 # build-assets.sh artik: ucretliyi (mail, calistirici) gecici yola derler,
 # gosp-paketle ile .gosp uretir, DUZ ikiliyi SILER; whitelabel duz kalir.
-# 🔴 ORTAK GOOGLE DRIVE OAUTH İSTEMCİSİ — ikiliye GÖMÜLÜR (2026-10-08).
-# ONCESI: bu betik istemciyi hic gommuyordu (build-assets.sh yalniz GOSP_GDRIVE_CLIENT_ID/SECRET
-# env'i verilirse gomer; verilmedi) ve kurulum/guncelleme betikleri /etc/girginospanel/
-# gdrive-istemci.json'i dagitmiyor. Sonuc: musteri sunucusunda "Google ile bagla" daima
-# "Ortak Google istemcisi bu surumde yapilandirilmamis" verirdi; yalniz dosyasi olan 181 calisirdi.
-# Kaynak sirasi: env (GOSP_GDRIVE_CLIENT_ID/SECRET) > $GOSP_GDRIVE_DOSYA (varsayilan
-# /etc/girginospanel/gdrive-istemci.json; duz ya da Google "JSON indir" bicimi). Degerler ASLA
-# yazdirilmaz. Bilerek gommeden uretmek icin GOSP_GDRIVE_YOK=1.
-if [ -z "${GOSP_GDRIVE_CLIENT_ID:-}" ] || [ -z "${GOSP_GDRIVE_CLIENT_SECRET:-}" ]; then
+# 🔴 ORTAK GOOGLE DRIVE OAUTH İSTEMCİSİ — varsayılan GÖMÜLMEZ (2026-10-08 kullanıcı kararı:
+# "yedek sistemi şimdilik ftp/sftp mantığında kalsın, Google'ı gelecekte ekleriz").
+# Secret herkese açık yayın ikilisine girerdi; gelecekte lisans sunucusundan teslim ya da
+# gizleme kararı verilince açılır. Bilerek gömmek için: GOSP_GDRIVE_GOM=1 (kaynak sırası:
+# env GOSP_GDRIVE_CLIENT_ID/SECRET > $GOSP_GDRIVE_DOSYA, varsayılan
+# /etc/girginospanel/gdrive-istemci.json; duz ya da Google "JSON indir" bicimi). Degerler
+# ASLA yazdirilmaz. Gomulmeyen pakette "Google ile bagla" musteride "Ortak Google istemcisi bu
+# surumde yapilandirilmamis" der; "Gelismis"ten kendi istemcisini girebilir.
+unset GOSP_GDRIVE_CLIENT_ID GOSP_GDRIVE_CLIENT_SECRET 2>/dev/null || true
+if [ "${GOSP_GDRIVE_GOM:-0}" = "1" ]; then
   GDRIVE_DOSYA="${GOSP_GDRIVE_DOSYA:-/etc/girginospanel/gdrive-istemci.json}"
-  if [ -r "$GDRIVE_DOSYA" ]; then
-    GDRIVE_CIFT=$(python3 - "$GDRIVE_DOSYA" <<'PYGD'
+  [ -r "$GDRIVE_DOSYA" ] || dur "GOSP_GDRIVE_GOM=1 ama ortak istemci dosyası okunamıyor: $GDRIVE_DOSYA"
+  GDRIVE_CIFT=$(python3 - "$GDRIVE_DOSYA" <<'PYGD'
 import json, re, sys
 d = json.load(open(sys.argv[1]))
 if isinstance(d.get("installed"), dict):
@@ -164,25 +165,20 @@ if not re.fullmatch(r"[0-9A-Za-z._-]{8,128}", s):
 print(i)
 print(s)
 PYGD
-    ) || dur "ortak Google istemci dosyası okunamadı/geçersiz biçim: $GDRIVE_DOSYA"
-    GOSP_GDRIVE_CLIENT_ID=$(printf '%s\n' "$GDRIVE_CIFT" | sed -n 1p)
-    GOSP_GDRIVE_CLIENT_SECRET=$(printf '%s\n' "$GDRIVE_CIFT" | sed -n 2p)
-    unset GDRIVE_CIFT
-  fi
-fi
-if [ -n "${GOSP_GDRIVE_CLIENT_ID:-}" ] && [ -n "${GOSP_GDRIVE_CLIENT_SECRET:-}" ]; then
+  ) || dur "ortak Google istemci dosyası geçersiz biçim: $GDRIVE_DOSYA"
+  GOSP_GDRIVE_CLIENT_ID=$(printf '%s\n' "$GDRIVE_CIFT" | sed -n 1p)
+  GOSP_GDRIVE_CLIENT_SECRET=$(printf '%s\n' "$GDRIVE_CIFT" | sed -n 2p)
+  unset GDRIVE_CIFT
   export GOSP_GDRIVE_CLIENT_ID GOSP_GDRIVE_CLIENT_SECRET
   ok "ortak Google Drive istemcisi ikiliye gömülecek (değerler gösterilmez)"
-elif [ "${GOSP_GDRIVE_YOK:-0}" = "1" ]; then
-  uyar "ortak Google Drive istemcisi GÖMÜLMEYECEK (GOSP_GDRIVE_YOK=1) — müşteride 'Google ile bağlan' çalışmaz"
 else
-  dur "ortak Google Drive istemcisi yok (env GOSP_GDRIVE_CLIENT_ID/SECRET ya da /etc/girginospanel/gdrive-istemci.json) — bilerek atlamak için GOSP_GDRIVE_YOK=1"
+  ok "ortak Google Drive istemcisi GÖMÜLMEYECEK (varsayılan; gömmek için GOSP_GDRIVE_GOM=1)"
 fi
 GOSP_SURUM="$SURUM_TAM" bash "$S/scripts/build-assets.sh" || dur "build-assets.sh (eklenti yukleri + .gosp)"
 
 # 🔴 KAPI: gömülü istemci gerçekten ikilide mi? (build-assets.sh env'i sessizce yok sayarsa
 # paket yine "Google ile bağlan" kıran biçimde çıkardı — bu kapı o sessiz başarısızlığı kapatır.)
-if [ -n "${GOSP_GDRIVE_CLIENT_ID:-}" ]; then
+if [ "${GOSP_GDRIVE_GOM:-0}" = "1" ] && [ -n "${GOSP_GDRIVE_CLIENT_ID:-}" ]; then
   grep -aqF -- "$GOSP_GDRIVE_CLIENT_ID" "$A/girginospanel-server" || dur "ortak Google istemcisi ikilide YOK (build-assets.sh gömmedi)"
   ok "ortak Google Drive istemcisi ikilide gömülü"
 fi
