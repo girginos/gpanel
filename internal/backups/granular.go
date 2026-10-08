@@ -25,6 +25,7 @@ import (
 	"girginospanel/internal/archivex"
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/kiraci"
 	"girginospanel/internal/kota"
 
 	"github.com/go-chi/chi/v5"
@@ -713,18 +714,54 @@ func birDBGeriYukle(db *sql.DB, domainID int64, tmp, sk, srcDB, hedefDB string) 
 	return "yeni ‘" + hedefDB + "’ veritabanına geri yüklendi", nil
 }
 
+// restoreKiraciKomut: geri yükleme kopyalarını KİRACI kimliğinde (runuser -u <sk>) çalıştırır.
+// 🔴 Seçili dosya geri yükleme (mod=dosya; MusteriScope — kiracı çağırır) kök olarak
+// os.MkdirAll + `cp -a` ile /home/<sk>/<yol> altına yazıyordu: kiracı, yedek ALINDIKTAN sonra
+// canlı ağaçtaki bir dizini symlink'e çevirir (x -> /etc) ve "x/ld.so.preload" geri yüklemesi
+// ister → kök yol dizgesini izleyip /etc/ld.so.preload'a kiracı içeriğini yazar (belirleyici,
+// yarışsız keyfi kök dosya yazma). Kiracı kimliğinde çekirdek DAC'ı uygular → kiracı yalnız
+// zaten yazabildiği yere yazar. Seam: testler gerçek runuser yerine sıradan komut verir.
+var restoreKiraciKomut = func(sk string, argv ...string) ([]byte, error) {
+	ctx, iptal := context.WithTimeout(context.Background(), time.Hour)
+	defer iptal()
+	cmd, err := kiraci.Kiraci{Kul: sk, Ev: "/home/" + sk}.Komut(ctx, argv...)
+	if err != nil {
+		return nil, err
+	}
+	return cmd.CombinedOutput()
+}
+
+// sahnelemeyiKiraciyaDevret: seam (testler sahte kullanıcıyla çalışır).
+var sahnelemeyiKiraciyaDevret = func(sk, src string) error {
+	if out, err := exec.Command("chown", "-R", sk+":"+sk, src).CombinedOutput(); err != nil {
+		return fmt.Errorf("sahneleme kiracıya devredilemedi: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // secilenDosyalariGeriYukle: arsivden yalniz secilen yollari kopyalar.
 // hedef=klasor → /home/<sk>/geri-yukleme-<stamp>/ (hicbir sey ezilmez, önerilen).
 // hedef=yerinde → orijinal konuma (yalniz secilenler; tum home ezilmez).
+// Tüm yazma işlemleri kiracı kimliğinde (bkz. restoreKiraciKomut).
 func secilenDosyalariGeriYukle(tmp, sk string, yollar []string, hedef string) (int, string, error) {
+	if !reSKGuvenli.MatchString(sk) {
+		return 0, "", fmt.Errorf("güvenlik: geçersiz sistem kullanıcısı")
+	}
 	src := filepath.Join(tmp, sk)
+	// Sahneleme (kök sahipli /var/tmp/gosp-restore-*) kiracının okuyabileceği hale getirilir:
+	// tmp'ye yalnız çalıştırma (0711) + tmp/<sk> ağacı kiracıya devri. chown -R bağ İZLEMEZ
+	// (coreutils -R: lchown), arşivdeki symlink'ler yalnız kendisi devredilir.
+	_ = os.Chmod(tmp, 0o711)
+	if err := sahnelemeyiKiraciyaDevret(sk, src); err != nil {
+		return 0, "", err
+	}
 	kokHedef := "/home/" + sk
 	altKlasor := ""
 	if hedef != "yerinde" {
 		altKlasor = "geri-yukleme-" + time.Now().Format("20060102-150405")
 		kokHedef = filepath.Join("/home/"+sk, altKlasor)
-		if err := os.MkdirAll(kokHedef, 0755); err != nil {
-			return 0, "", fmt.Errorf("hedef klasör: %w", err)
+		if out, err := restoreKiraciKomut(sk, "mkdir", "-p", "--", kokHedef); err != nil {
+			return 0, "", fmt.Errorf("hedef klasör: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
 	}
 	n := 0
@@ -741,15 +778,15 @@ func secilenDosyalariGeriYukle(tmp, sk string, yollar []string, hedef string) (i
 			continue
 		}
 		d := filepath.Join(kokHedef, rel)
-		if err := os.MkdirAll(filepath.Dir(d), 0755); err != nil {
+		if _, err := restoreKiraciKomut(sk, "mkdir", "-p", "--", filepath.Dir(d)); err != nil {
 			continue
 		}
-		if _, err := exec.Command("cp", "-a", s, d).CombinedOutput(); err != nil {
+		// -dR: bağları olduğu gibi kopyala; mod+zaman damgası korunur (sahiplik/xattr kiracıda zaten doğru).
+		if _, err := restoreKiraciKomut(sk, "cp", "-dR", "--preserve=mode,timestamps", "--", s, d); err != nil {
 			continue
 		}
 		n++
 	}
-	_, _ = exec.Command("chown", "-R", sk+":"+sk, kokHedef).CombinedOutput()
 	selinuxetiket.LoglaYol("yedek geri yukle (secili)", kokHedef)
 	return n, altKlasor, nil
 }
