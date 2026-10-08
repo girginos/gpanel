@@ -100,7 +100,7 @@ func (h *Handlers) Schedule(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Aktif bool `json:"aktif"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -206,7 +206,7 @@ func (h *Handlers) Queue(w http.ResponseWriter, r *http.Request) {
 		MaxJobs    int    `json:"max_jobs"`
 		Connection string `json:"connection"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}

@@ -159,7 +159,7 @@ func (h *Handlers) ErisimKaydet(w http.ResponseWriter, r *http.Request) {
 		Aktif      bool   `json:"aktif"`
 		Varsayilan string `json:"varsayilan"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -216,7 +216,7 @@ func (h *Handlers) ErisimKuralEkle(w http.ResponseWriter, r *http.Request) {
 		CIDR     string `json:"cidr"`
 		Aciklama string `json:"aciklama"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}

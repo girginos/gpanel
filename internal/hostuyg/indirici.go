@@ -40,9 +40,10 @@ var IndirmeCacheDir = "/var/tmp/gpanel-apps-cache"
 
 // Indir — URL'den download + SHA256 verify. Dönen: geçici dosya yolu.
 // Hata halinde geçici dosya silinir.
-func Indir(url, beklenenSHA256 string) (string, error) {
+func Indir(url, beklenenSHA256 string) (yol string, err error) {
 	// HEAD önce — boyut kontrolü
-	head, err := http.Head(url) //nolint:gosec // G107: url yalniz derleme-ici Katalog'dan gelir (KatalogAra kod->tarif; kullanici yalniz kod secer) -> kullanici-kontrollu URL/SSRF yok; ayrica SHA256 zorunlu dogrulanir.
+	headClient := &http.Client{Timeout: 30 * time.Second}
+	head, err := headClient.Head(url) //nolint:gosec // G107: url yalniz derleme-ici Katalog'dan gelir (KatalogAra kod->tarif; kullanici yalniz kod secer) -> kullanici-kontrollu URL/SSRF yok; ayrica SHA256 zorunlu dogrulanir.
 	if err == nil {
 		defer head.Body.Close()
 		if head.ContentLength > MaxIndirmeBoyutu {

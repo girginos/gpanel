@@ -74,7 +74,7 @@ type kurGovde struct {
 // unit dosyası. Gerçek indirme + start SONRAKI faz.
 func (h *Handler) Kur(w http.ResponseWriter, r *http.Request) {
 	var g kurGovde
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&g); err != nil {
 		yazHata(w, 400, "geçersiz gövde: "+err.Error())
@@ -262,7 +262,7 @@ func (h *Handler) YedekAl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var g yedekGovde
-	if err := json.NewDecoder(r.Body).Decode(&g); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&g); err != nil && !errors.Is(err, io.EOF) {
 		http.Error(w, "geçersiz gövde", http.StatusBadRequest)
 		return
 	}
@@ -305,7 +305,7 @@ func (h *Handler) YedekGeriYukle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var g restoreGovde
-	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&g); err != nil {
 		yazHata(w, 400, "geçersiz gövde")
 		return
 	}

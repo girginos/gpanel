@@ -166,7 +166,7 @@ func (h *Handlers) mutasyonHazir(w http.ResponseWriter, r *http.Request, dizin s
 // POST /domains/{id}/wordpress/eklenti  {dizin, islem: guncelle|tumunu-guncelle|aktif|pasif, ad}
 func (h *Handlers) EklentiIslem(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin, Islem, Ad string }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -180,7 +180,7 @@ func (h *Handlers) EklentiIslem(w http.ResponseWriter, r *http.Request) {
 // POST /domains/{id}/wordpress/tema  {dizin, islem: guncelle|tumunu-guncelle|aktif, ad}
 func (h *Handlers) TemaIslem(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin, Islem, Ad string }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -236,7 +236,7 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 		UserID int    `json:"user_id"`
 		Parola string `json:"parola"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -277,7 +277,7 @@ func (h *Handlers) KullaniciParola(w http.ResponseWriter, r *http.Request) {
 // (wp-content'e dokunmadan), DB'yi günceller, tekrar doğrular.
 func (h *Handlers) Onar(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin string }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -321,7 +321,7 @@ func (h *Handlers) Onar(w http.ResponseWriter, r *http.Request) {
 // POST /domains/{id}/wordpress/arac  {dizin, islem: bakim-ac|bakim-kapat|cache-temizle|tumunu-guncelle}
 func (h *Handlers) AracIslem(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Dizin, Islem string }
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}

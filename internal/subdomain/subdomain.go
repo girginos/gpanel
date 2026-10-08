@@ -123,7 +123,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		AltAd    string `json:"alt_ad"`
 		PHPSurum string `json:"php_surum"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}

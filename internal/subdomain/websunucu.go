@@ -51,6 +51,23 @@ func subNginxDefaults() subNginx {
 		FastcgiCacheDakika: 60, BrowserCache: true, BrowserCacheGun: 30, ClientMaxBodyMB: 64}
 }
 
+// subNginxDogrula — sayısal alanlar vhost'a %d ile yazılır. Negatif/aşırı değer
+// (fastcgi_cache_valid -1m gibi) `nginx -t`yi düşürür: ayar zaten DB'ye yazıldığı için
+// alt alanın vhost'u sonraki HER yeniden kurulumda (askı, SSL, heal) başarısız kalırdı.
+func subNginxDogrula(n subNginx) error {
+	switch {
+	case n.HSTSMaxAge < 0 || n.HSTSMaxAge > 63072000:
+		return fmt.Errorf("hsts_max_age 0..63072000 olmalı")
+	case n.FastcgiCacheDakika < 0 || n.FastcgiCacheDakika > 1440:
+		return fmt.Errorf("fastcgi_cache_dakika 0..1440 olmalı")
+	case n.BrowserCacheGun < 0 || n.BrowserCacheGun > 3650:
+		return fmt.Errorf("browser_cache_gun 0..3650 olmalı")
+	case n.ClientMaxBodyMB < 0 || n.ClientMaxBodyMB > 8192:
+		return fmt.Errorf("client_max_body_mb 0..8192 olmalı")
+	}
+	return nil
+}
+
 func subNginxGet(ctx context.Context, db *sql.DB, sid int64) (subNginx, error) {
 	n := subNginxDefaults()
 	row := db.QueryRowContext(ctx, `SELECT hdr_x_content_type, hdr_x_xss, hdr_referrer, hdr_permissions,
@@ -342,8 +359,12 @@ func (h *Handlers) WebPut(w http.ResponseWriter, r *http.Request) {
 		Backend string   `json:"backend"`
 		Nginx   subNginx `json:"nginx"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
+	if err := subNginxDogrula(req.Nginx); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// ek_direktifler güvenlik doğrulaması (domain ile aynı)

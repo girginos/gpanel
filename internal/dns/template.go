@@ -329,7 +329,7 @@ func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 		Kayitlar []TemplateRow `json:"kayitlar"`
 		Meta     *TemplateMeta `json:"meta"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -337,6 +337,14 @@ func (h *Handlers) PutTemplate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
 		return
+	}
+	// Şablon satırları müşteri zone'larına SeedDefaults ile yazılır: bayi
+	// satırındaki satır sonu/'$' yönergesi başkasının zone'una enjekte olur.
+	for _, t := range req.Kayitlar {
+		if err := KayitAlanlariGecerli(t.Ad, t.Deger); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "şablon satırı geçersiz: "+err.Error())
+			return
+		}
 	}
 	tx, err := h.DB.BeginTx(r.Context(), nil)
 	if err != nil {

@@ -97,7 +97,7 @@ func (h *Handlers) PutSOA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var s SOA
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&s); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -122,6 +122,10 @@ func (h *Handlers) PutSOA(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.TTL <= 0 {
 		s.TTL = d.TTL
+	}
+	if err := SOAAlanlariGecerli(s.PrimaryNS, s.Hostmaster); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if _, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)

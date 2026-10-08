@@ -90,8 +90,35 @@ func KayitAlanlariGecerli(ad, deger string) error {
 	if strings.ContainsAny(deger, "\r\n") {
 		return errors.New("kayıt değeri satır sonu içeremez")
 	}
+	// NUL ve diğer kontrol karakterleri zone ayrıştırıcısını şaşırtır. Sekme serbest.
+	for _, c := range ad + deger {
+		if (c < 0x20 && c != '\t') || c == 0x7f {
+			return errors.New("kayıt kontrol karakteri içeremez")
+		}
+	}
 	if strings.HasPrefix(strings.TrimSpace(ad), "$") || strings.HasPrefix(strings.TrimSpace(deger), "$") {
 		return errors.New("kayıt '$' ile başlayamaz")
+	}
+	return nil
+}
+
+// SOAAlanlariGecerli: SOA primary_ns ve hostmaster zone şablonuna AYNEN yazılır
+// ({{soaHost}} / {{soaMail}}). Satır sonu, '$' yönergesi ($INCLUDE/$GENERATE),
+// ';' yorum, '(' ')' ve '"' içeren değer zone'a satır/yönerge enjekte eder
+// (örn. hostmaster "a@b\n$INCLUDE /etc/x" → named-checkzone dosyayı okur ve hata
+// çıktısı müşteriye döner). Yalnız ad/e-posta karakterlerine izin verilir.
+func SOAAlanlariGecerli(primaryNS, hostmaster string) error {
+	for _, f := range []struct{ ad, v string }{{"birincil NS", primaryNS}, {"hostmaster", hostmaster}} {
+		if len(f.v) > 255 {
+			return errors.New(f.ad + " çok uzun")
+		}
+		for _, c := range f.v {
+			ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+				c == '.' || c == '-' || c == '_' || (c == '@' && f.ad == "hostmaster") || c == '+'
+			if !ok {
+				return errors.New(f.ad + " geçersiz karakter içeriyor")
+			}
+		}
 	}
 	return nil
 }
@@ -112,7 +139,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// Kayit.Aktif bool oldugundan "gonderilmedi" ile "false" ayirt edilemiyor; ayrica
 	// *bool ile yakaliyoruz. Eskiden alan yokken Go sifiri (false) kaydi sessizce pasif
 	// yapip WriteZone WHERE aktif=1 ile zone disinda birakiyordu (E2E bulgusu).
-	ham, _ := io.ReadAll(r.Body)
+	ham, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err := json.Unmarshal(ham, &k); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
@@ -174,7 +201,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var k Kayit
-	if err := json.NewDecoder(r.Body).Decode(&k); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&k); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -257,7 +284,7 @@ func (h *Handlers) TopluSil(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		IDs []int64 `json:"ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -305,7 +332,7 @@ func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 		IDs   []int64 `json:"ids"`
 		Aktif bool    `json:"aktif"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -409,6 +436,11 @@ func SeedDefaults(ctx context.Context, db *sql.DB, domainID int64, alanAdi, ipv4
 		ad := subst(t.Ad, alanAdi, ipv4, selector, dkimTxt)
 		deger := subst(t.Deger, alanAdi, ipv4, selector, dkimTxt)
 		tip := strings.ToUpper(strings.TrimSpace(t.Tip))
+		// Eski/elle yazılmış şablon satırı zone'a enjekte olamaz (PutTemplate de doğrular).
+		if KayitAlanlariGecerli(ad, deger) != nil {
+			log.Printf("dns seed: geçersiz şablon satırı atlandı (domain=%d tip=%s)", domainID, tip)
+			continue
+		}
 		// Ayni ad+tip+deger varsa atla (idempotent)
 		var n int
 		_ = db.QueryRowContext(ctx,

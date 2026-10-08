@@ -463,7 +463,7 @@ func (h *Handlers) Kur(w http.ResponseWriter, r *http.Request) {
 		AdminKullanici string `json:"admin_kullanici"`
 		AdminEmail     string `json:"admin_email"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -783,7 +783,7 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	var greq struct {
 		Dizin string `json:"dizin"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&greq); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&greq); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -906,7 +906,7 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		Dizin string `json:"dizin"`
 		DBSil bool   `json:"db_sil"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&sreq); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&sreq); err != nil && !errors.Is(err, io.EOF) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
