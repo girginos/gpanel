@@ -117,7 +117,11 @@ type Paket = {
   fiyat_kurus: number; varsayilan: boolean; bayi_sayisi: number
 }
 
-const bos = { kullanici: '', parola: '', ad_soyad: '', paket_id: 0, max_domain: 0, max_disk_mb: 0, max_trafik_mb: 0 }
+type BayiForm = {
+  kullanici: string; parola: string; ad_soyad: string; paket_id: number
+  max_domain: number | string; max_disk_mb: number | string; max_trafik_mb: number | string; durum?: string
+}
+const bos: BayiForm = { kullanici: '', parola: '', ad_soyad: '', paket_id: 0, max_domain: 0, max_disk_mb: 0, max_trafik_mb: 0 }
 
 export default function ResellerlarPage() {
   useTranslation() // dil re-render aboneligi
@@ -125,13 +129,11 @@ export default function ResellerlarPage() {
   const toast = useToast()
   const [items, setItems] = useState<Reseller[]>([])
   const [yuk, setYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
-  const [ok, setOk] = useState<string | null>(null)
   const [paketler, setPaketler] = useState<Paket[]>([])
   const [parolaGoster, setParolaGoster] = useState(false)
   const [kopyalandi, setKopyalandi] = useState(false)
   const [modal, setModal] = useState<'yeni' | Reseller | null>(null)
-  const [form, setForm] = useState<any>(bos)
+  const [form, setForm] = useState<BayiForm>(bos)
   const [kaydet, setKaydet] = useState(false)
   const [silinen, setSilinen] = useState<number | null>(null)
   // Arka plan silme işi: is = cp_toplu_isler kimliği, bayi = silinen bayi (yedekleri bırakarak yeniden deneme için).
@@ -140,9 +142,11 @@ export default function ResellerlarPage() {
 
   function yukle() {
     setYuk(true)
-    api.get<Reseller[]>('/resellers').then(r => setItems(r.data)).catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) }).finally(() => setYuk(false))
+    api.get<Reseller[]>('/resellers').then(r => setItems(r.data)).catch(e => { const m = apiHata(e); toast.hata(cevir("İşlem başarısız"), m) }).finally(() => setYuk(false))
     api.get<Paket[]>('/reseller-plans').then(r => setPaketler(r.data)).catch(() => setPaketler([]))
   }
+  // yukle her çizimde yeni fonksiyon; yalnız açılışta bir kez çalışmalı.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(yukle, [])
   // Sayfa yenilendiyse çalışan bayi silme işini yeniden yakala (iş sunucuda sürer).
   useEffect(() => {
@@ -153,15 +157,15 @@ export default function ResellerlarPage() {
     }).catch(() => { /* iş yok / yetki yok */ })
   }, [])
 
-  function yeniAc() { setForm(bos); setModal('yeni'); setHata(null); setOk(null) }
+  function yeniAc() { setForm(bos); setModal('yeni');  }
   function duzenleAc(x: Reseller) {
     setForm({ kullanici: x.kullanici, parola: '', ad_soyad: x.ad_soyad, durum: x.durum, paket_id: x.paket_id || 0,
       max_domain: x.max_domain, max_disk_mb: x.max_disk_mb, max_trafik_mb: x.max_trafik_mb })
-    setModal(x); setHata(null); setOk(null); setParolaGoster(false); setKopyalandi(false)
+    setModal(x); setParolaGoster(false); setKopyalandi(false)
   }
 
   async function gonder(e: React.FormEvent) {
-    e.preventDefault(); setHata(null); setOk(null); setKaydet(true)
+    e.preventDefault(); setKaydet(true)
     try {
       if (modal === 'yeni') {
         await api.post('/resellers', {
@@ -169,21 +173,20 @@ export default function ResellerlarPage() {
           max_domain: Number(form.max_domain), max_disk_mb: Number(form.max_disk_mb), max_trafik_mb: Number(form.max_trafik_mb),
         })
         const yeniOk = `${cevir("Bayi")} "${form.kullanici}" ${cevir("oluşturuldu.")}`
-        setOk(yeniOk); toast.basari(yeniOk)
+        toast.basari(yeniOk)
       } else if (modal) {
-        const body: any = {
+        const body: Record<string, unknown> = {
           ad_soyad: form.ad_soyad, durum: form.durum, paket_id: Number(form.paket_id) || 0,
           max_domain: Number(form.max_domain), max_disk_mb: Number(form.max_disk_mb), max_trafik_mb: Number(form.max_trafik_mb),
         }
         if (form.parola) body.parola = form.parola
         await api.put(`/resellers/${modal.id}`, body)
-        setOk(cevir("Bayi güncellendi."))
         toast.basari(cevir("Bayi güncellendi."))
       }
       setModal(null); yukle()
     } catch (err) {
       const m = apiHata(err, cevir("İşlem başarısız"))
-      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      toast.hata(cevir("İşlem başarısız"), m)
     }
     finally { setKaydet(false) }
   }
@@ -194,13 +197,13 @@ export default function ResellerlarPage() {
   }
 
   async function silBaslat(x: Reseller, yedekleriBirak: boolean) {
-    setHata(null); setOk(null); setSilinen(x.id)
+    setSilinen(x.id)
     try {
       const r = await api.delete<{ is_id: number }>(`/resellers/${x.id}${yedekleriBirak ? '?uzagi_yoksay=1' : ''}`)
       setSilIs({ is: r.data.is_id, bayi: x }); setSilModal(true)
     } catch (err) {
       const m = apiHata(err, cevir('Silinemedi'))
-      setHata(m); toast.hata(cevir("İşlem başarısız"), m)
+      toast.hata(cevir("İşlem başarısız"), m)
     }
     finally { setSilinen(null) }
   }

@@ -312,8 +312,12 @@ export default function DomainsPage() {
       modalVeriYukle()
     }
     return () => { iptal = true }
+  // modalVeriYukle her çizimde yeniden kurulur; yalnız modal/rol değişince çalışmalı.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topluModal, yonetici])
 
+  // yukle/cevir/toast kararlı değil; yalnız açılışta bir kez yüklenmeli.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(yukle, [])
   // SSL degisimi nginx reload tetikleyip sayfayi yenileyebilir → devam eden isi bul.
   // Toplu işler (ve bu yoklama) AdminOnly: bayi oturumunda istek atılmaz.
@@ -330,7 +334,7 @@ export default function DomainsPage() {
   // birlikte silinir (kendi endpoint'i). Domain seçimiyle çakışmasın diye AYRI set.
   const [subSecili, setSubSecili] = useState<Set<number>>(new Set())
   function subTogga(id: number) {
-    setSubSecili(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+    setSubSecili(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
 
   // Mobil alt gezinme cubugundaki "Yeni" eylemi buraya ?yeni=1 ile gelir.
@@ -451,7 +455,7 @@ export default function DomainsPage() {
     }
     setOlusturuluyor(true)
     try {
-      const body: any = { alan_adi: alanAdi, php_surum: fPHPSurum }
+      const body: Record<string, unknown> = { alan_adi: alanAdi, php_surum: fPHPSurum }
       if (fPlanID !== '') body.plan_id = fPlanID
       if (fSqlOlustur) body.sql_olustur = true
       // Sağlama 10-40 sn sürer (SELinux, php-fpm/nginx doğrulama); sunucu istemciden
@@ -467,7 +471,7 @@ export default function DomainsPage() {
       toast.basari(cevir("Oluşturuldu"), m)
       setTimeout(() => setBasari(null), 8000)
       yukle()
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (sonucBelirsiz(e)) {
         if (await olusturmaDurumuBekle(alanAdi)) {
           setOlusturAcik(false)
@@ -496,14 +500,14 @@ export default function DomainsPage() {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(metin); return true
       }
-    } catch {}
+    } catch { /* Clipboard API yok/reddedildi — sıradaki yönteme geç */ }
     try {
       const ta = document.createElement('textarea')
       ta.value = metin; ta.style.position = 'fixed'; ta.style.opacity = '0'
       document.body.appendChild(ta); ta.select(); document.execCommand('copy')
       document.body.removeChild(ta); return true
-    } catch {}
-    try { (await sor({ baslik: cevir("Kopyalamak için Ctrl+C, sonra Enter:"), varsayilan: metin })); return true } catch {}
+    } catch { /* execCommand yok — son çare: elle kopyalama penceresi */ }
+    try { (await sor({ baslik: cevir("Kopyalamak için Ctrl+C, sonra Enter:"), varsayilan: metin })); return true } catch { /* pencere kapatıldı */ }
     return false
   }
 
