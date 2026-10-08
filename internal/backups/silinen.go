@@ -51,10 +51,18 @@ package backups
 // gönderim adayı DEĞİLDİR (bkz. uzak.KokYedegiMi): eski yedeği kullanıcı istemeden uzağa itmek ve
 // ardından yerel kopyayı silmek (yerel-silme) beklenmedik olurdu.
 //
-// 🔴 O2 — YARIŞ: yetim satırı silen HER yol (süpürme, DELETE /admin/silinen-yedekler/{sk}) uzak silmeden
-// SONRA tek işlemde `DELETE ... WHERE id=? AND domain_id=0 AND silinme IS NOT NULL` yapar; yalnız
-// RowsAffected()==1 ise dosyayı siler, dosya silinemezse (yok hariç) işlemi geri alır ve satırı KORUR.
-// Uzak silme dakikalar sürebilir; bu sürede sahibi bağlayan canlı yedek asla silinmez.
+// 🔴 O2 — YARIŞ: yetim satırı silen HER yol (süpürme, DELETE /admin/silinen-yedekler/{sk}) uzak silmeden SONRA tek
+// işlemde `DELETE ... WHERE id=? AND domain_id=0 AND silinme IS NOT NULL` yapar; yalnız RowsAffected()==1 ise
+// dosyayı siler, dosya silinemezse (yok hariç) işlemi geri alır ve satırı KORUR. Uzak silme dakikalar sürebilir ve
+// DELETE'ten ÖNCE koşar: araya giren bir bağlama canlı yedeğin satırını/dosyasını korusa bile UZAK kopyası silinmiş
+// olurdu (yerel kopya "uzağa taşındı" diye silinmişse tek kopya). Bu yüzden uzak silmesi süren satırlar süreç içi
+// bir kayıt defterinde tutulur (yetimSilinmekte): silme önce satırı KİLİTLİ okumayla doğrular (süren bir bağlamanın
+// commit'ini bekler; bağlandıysa hiçbir şey silinmez), sonra uzak adıma geçer; bağlama (yetimleriBaglaBir) satırlarını
+// kilitledikten sonra defteri okur ve silinmekte olanları BAĞLAMAZ. İki sıralama da kapalıdır: ya bağlama önce gelir
+// ve uzak kopyaya hiç dokunulmaz, ya silme önce gelir ve o satır bağlanmaz. (Uzun InnoDB satır kilidi tutmak yerine
+// uygulama düzeyinde dışlama: bağlama bekletilmez, birincil/ikincil indeks kilit sırası ters kilitlenmesi oluşmaz.
+// Panel tek süreçtir: süpürme goroutine'i ve HTTP uçları aynı süreçte koşar.) Uzak adım satır başına
+// yetimUzakSureSiniri ile sınırlıdır.
 //
 // 🔴 Yetim satırlar HİÇBİR canlı akışa girmemeli ve kendi başına silinmemeli. Yetimi yalnız şunlar
 // siler: süpürme (süresi dolanı; 04:00 turu, süre bütçesi bitene dek parti parti), yönetici DELETE ucu.
@@ -112,6 +120,16 @@ const (
 // bekleyebilir; iz best-effort'tur (yazılamayan iz sahipsiz işaretleme turuyla tamamlanır) → kısa tutulur.
 const izZamanAsimi = 3 * time.Second
 
+// kalintiZamanAsimi: YetimKalintilariniAyir'ın üst süresi. Normalde tek indeksli SELECT'tir (kalıntı yok); kalıntı varsa
+// (nadir çift arıza) satır satır işaretlenir ve eksik kalan satırlar yeni müşteriye GÖRÜNÜR kalır (S2 artık
+// "domain yok" koşuluna uymayan bu satırlara bakmaz) → iz bütçesinden (izZamanAsimi) çok daha cömert.
+const kalintiZamanAsimi = 30 * time.Second
+
+// yetimUzakSureSiniri: TEK yetim satırın uzak silme adımının (anlık görüntü hedefi + genel hedef; her biri sil + doğrula
+// lftp oturumları) üst süresi. Ölü/kara delik hedef satır başına dakikalarca sürebilir ve bu sürede satır kilidi
+// tutulur (O2); aşılırsa adım hata olur (satır korunur, sonraki turda yeniden denenir).
+var yetimUzakSureSiniri = 2 * time.Minute // testte kısaltılır
+
 // yetimHedefParolaSutun: backup_yetim_hedefler.parola VARCHAR genişliği (backup_destinations.parola ile aynı).
 const yetimHedefParolaSutun = 255
 
@@ -144,13 +162,31 @@ var izIDUret = func() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// silinenAyar: cp_ayarlar'daki ham değer ("" = ayarsız → slot).
-func silinenAyar(ctx context.Context, db *sql.DB) string {
+// silinenAyar: cp_ayarlar'daki ham değer ("" = ayarsız → slot). Satır YOKSA ("", nil); okuma HATASIysa ("", err):
+// "ayarsız" ile "okunamadı" ayrı şeylerdir (ayar 0 = otomatik silme yok iken geçici okuma hatası yetimleri 7 gün sonra
+// sildirmesin; ayar GET ucu hatayı 200+null ile gizlemesin).
+func silinenAyar(ctx context.Context, db *sql.DB) (string, error) {
 	var v string
-	if err := db.QueryRowContext(ctx, `SELECT deger FROM cp_ayarlar WHERE anahtar=?`, silinenAyarKey).Scan(&v); err != nil {
-		return ""
+	err := db.QueryRowContext(ctx, `SELECT deger FROM cp_ayarlar WHERE anahtar=?`, silinenAyarKey).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
 	}
-	return strings.TrimSpace(v)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(v), nil
+}
+
+// silinenGun — bu silme için saklama günü (0 = otomatik silme yok). ok=false: ayar OKUNAMADI (günlüğe 🔴 yazılır).
+// Çağıranlar okunamayan kuralı "sil" yönünde yorumlamamalı: iz yazımı süresiz saklamayı (gun=0), S2 turu işaretlemeyi
+// sonraya bırakmayı seçer — erken silme geri alınamaz, geç silme yönetici tarafından düzeltilebilir.
+func silinenGun(ctx context.Context, db *sql.DB, slot int) (gun int, ok bool) {
+	ayar, err := silinenAyar(ctx, db)
+	if err != nil {
+		log.Printf("🔴 silinmiş yedek saklama ayarı okunamadı: %v", err)
+		return 0, false
+	}
+	return silinenSaklamaGunu(ayar, slot), true
 }
 
 // silinenSaklamaGunu: bu hosting için saklama günü; 0 = otomatik silme yok.
@@ -312,7 +348,7 @@ func (iz *SilinenIz) yaz(ctx context.Context, db *sql.DB) error {
 	if iz.hedef != nil {
 		iz.hedefAnlikGoruntusu(ctx, db)
 	}
-	gun := silinenSaklamaGunu(silinenAyar(ctx, db), iz.slot)
+	gun, _ := silinenGun(ctx, db, iz.slot) // kural okunamazsa 0: süresiz sakla (son_kullanma NULL), yönetici ucundan elle silinir
 	// S4: satır domain_id=0'a taşınır, eski id eski_domain_id'de (yalnız bilgi) kalır; bağ iz_id iledir.
 	q := `UPDATE backups SET alan_adi=?, sistem_kullanici=?, reseller_id=?, eski_domain_id=?, iz_id=?, domain_id=0, silinme=NOW(), son_kullanma=NULL WHERE domain_id=?`
 	args := []any{iz.alanAdi, iz.sk, iz.resellerID, iz.domainID, iz.izID, iz.domainID}
@@ -457,7 +493,7 @@ func YetimKalintilariniAyir(ctx context.Context, db *sql.DB, domainID int64) (is
 	if db == nil || domainID <= 0 {
 		return 0
 	}
-	ctx, iptal := context.WithTimeout(ctx, izZamanAsimi)
+	ctx, iptal := context.WithTimeout(ctx, kalintiZamanAsimi)
 	defer iptal()
 	rows, err := db.QueryContext(ctx, `SELECT id, dosya FROM backups WHERE domain_id=? AND silinme IS NULL ORDER BY id LIMIT ?`, domainID, silinenSatirLimit)
 	if err != nil {
@@ -483,7 +519,7 @@ func YetimKalintilariniAyir(ctx context.Context, db *sql.DB, domainID int64) (is
 		}
 		return 0
 	}
-	gun := silinenSaklamaGunu(silinenAyar(ctx, db), silinenEnAzGun)
+	gun, _ := silinenGun(ctx, db, silinenEnAzGun) // kural okunamazsa 0: yeni müşteriden AYIRMAK şart, silme süresi değil → süresiz sakla
 	izler := map[string]string{}
 	turetilemeyen := 0
 	for _, k := range liste {
@@ -510,6 +546,9 @@ func YetimKalintilariniAyir(ctx context.Context, db *sql.DB, domainID int64) (is
 		domainID, len(liste), isaretlenen, turetilemeyen)
 	return isaretlenen
 }
+
+// sahipsizIsaretKilit: aynı anda tek sahipsiz işaretleme turu (S2).
+var sahipsizIsaretKilit sync.Mutex
 
 // sahipsizAday — S2'nin işaretlemeye aday satırı.
 type sahipsizAday struct {
@@ -571,12 +610,18 @@ func sahipsizIzID(ctx context.Context, db *sql.DB, domainID int64) string {
 // Satırlar id imleciyle PARTİ PARTİ işlenir (türetilemeyen satırlar arkadakileri aç bırakmaz) ve bağlam
 // (süre bütçesi) bitene ya da aday kalmayana dek sürer.
 //
-// 🔴 D6 — EŞİK: aday sayısı sahipsizEsikAdet'ten çoksa ve (domains tablosu boşsa ya da adaylar tüm backups
-// satırlarının yarısından fazlaysa) toplu işaretleme ATLANIR: eksik/hatalı bir `domains` tablosu TÜM yedekleri
+// 🔴 D6 — EŞİK: aday sayısı sahipsizEsikAdet'ten çoksa ve (domains tablosu boşsa ya da adaylar canlı+aday backups
+// satırlarının (domain_id>0; yetimler hariç) yarısından fazlaysa) toplu işaretleme ATLANIR: eksik/hatalı bir `domains` tablosu TÜM yedekleri
 // sahipsiz gösterir ve ≥7 gün sonra dosya + uzak kopyalar silinirdi. Atlamak veri kaybettirmez (satırlar
 // olduğu gibi kalır); operatör 🔴 günlüğü görür.
 // Dönen: işaretlenen, türetilemeyen.
 func SilinenSahipsizIsaretle(ctx context.Context, db *sql.DB) (isaretlenen, turetilemeyen int) {
+	// Panel açılışındaki tur ile 04:00 turu çakışırsa iki koşu aynı (domain, sk) grubuna FARKLI iz_id verebilir ve
+	// biri anlık görüntüsüz kalırdı: aynı anda tek tur (diğeri bekletilmez, sonraki tur zaten tamamlar).
+	if !sahipsizIsaretKilit.TryLock() {
+		return 0, 0
+	}
+	defer sahipsizIsaretKilit.Unlock()
 	var aday, toplam, alanSayisi int64
 	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM backups b WHERE b.domain_id>0 AND b.silinme IS NULL AND NOT EXISTS (SELECT 1 FROM domains d WHERE d.id=b.domain_id)`).Scan(&aday); err != nil {
@@ -586,7 +631,9 @@ func SilinenSahipsizIsaretle(ctx context.Context, db *sql.DB) (isaretlenen, ture
 	if aday == 0 {
 		return 0, 0
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM backups`).Scan(&toplam); err != nil {
+	// Payda: canlı + aday satırlar (domain_id>0). Zaten işaretli YETİMLER (domain_id=0) paydayı şişirmez: toplu bayi silmesinden
+	// sonra binlerce yetim varken bozuk bir `domains` tablosu yedeklerin çoğunu sahipsiz gösterse bile oran %50'nin altına inmesin.
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM backups WHERE domain_id>0`).Scan(&toplam); err != nil {
 		log.Printf("sahipsiz yedek işaretleme: toplam sayılamadı, atlandı: %v", err)
 		return 0, 0
 	}
@@ -600,7 +647,10 @@ func SilinenSahipsizIsaretle(ctx context.Context, db *sql.DB) (isaretlenen, ture
 			aday, toplam, alanSayisi)
 		return 0, 0
 	}
-	gun := silinenSaklamaGunu(silinenAyar(ctx, db), silinenEnAzGun)
+	gun, okundu := silinenGun(ctx, db, silinenEnAzGun)
+	if !okundu {
+		return 0, 0 // idempotent tur: sonraki tur (04:00/açılış) işaretler; yanlış süreyle işaretlenmesin
+	}
 	type izAnahtar struct {
 		dom int64
 		sk  string
@@ -778,9 +828,17 @@ func yetimleriBaglaBir(ctx context.Context, db *sql.DB, domainID int64, kosul st
 			return e
 		}
 		rows.Close()
-		res, e := tx.ExecContext(ctx,
-			`UPDATE backups SET domain_id=?, eski_domain_id=0, iz_id='', silinme=NULL, son_kullanma=NULL, tip=? WHERE `+kosul+` AND `+yetimKosulu,
-			append([]any{domainID, TipKurtarma}, args...)...)
+		// O2: uzak kopyası şu an SİLİNMEKTE olan satırlar bağlanmaz (satırlar yukarıda kilitlendi; defter kilitten SONRA
+		// okunur: silme kaydı bu noktadan sonra düşse bile yetimHalaYetim bu işlemin commit'ini bekler ve bağlı satırı görür).
+		set := `UPDATE backups SET domain_id=?, eski_domain_id=0, iz_id='', silinme=NULL, son_kullanma=NULL, tip=? WHERE ` + kosul + ` AND ` + yetimKosulu
+		uargs := append([]any{domainID, TipKurtarma}, args...)
+		if sil := yetimSilinmektekiler(); len(sil) > 0 {
+			set += ` AND id NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(sil)), ",") + `)`
+			for _, id := range sil {
+				uargs = append(uargs, id)
+			}
+		}
+		res, e := tx.ExecContext(ctx, set, uargs...)
 		if e != nil {
 			return e
 		}
@@ -844,10 +902,33 @@ type yetimSilHatasi struct {
 func (e *yetimSilHatasi) Error() string { return e.err.Error() }
 func (e *yetimSilHatasi) Unwrap() error { return e.err }
 
+// uzakHedefUlasilamiyor — uzak silme hatası HEDEFİN kendisinin erişilemezliğini mi gösteriyor (çözümleme/bağlantı/
+// kimlik doğrulama/zaman aşımı/lftp yok) yoksa tek dosyaya özgü bir hata mı (izin, silindi ama hâlâ listeleniyor)?
+// Yalnız ilki aynı hedefe giden diğer satırlar için de geçerlidir: devre kesici (SilinenSupur/SilinenSil) yalnız buna
+// bakar — dosyaya özgü bir hata, aynı hesabın sağlam satırlarının temizliğini ertelememeli.
+func uzakHedefUlasilamiyor(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrLftpYok) {
+		return true
+	}
+	// context.DeadlineExceeded (satır başına süre sınırımız) metniyle ("context deadline exceeded") ya da lftp sürecinin
+	// öldürülmesiyle ("signal: killed") yakalanır.
+	m := strings.ToLower(err.Error())
+	for _, p := range []string{"login failed", "connection refused", "could not resolve", "host key verification failed",
+		"no route to host", "connection timed out", "cannot connect", "name or service not known", "network is unreachable",
+		"context deadline exceeded", "signal: killed", "timeout"} {
+		if strings.Contains(m, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // yetimSatiriniVeDosyayiSil — O2/D3: satırı KOŞULLU siler (`AND domain_id=0 AND silinme IS NOT NULL`), YALNIZ tam bir
 // satır silindiyse dosyayı siler; dosya silinemezse (yok hariç) işlemi geri alıp satırı KORUR. Satır kilidi
-// işlem boyunca tutulur: aynı satırı bağlamak isteyen yetimleriBagla kilit açılana dek bekler (ya bağlama
-// önce gelir ve burada hiçbir satır silinmez, ya biz önce gireriz ve bağlanacak satır kalmaz).
+// işlem boyunca tutulur: aynı satırı bağlamak isteyen yetimleriBagla kilit açılana dek bekler.
 func yetimSatiriniVeDosyayiSil(ctx context.Context, db *sql.DB, bid int64, sk, dosya string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -867,11 +948,65 @@ func yetimSatiriniVeDosyayiSil(ctx context.Context, db *sql.DB, bid int64, sk, d
 	return tx.Commit()
 }
 
-// yetimYedegiSil — BİR yetim yedeği kalıcı siler: uzak (anlık görüntü hedefi + genel hedef) → satır + yerel dosya
-// (tek işlemde, yetimSatiriniVeDosyayiSil). izID: satırın silme izi (anlık görüntü anahtarı). uzagiYoksay: uzak adımı atlar.
-// Uzak silinemezse satır + dosya KALIR (yetimSilHatasi{uzak}, parola maskeli). Bitince izID'nin yetimi kalmadıysa
-// anlık görüntü silinir. Güvenlik: sk regex, dosya adı tek bileşen + .tar.gz, sk dizini symlink değil,
-// satır HÂLÂ yetim (araya giren bağlama canlı yedeği silmesin: errYetimDegil).
+// yetimSilinmekte — uzak silmesi SÜREN yetim satır kimlikleri (süreç içi; bkz. dosya başlığı O2).
+var yetimSilinmekte = struct {
+	sync.Mutex
+	m map[int64]struct{}
+}{m: map[int64]struct{}{}}
+
+// yetimSilmeBasla — id'yi "silinmekte" olarak kaydeder. Zaten kayıtlıysa (başka bir silme aynı satırı işliyor) ok=false.
+// birak: kaydı kaldırır (silme bitince/başarısız olunca MUTLAKA çağrılır).
+func yetimSilmeBasla(id int64) (birak func(), ok bool) {
+	yetimSilinmekte.Lock()
+	defer yetimSilinmekte.Unlock()
+	if _, var1 := yetimSilinmekte.m[id]; var1 {
+		return nil, false
+	}
+	yetimSilinmekte.m[id] = struct{}{}
+	return func() {
+		yetimSilinmekte.Lock()
+		delete(yetimSilinmekte.m, id)
+		yetimSilinmekte.Unlock()
+	}, true
+}
+
+// yetimSilinmektekiler — şu an silinmekte olan satır kimlikleri (anlık görüntü, artan).
+func yetimSilinmektekiler() []int64 {
+	yetimSilinmekte.Lock()
+	defer yetimSilinmekte.Unlock()
+	out := make([]int64, 0, len(yetimSilinmekte.m))
+	for id := range yetimSilinmekte.m {
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// yetimHalaYetim — satır HÂLÂ yetim mi? Kilitli okuma (FOR UPDATE) + hemen commit: süren bir bağlamanın (satırı
+// kilitlemiş olabilir) commit'ini bekler, böylece "yetim" cevabı bağlamayla yarışmaz. Bağlandıysa errYetimDegil.
+func yetimHalaYetim(ctx context.Context, db *sql.DB, bid int64) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var id int64
+	switch e := tx.QueryRowContext(ctx, `SELECT id FROM backups WHERE id=? AND `+yetimKosulu+` FOR UPDATE`, bid).Scan(&id); {
+	case errors.Is(e, sql.ErrNoRows):
+		return fmt.Errorf("yedek %d: %w", bid, errYetimDegil)
+	case e != nil:
+		return e
+	}
+	return tx.Commit()
+}
+
+// yetimYedegiSil — BİR yetim yedeği kalıcı siler: kayıt defterine yaz (aynı satırı başka bir silme işliyorsa atla) →
+// satır HÂLÂ yetim mi (kilitli okuma) → uzak (anlık görüntü hedefi + genel hedef; yetimUzakSureSiniri ile sınırlı) →
+// satır + yerel dosya (tek işlemde, yetimSatiriniVeDosyayiSil). Uzak adımın sürdüğü boyunca bağlama bu satırı BAĞLAMAZ
+// (dosya başlığı O2): canlı yedeğin uzak kopyası silinmez. izID: satırın silme izi (anlık görüntü anahtarı).
+// uzagiYoksay: uzak adımı atlar. Uzak silinemezse satır + dosya KALIR (yetimSilHatasi{uzak}, parola maskeli). Bitince
+// izID'nin yetimi kalmadıysa anlık görüntü silinir. Güvenlik: sk regex, dosya adı tek bileşen + .tar.gz, sk dizini
+// symlink değil, satır HÂLÂ yetim (araya giren bağlama canlı yedeği silmesin: errYetimDegil).
 func yetimYedegiSil(ctx context.Context, db *sql.DB, bid int64, izID, sk, dosya string, uzagiYoksay bool) error {
 	if !silinenSKGecerli(sk) || !dosyaAdiGuvenli(dosya) {
 		return fmt.Errorf("yedek %d: güvensiz sk/dosya adı, atlandı", bid)
@@ -879,19 +1014,23 @@ func yetimYedegiSil(ctx context.Context, db *sql.DB, bid int64, izID, sk, dosya 
 	if !yedekDizinSilinebilir(sk) {
 		return fmt.Errorf("yedek %d: yedek dizini güvenli değil (symlink?), atlandı", bid)
 	}
-	var hala int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM backups WHERE id=? AND `+yetimKosulu, bid).Scan(&hala); err != nil {
-		return err
+	birak, ok := yetimSilmeBasla(bid)
+	if !ok {
+		return fmt.Errorf("yedek %d (başka bir silme işliyor): %w", bid, errYetimDegil)
 	}
-	if hala != 1 {
-		return fmt.Errorf("yedek %d: %w", bid, errYetimDegil)
+	defer birak()
+	if err := yetimHalaYetim(ctx, db, bid); err != nil {
+		return err
 	}
 	if !uzagiYoksay {
 		d, err := yetimHedefOku(ctx, db, izID)
 		if err != nil {
 			return fmt.Errorf("yedek %d: uzak hedef anlık görüntüsü okunamadı: %w", bid, err)
 		}
-		if e := maskeliUzakHata(yetimUzakSil(ctx, db, d, dosya), d); e != nil {
+		uctx, iptal := context.WithTimeout(ctx, yetimUzakSureSiniri)
+		e := maskeliUzakHata(yetimUzakSil(uctx, db, d, dosya), d)
+		iptal()
+		if e != nil {
 			return &yetimSilHatasi{uzak: true, err: e}
 		}
 	}
@@ -955,10 +1094,16 @@ func SilinenSupur(ctx context.Context, db *sql.DB) {
 	defer silinenSupurKilit.Unlock()
 	SilinenSahipsizIsaretle(ctx, db)
 	yetimHedefArtiklariniTemizle(ctx, db)
-	var silinen, hata, atlanan int
+	var silinen, hata, atlanan, denenmedi int
 	var silinenB int64
 	var imlec int64
 	sureDoldu := false
+	// Devre kesici: bir silme izinin (aynı hesabın; iz_id boşsa yalnız genel hedefi olan eski satırlar) uzak hedefi turda
+	// bir kez ERİŞİLEMEZ çıktıysa (uzakHedefUlasilamiyor: çözümleme/bağlantı/kimlik/zaman aşımı) o izin kalan satırları
+	// AYNI hatayı verecektir; her biri için 2 dk'ya varan lftp oturumları açmak 20 dk'lık bütçeyi ölü bir hedefin başında
+	// eritir, ID'si daha büyük sağlıklı hesapların yetimleri hiç işlenmez. Kalanlar bu turda denenmez (korunur; ertesi tur
+	// yeniden dener). Dosyaya özgü hatalar (izin vb.) kesiciyi AÇMAZ.
+	uzakBozuk := map[string]bool{}
 	for {
 		if ctx.Err() != nil {
 			sureDoldu = true
@@ -978,6 +1123,10 @@ func SilinenSupur(ctx context.Context, db *sql.DB) {
 				break
 			}
 			imlec = k.id
+			if uzakBozuk[k.izID] {
+				denenmedi++
+				continue
+			}
 			switch e := yetimYedegiSil(ctx, db, k.id, k.izID, k.sk, k.dosya, false); {
 			case e == nil:
 				silinen++
@@ -986,6 +1135,10 @@ func SilinenSupur(ctx context.Context, db *sql.DB) {
 				atlanan++ // sahibi bağladı: canlı yedek, dokunulmadı
 			default:
 				hata++
+				var se *yetimSilHatasi
+				if errors.As(e, &se) && se.uzak && uzakHedefUlasilamiyor(se.err) {
+					uzakBozuk[k.izID] = true
+				}
 				log.Printf("yetim yedek %d (%s) temizlenemedi, kayıt korundu (yarın tekrar denenir): %v", k.id, k.dosya, e)
 			}
 		}
@@ -996,12 +1149,15 @@ func SilinenSupur(ctx context.Context, db *sql.DB) {
 	if sureDoldu {
 		log.Printf("yetim yedek süpürme: süre doldu, kalanı sonraki turda")
 	}
-	if silinen == 0 && hata == 0 && atlanan == 0 {
+	if silinen == 0 && hata == 0 && atlanan == 0 && denenmedi == 0 {
 		return
 	}
-	log.Printf("yetim yedek süpürme: %d yedek silindi (%s), %d silinemedi (korundu), %d atlandı (bağlanmış)", silinen, boyutMetni(silinenB), hata, atlanan)
+	log.Printf("yetim yedek süpürme: %d yedek silindi (%s), %d silinemedi (korundu), %d atlandı (bağlanmış), %d denenmedi (aynı hesabın uzak hedefi hata verdi)", silinen, boyutMetni(silinenB), hata, atlanan, denenmedi)
 	// D2: silmeler tek bir özet denetim satırı (kök kapsamı; arka plan işi → httpx.DenetimSistem).
 	detay := fmt.Sprintf("%d yedek silindi (%s), %d silinemedi, %d bağlanmış olduğundan atlandı", silinen, boyutMetni(silinenB), hata, atlanan)
+	if denenmedi > 0 {
+		detay += fmt.Sprintf(", %d aynı hesabın uzak hedefi hata verdiği için denenmedi", denenmedi)
+	}
 	if sureDoldu {
 		detay += "; süre doldu, kalanı sonraki turda"
 	}
@@ -1268,7 +1424,12 @@ func (h *Handlers) SilinenSil(w http.ResponseWriter, r *http.Request) {
 	uid, kul := middleware.Aktor(r)
 	var ilk error
 	silinen, atlanan, uzakKalan, yerelKalan, digerKalan := 0, 0, 0, 0, 0
+	uzakBozuk := map[string]bool{} // devre kesici (SilinenSupur ile aynı): aynı izin uzak hedefi erişilemezse kalanı denenmez
 	for _, k := range liste {
+		if uzakBozuk[k.izID] {
+			uzakKalan++
+			continue
+		}
 		e := yetimYedegiSil(kctx, h.DB, k.id, k.izID, sk, k.dosya, yoksay)
 		if e == nil {
 			silinen++
@@ -1282,6 +1443,9 @@ func (h *Handlers) SilinenSil(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.As(e, &sh) && sh.uzak:
 			uzakKalan++
+			if uzakHedefUlasilamiyor(sh.err) {
+				uzakBozuk[k.izID] = true
+			}
 		case errors.As(e, &sh):
 			yerelKalan++
 		default:
@@ -1432,7 +1596,15 @@ func (h *Handlers) SilinenBagla(w http.ResponseWriter, r *http.Request) {
 
 // SilinenAyarGet: GET /admin/silinen-yedekler/ayar → {gun: null|N}  (null = hostingin yedek slotu)
 func (h *Handlers) SilinenAyarGet(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"gun": silinenAyarJSON(silinenAyar(r.Context(), h.DB)), "en_az_slot_gun": silinenEnAzGun})
+	ayar, err := silinenAyar(r.Context(), h.DB)
+	if err != nil {
+		// 200+null "ayarsız" demektir; okunamayan ayarı öyle göstermek arayüzün kayıtlı değeri (ör. 0) sessizce
+		// sıfırlamasına yol açardı. Arayüz okuma hatasında Kaydet'i kapatır.
+		log.Printf("silinen yedek ayar okunamadı: %v", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "ayar okunamadı")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"gun": silinenAyarJSON(ayar), "en_az_slot_gun": silinenEnAzGun})
 }
 
 func silinenAyarJSON(v string) any {

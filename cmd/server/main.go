@@ -1651,14 +1651,24 @@ func semaYapiDogrula(d *sql.DB) []string {
 			sorun = append(sorun, "backup_yetim_hedefler.uk_yetim_hedef_domain (eski_domain_id UNIQUE) hala var: domain kimligi yeniden kullanilinca ikinci silmenin anlik goruntusu yazilamaz")
 		}
 	}
-	var fk int
-	err := d.QueryRow(`SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
-		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'backups' AND CONSTRAINT_NAME = 'fk_backup_domain' AND CONSTRAINT_TYPE = 'FOREIGN KEY'`).Scan(&fk)
+	// FK denetimi AD BAĞIMSIZDIR: göç yalnız bilinen adı (fk_backup_domain) kaldırır; başka adla duran bir FK (eski bir kurulum
+	// yolu) domain silinince yedek satırlarını CASCADE ile sildirirdi.
+	fkRows, err := d.Query(`SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS
+		WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'backups' AND REFERENCED_TABLE_NAME = 'domains'`)
 	if err != nil {
-		log.Printf("sema yapi sorgusu basarisiz (fk_backup_domain): %v", err)
-	} else if fk > 0 {
-		sorun = append(sorun, "backups.fk_backup_domain FK'si hala var: domain silinince yedek satirlari CASCADE ile gider (yedeklerden bagimsiz silme calismaz)")
+		log.Printf("sema yapi sorgusu basarisiz (backups FK): %v", err)
+		return sorun
 	}
+	for fkRows.Next() {
+		var ad string
+		if fkRows.Scan(&ad) == nil {
+			sorun = append(sorun, "backups."+ad+" FK'si hala var: domain silinince yedek satirlari CASCADE ile gider (yedeklerden bagimsiz silme calismaz)")
+		}
+	}
+	if e := fkRows.Err(); e != nil {
+		log.Printf("sema yapi sorgusu basarisiz (backups FK satirlari): %v", e)
+	}
+	fkRows.Close()
 	return sorun
 }
 

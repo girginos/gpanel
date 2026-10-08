@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os/exec"
 	"path/filepath"
@@ -533,10 +534,56 @@ func TestDGBulgu_Y1d_PutDestination_HostDegisinceBosParola_Reddedilmeli(t *testi
 
 // ================================================================ M — yetimYedegiSil ↔ bağlama yarışı
 
-// BULGU M1 — süpürme bir yetimin uzak kopyasını silerken (ağ gecikmesi) müşteri yeni hostingini açıp yedek sayfasına
-// bakarsa yetimler domaine bağlanır; ama yetimYedegiSil "hâlâ yetim mi" denetimini YALNIZ başta yapar, sonda koşulsuz
-// `DELETE FROM backups WHERE id=?` + os.Remove çalıştırır → az önce kurtarılan CANLI yedek (dosya + satır) silinir.
-func TestDGBulgu_M1_Supurme_UzakSilmeSirasindaBaglanan_CanliYedekSilinmemeli(t *testing.T) {
+// UYARLAMA (düzeltme turu, bağımsız inceleme bulgusu): M1/M2 ilk yazıldığında "uzak silme sürerken araya giren bağlama
+// SONRADAN koşullu DELETE ile yakalanır" tasarımını kodluyordu: bağlama başarıyla biter (iki satırı da bağlar), silme
+// errYetimDegil ile satırı + yerel dosyayı korurdu. Bu, bağlanan CANLI yedeğin UZAK kopyasının silinmesini önlemiyordu (uzak
+// adım DELETE'ten ÖNCE koşar; yerel kopya "uzağa taşındı" diye silinmişse tek kopya yok olur). Artık uzak silmesi süren satır
+// süreç içi kayıt defterindedir (yetimSilinmekte) ve bağlama onu BAĞLAMAZ; kalan satırlar normal bağlanır. Değişmezler:
+//   - uzak silmesi çağrılan hiçbir yedek canlı kalmaz (satır ve yerel dosya gitmiştir);
+//   - bağlanan hiçbir yedeğin uzak silmesi çağrılmaz, yerel dosyası yerindedir;
+//   - uzak silmesi SÜREN satır, o sırada başlayan bağlamayla bağlanmaz (bağlama diğer satırları bağlar, beklemez).
+
+// dgBaglaIstek: dgBagla'nın t kullanmayan biçimi (HTTP durum kodu + bağlanan sayısı).
+func dgBaglaIstek(r http.Handler, sk string, domainID int64) (kod int, baglanan int) {
+	kod, g := advIstek(r, "POST", "/s/"+sk+"/bagla", fmt.Sprintf(`{"domain_id":%d,"zorla":false}`, domainID))
+	var y struct {
+		Baglanan int `json:"baglanan"`
+	}
+	_ = json.Unmarshal([]byte(g), &y)
+	return kod, y.Baglanan
+}
+
+// dgYarisDegismezleri: uzak silmesi çağrılan dosyalar / bağlanan dosyalar için değişmezleri denetler.
+func dgYarisDegismezleri(t *testing.T, o *dgOrtam, sk string, hedefDomain int64, dosyalar, uzakSilinen []string) {
+	t.Helper()
+	uzakta := map[string]bool{}
+	for _, d := range uzakSilinen {
+		uzakta[d] = true
+	}
+	for _, d := range dosyalar {
+		var canli, var1 int
+		if err := o.db.QueryRow(`SELECT COUNT(*) FROM backups WHERE dosya=? AND domain_id=?`, d, hedefDomain).Scan(&canli); err != nil {
+			t.Fatal(err)
+		}
+		if err := o.db.QueryRow(`SELECT COUNT(*) FROM backups WHERE dosya=?`, d).Scan(&var1); err != nil {
+			t.Fatal(err)
+		}
+		dosyaVar := varMi(filepath.Join(o.kok, sk, d))
+		switch {
+		case uzakta[d] && (var1 != 0 || dosyaVar):
+			t.Errorf("🔴 uzak kopyası silinen yedek canlı/yarım kaldı: %s (satır=%d dosya=%v) — uzak silme sürerken araya giren bağlama bunu kurtarsa bile uzak kopya gitmişti", d, var1, dosyaVar)
+		case !uzakta[d] && canli == 1 && !dosyaVar:
+			t.Errorf("🔴 bağlanan (canlı) yedeğin YEREL DOSYASI silindi: %s", d)
+		case !uzakta[d] && canli != 1:
+			t.Errorf("uzağı silinmeyen yedek ne bağlandı ne silindi (satır=%d): %s", var1, d)
+		}
+	}
+}
+
+// BULGU M1 — süpürme bir yetimin uzak kopyasını silerken (ağ gecikmesi) müşteri yeni hostingini açıp yetimleri bağlamaya
+// çalışır. Eski kod "hâlâ yetim mi" denetimini YALNIZ başta yapıp sonda koşulsuz DELETE + os.Remove çalıştırıyordu → CANLI yedek
+// silinirdi; koşullu DELETE bunu önledi ama uzak kopya yine silinmiş olurdu.
+func TestDGBulgu_M1_Supurme_UzakSilmeSirasindaBaglama_SilinmekteOlanBaglanmazDigeriBaglanir(t *testing.T) {
 	o := dgYeni(t)
 	ctx := context.Background()
 	dosyalar, _ := o.hesap(700, "tk.com", "c_tk", 5, "", 2)
@@ -544,53 +591,61 @@ func TestDGBulgu_M1_Supurme_UzakSilmeSirasindaBaglanan_CanliYedekSilinmemeli(t *
 	g113_exec(t, o.db, `UPDATE backups SET son_kullanma=DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE domain_id=0`)
 	dgDomain(t, o.db, 701, "tk.com", "c_tk", 5)
 
+	var uzakSilinen []string
+	var bagKod, bagN int
 	eski := yetimUzakSil
 	t.Cleanup(func() { yetimUzakSil = eski })
 	var bir sync.Once
 	yetimUzakSil = func(ctx context.Context, db *sql.DB, d *Destination, dosya string) error {
+		uzakSilinen = append(uzakSilinen, dosya)
 		bir.Do(func() {
-			// uzak silme (ağ) sürerken müşteri yeni hostingini açıp yönetici/otomatik yolla bağlama gerçekleşir
-			if n := dgBagla(t, o.r, "c_tk", 701, false); n != 2 {
-				t.Errorf("kurulum: uzak silme sürerken 2 yetim bağlanmalıydı: %d", n)
-			}
+			// uzak silme (ağ) sürerken müşteri yeni hostingini açıp yetimleri bağlar
+			bagKod, bagN = dgBaglaIstek(o.r, "c_tk", 701)
 		})
 		return nil
 	}
 	SilinenSupur(ctx, o.db)
-
-	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=701 AND tip='kurtarma'`); n != 2 {
-		t.Errorf("🔴 süpürme, uzak silme sırasında bağlanan CANLI yedeği sildi: domain 701'de %d/2 satır kaldı", n)
+	if bagKod != 200 || bagN != 1 {
+		t.Errorf("silinmekte olan satır HARİÇ diğeri bağlanmalı (200, 1 satır): %d, %d", bagKod, bagN)
 	}
-	for _, d := range dosyalar {
-		if !varMi(filepath.Join(o.kok, "c_tk", d)) {
-			t.Errorf("🔴 bağlanmış (canlı) yedeğin DOSYASI silindi: %s", d)
-		}
+	if len(uzakSilinen) != 1 || uzakSilinen[0] != dosyalar[0] {
+		t.Fatalf("🔴 uzak silme yalnız silinmekte olan ilk satır için çağrılmalı (bağlanan ikinci satırın uzak kopyası ASLA): %v", uzakSilinen)
+	}
+	dgYarisDegismezleri(t, o, "c_tk", 701, dosyalar, uzakSilinen)
+	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=701 AND tip='kurtarma'`); n != 1 {
+		t.Errorf("domain 701'de bağlanan 1 satır beklenirdi: %d", n)
 	}
 }
 
-// BULGU M2 — aynı yarış yönetici DELETE ucunda: 200 döner, müşterinin kurtardığı yedek gider.
-func TestDGBulgu_M2_YoneticiSilUcu_UzakSilmeSirasindaBaglanan_CanliYedekSilinmemeli(t *testing.T) {
+// BULGU M2 — aynı yarış yönetici DELETE ucunda: 200 döner, müşterinin kurtardığı yedek (ve uzak kopyası) yerinde kalır.
+func TestDGBulgu_M2_YoneticiSilUcu_UzakSilmeSirasindaBaglama_SilinmekteOlanBaglanmazDigeriBaglanir(t *testing.T) {
 	o := dgYeni(t)
 	dosyalar, _ := o.hesap(710, "tm.com", "c_tm", 5, "", 2)
 	kSil(t, o.db, 710, "tm.com", "c_tm")
 	dgDomain(t, o.db, 711, "tm.com", "c_tm", 5)
+
+	var uzakSilinen []string
+	var bagKod, bagN int
 	eski := yetimUzakSil
 	t.Cleanup(func() { yetimUzakSil = eski })
 	var bir sync.Once
 	yetimUzakSil = func(ctx context.Context, db *sql.DB, d *Destination, dosya string) error {
-		bir.Do(func() { dgBagla(t, o.r, "c_tm", 711, false) })
+		uzakSilinen = append(uzakSilinen, dosya)
+		bir.Do(func() { bagKod, bagN = dgBaglaIstek(o.r, "c_tm", 711) })
 		return nil
 	}
 	kod, g := advIstek(o.r, "DELETE", "/s/c_tm", "")
 	t.Logf("yönetici DELETE yanıtı: %d %s", kod, g)
-	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=711 AND tip='kurtarma'`); n != 2 {
-		t.Errorf("🔴 yönetici silmesi, aynı anda bağlanan CANLI yedeği sildi: domain 711'de %d/2 satır kaldı (yanıt: %s)", n, g)
+	if kod != 200 {
+		t.Errorf("silme ucu 200 dönmeli (araya bağlanan satırlar atlanır, hata sayılmaz): %d %s", kod, g)
 	}
-	for _, d := range dosyalar {
-		if !varMi(filepath.Join(o.kok, "c_tm", d)) {
-			t.Errorf("🔴 bağlanmış (canlı) yedeğin DOSYASI silindi: %s", d)
-		}
+	if bagKod != 200 || bagN != 1 {
+		t.Errorf("silinmekte olan satır HARİÇ diğeri bağlanmalı (200, 1 satır): %d, %d", bagKod, bagN)
 	}
+	if len(uzakSilinen) != 1 || uzakSilinen[0] != dosyalar[0] {
+		t.Fatalf("🔴 uzak silme yalnız silinmekte olan ilk satır için çağrılmalı: %v", uzakSilinen)
+	}
+	dgYarisDegismezleri(t, o, "c_tm", 711, dosyalar, uzakSilinen)
 }
 
 // ================================================================ N — yetimleriBagla değişmezleri

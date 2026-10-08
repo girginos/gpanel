@@ -838,6 +838,21 @@ func TestS2_Esik_TopluIsaretlemeKorunur(t *testing.T) {
 			t.Errorf("🔴 günlük beklenirdi: %s", logs.String())
 		}
 	})
+	t.Run("yetimler paydayı ŞİŞİRMEZ: bozuk domains + çok yetim → adaylar canlı+aday satırların yarısından fazlaysa ATLANIR", func(t *testing.T) {
+		db := kDB(t)
+		logs := logYakala(t)
+		for i := 0; i < 500; i++ { // toplu bayi silmesinden kalan işaretli yetimler
+			silinenYetim(t, db, 9500, "y.test", "c_yet", fmt.Sprintf("c_yet-20261001-%06d.tar.gz", i), 0, "NULL")
+		}
+		canliAyarla(t, db, 20) // domains boş DEĞİL (1 canlı domain) ama kalanı kayıp: 150 aday / (20 + 150) canlı+aday
+		ekle(t, db, 9001, "c_orf", 150)
+		if m, _ := SilinenSahipsizIsaretle(context.Background(), db); m != 0 {
+			t.Errorf("🔴 yetimler paydayı şişirdi: bozuk domains tablosu 150 satırı yetim yaptı: %d", m)
+		}
+		if !strings.Contains(logs.String(), "ATLANDI") {
+			t.Errorf("🔴 günlük beklenirdi: %s", logs.String())
+		}
+	})
 	t.Run("tam yarı (aday*2 == toplam) eşik aşılmaz → işaretlenir", func(t *testing.T) {
 		db := kDB(t)
 		logYakala(t)
@@ -1119,35 +1134,47 @@ func TestYalitimliIslem_ReadCommittedAcar(t *testing.T) {
 	}
 }
 
-// Araya giren bağlama (yetim artık canlı) hata DEĞİLDİR: silme ucu 200 döner, kurtarılan yedeğe dokunmaz, kurtarılan satır sayılmaz.
+// Araya giren bağlama (yetim artık canlı) hata DEĞİLDİR: silme ucu 200 döner, kurtarılan yedeğe dokunmaz ve (satır kilidi
+// sayesinde) uzak kopyasını da silmez, kurtarılan satır "silinen" sayılmaz. Bağlama burada TEK satırı (id=?) hedefler: işlenmekte olan
+// satırın kilidini beklemeden, silme ucu o satıra gelmeden önce tamamlanır (zamanlamadan bağımsız, deterministik).
 func TestSilinenSil_ArayaBaglanan_HataSayilmaz_200(t *testing.T) {
 	o := dgYeni(t)
 	logYakala(t)
 	dosyalar, _ := o.hesap(2500, "ara.com", "c_ara", 5, "", 2)
 	kSil(t, o.db, 2500, "ara.com", "c_ara")
 	dgDomain(t, o.db, 2501, "ara.com", "c_ara", 5)
+	idler := dgYetimIDleri(t, o.db, 2500)
+	if len(idler) != 2 {
+		t.Fatalf("2 yetim bekleniyordu: %v", idler)
+	}
+	var uzakSilinen []string
 	eski := yetimUzakSil
 	t.Cleanup(func() { yetimUzakSil = eski })
-	var bir bool
 	yetimUzakSil = func(ctx context.Context, db *sql.DB, d *Destination, dosya string) error {
-		if !bir {
-			bir = true
-			dgBagla(t, o.r, "c_ara", 2501, false) // uzak silme sürerken sahibi yedekleri kurtarır
+		uzakSilinen = append(uzakSilinen, dosya)
+		if len(uzakSilinen) == 1 { // ilk satırın uzak silmesi sürerken sahibi İKİNCİ satırı kurtarır
+			if n, err := yetimleriBagla(ctx, db, 2501, "id=?", idler[1]); err != nil || n != 1 {
+				t.Errorf("kurulum: ikinci satır bağlanmalıydı: n=%d err=%v", n, err)
+			}
 		}
 		return nil
 	}
 	kod, g := advIstek(o.r, "DELETE", "/s/c_ara", "")
 	m := dgJSON(t, g)
-	if kod != 200 || m["ok"] != true || m["silinen"] != float64(0) {
-		t.Errorf("araya bağlanan satırlar atlanır, hata sayılmaz → 200 silinen=0: %d %s", kod, g)
+	if kod != 200 || m["ok"] != true || m["silinen"] != float64(1) {
+		t.Errorf("araya bağlanan satır atlanır, hata sayılmaz → 200 silinen=1: %d %s", kod, g)
 	}
-	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=2501 AND tip='kurtarma'`) != 2 {
-		t.Error("kurtarılan canlı yedekler yerinde kalmalı")
+	if len(uzakSilinen) != 1 || uzakSilinen[0] != dosyalar[0] {
+		t.Errorf("🔴 yalnız ilk satırın uzak kopyası silinmeli, kurtarılan satırınki ASLA: %v", uzakSilinen)
 	}
-	for _, d := range dosyalar {
-		if !varMi(filepath.Join(o.kok, "c_ara", d)) {
-			t.Errorf("kurtarılan yedek dosyası silindi: %s", d)
-		}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=2501 AND tip='kurtarma' AND dosya=?`, dosyalar[1]) != 1 {
+		t.Error("kurtarılan canlı yedek yerinde kalmalı")
+	}
+	if !varMi(filepath.Join(o.kok, "c_ara", dosyalar[1])) {
+		t.Errorf("kurtarılan yedek dosyası silindi: %s", dosyalar[1])
+	}
+	if varMi(filepath.Join(o.kok, "c_ara", dosyalar[0])) || g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE dosya=?`, dosyalar[0]) != 0 {
+		t.Errorf("silinen yedek (satır + dosya) gitmiş olmalı: %s", dosyalar[0])
 	}
 }
 
@@ -1312,5 +1339,403 @@ func TestRowsErr_ListeOzetSilinen_YarimVeriBasariGibiDonmez(t *testing.T) {
 	SilinenSupur(context.Background(), db3)
 	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE sistem_kullanici='c_re2'`) != 1 {
 		t.Error("parti okunamadıysa hiçbir şey silinmemeli")
+	}
+}
+
+// ---------------------------------------------------------------- O2: uzak silmesi süren satır kayıt defterinde
+
+// Uzak silme sürerken satır "silinmekte" kayıtlıdır: aynı satırı işlemek isteyen İKİNCİ silme (süpürme + yönetici ucu aynı anda)
+// uzak kopyaya dokunmadan atlanır; bağlama o satırı bağlamaz. Bitince kayıt kalkar.
+func TestYetimYedegiSil_UzakSilmeSirasindaSatirKayitliVeIkinciSilmeAtlanir(t *testing.T) {
+	o := dgYeni(t)
+	dosyalar, _ := o.hesap(3000, "kk.com", "c_kk", 5, "", 2)
+	kSil(t, o.db, 3000, "kk.com", "c_kk")
+	dgDomain(t, o.db, 3001, "kk.com", "c_kk", 5)
+	idler := dgYetimIDleri(t, o.db, 3000)
+	var uzak []string
+	var ikinciHata error
+	var kayitli []int64
+	var bagN int64
+	var bagErr error
+	eski := yetimUzakSil
+	t.Cleanup(func() { yetimUzakSil = eski })
+	yetimUzakSil = func(ctx context.Context, db *sql.DB, d *Destination, dosya string) error {
+		uzak = append(uzak, dosya)
+		kayitli = yetimSilinmektekiler()
+		// aynı satırı başka bir silme (ör. yönetici ucu) işlemek ister: uzak kopyaya DOKUNMADAN atlanmalı
+		ikinciHata = yetimYedegiSil(ctx, db, idler[0], "", "c_kk", dosyalar[0], false)
+		// aynı anda tüm yetimleri bağlama: silinmekte olan satır hariç diğeri bağlanır
+		bagN, bagErr = yetimleriBagla(ctx, db, 3001, "sistem_kullanici=?", "c_kk")
+		return nil
+	}
+	if err := yetimYedegiSil(context.Background(), o.db, idler[0], "", "c_kk", dosyalar[0], false); err != nil {
+		t.Fatal(err)
+	}
+	if len(kayitli) != 1 || kayitli[0] != idler[0] {
+		t.Errorf("uzak silme sürerken satır kayıt defterinde olmalı: %v", kayitli)
+	}
+	if !errors.Is(ikinciHata, errYetimDegil) {
+		t.Errorf("🔴 aynı satırı işleyen ikinci silme atlanmalı (errYetimDegil): %v", ikinciHata)
+	}
+	if len(uzak) != 1 {
+		t.Errorf("🔴 uzak kopya TEK kez silinmeli (ikinci silme uzağa gitmemeli): %v", uzak)
+	}
+	if bagErr != nil || bagN != 1 {
+		t.Errorf("silinmekte olan satır hariç 1 yetim bağlanmalı: n=%d err=%v", bagN, bagErr)
+	}
+	if got := yetimSilinmektekiler(); len(got) != 0 {
+		t.Errorf("silme bitince kayıt kalkmalı: %v", got)
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE id=?`, idler[0]) != 0 || varMi(filepath.Join(o.kok, "c_kk", dosyalar[0])) {
+		t.Error("silinen satır ve dosya gitmiş olmalı")
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=3001`, idler[1]) != 1 || !varMi(filepath.Join(o.kok, "c_kk", dosyalar[1])) {
+		t.Error("bağlanan ikinci satır canlı ve dosyası yerinde olmalı")
+	}
+}
+
+// Uzak silme başarısızsa kayıt KALKAR (defter sızmaz): satır korunur, hemen yeniden denenebilir ve sonradan bağlanabilir.
+func TestYetimYedegiSil_UzakHatadaKayitKalkar(t *testing.T) {
+	o := dgYeni(t)
+	sahte := yetimUzakSahte(t)
+	sahte.hata = func(*Destination, string) error { return errors.New("uzak kapalı") }
+	dosyalar, _ := o.hesap(3010, "kb.com", "c_kb", 5, "", 1)
+	kSil(t, o.db, 3010, "kb.com", "c_kb")
+	dgDomain(t, o.db, 3011, "kb.com", "c_kb", 5)
+	idler := dgYetimIDleri(t, o.db, 3010)
+	for i := 0; i < 2; i++ { // ikinci deneme de uzağa gider: kayıt birinci hatadan sonra kalkmıştı
+		if err := yetimYedegiSil(context.Background(), o.db, idler[0], "", "c_kb", dosyalar[0], false); err == nil || errors.Is(err, errYetimDegil) {
+			t.Fatalf("deneme %d: uzak hata dönmeliydi: %v", i, err)
+		}
+	}
+	if sahte.say() != 2 {
+		t.Errorf("her deneme uzağa gitmeli: %d", sahte.say())
+	}
+	if got := yetimSilinmektekiler(); len(got) != 0 {
+		t.Errorf("🔴 başarısız silme kayıt defterini temizlemedi (satır sonsuza dek bağlanamaz): %v", got)
+	}
+	if n, err := yetimleriBagla(context.Background(), o.db, 3011, "sistem_kullanici=?", "c_kb"); err != nil || n != 1 {
+		t.Errorf("başarısız silmeden sonra satır bağlanabilmeli: n=%d err=%v", n, err)
+	}
+}
+
+// yetimHalaYetim KİLİTLİ okur: satırı güncelleyen (henüz commit etmemiş) bir bağlamanın commit'ini BEKLER; commit'ten sonra satır
+// yetim değildir (errYetimDegil). Kilitsiz (tutarlı anlık) okuma eski "yetim" cevabını verip silmeyi uzak adıma geçirirdi.
+func TestYetimHalaYetim_SurenBaglamayiBekler(t *testing.T) {
+	o := dgYeni(t)
+	o.hesap(3030, "bk.com", "c_bkl", 5, "", 1)
+	kSil(t, o.db, 3030, "bk.com", "c_bkl")
+	dgDomain(t, o.db, 3031, "bk.com", "c_bkl", 5)
+	idler := dgYetimIDleri(t, o.db, 3030)
+	tx, err := o.db.Begin() // bağlama işlemi: satırı bağladı ama henüz commit etmedi
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE backups SET domain_id=3031, eski_domain_id=0, iz_id='', silinme=NULL, son_kullanma=NULL, tip='kurtarma' WHERE id=?`, idler[0]); err != nil {
+		t.Fatal(err)
+	}
+	sonuc := make(chan error, 1)
+	go func() { sonuc <- yetimHalaYetim(context.Background(), o.db, idler[0]) }()
+	select {
+	case e := <-sonuc:
+		t.Fatalf("🔴 yetimHalaYetim süren bağlamanın commit'ini BEKLEMEDİ (kilitsiz okuma): %v", e)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case e := <-sonuc:
+		if !errors.Is(e, errYetimDegil) {
+			t.Errorf("bağlama commit edildikten sonra errYetimDegil beklenirdi: %v", e)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("yetimHalaYetim commit'ten sonra dönmedi")
+	}
+}
+
+// Uzak adım yetimUzakSureSiniri ile sınırlıdır: kara delik bir hedef satır kilidini süresiz tutmaz; hata olur, satır + dosya KALIR.
+func TestYetimYedegiSil_UzakAdimSureSinirli(t *testing.T) {
+	o := dgYeni(t)
+	eskiSn := yetimUzakSureSiniri
+	yetimUzakSureSiniri = 300 * time.Millisecond
+	t.Cleanup(func() { yetimUzakSureSiniri = eskiSn })
+	eski := yetimUzakSil
+	t.Cleanup(func() { yetimUzakSil = eski })
+	yetimUzakSil = func(ctx context.Context, db *sql.DB, d *Destination, dosya string) error {
+		select {
+		case <-ctx.Done(): // kara delik: yalnız süre sınırı bitirir
+			return ctx.Err()
+		case <-time.After(5 * time.Second): // emniyet: süre sınırı UYGULANMADIysa test askıda kalmasın
+			return errors.New("süre sınırı uygulanmadı")
+		}
+	}
+	dosyalar, _ := o.hesap(3020, "ks.com", "c_ks", 5, "", 1)
+	kSil(t, o.db, 3020, "ks.com", "c_ks")
+	idler := dgYetimIDleri(t, o.db, 3020)
+	t0 := time.Now()
+	err := yetimYedegiSil(context.Background(), o.db, idler[0], "", "c_ks", dosyalar[0], false)
+	if sure := time.Since(t0); sure > 10*time.Second {
+		t.Fatalf("uzak adım süre sınırında kesilmedi: %v", sure)
+	}
+	var sh *yetimSilHatasi
+	if !errors.As(err, &sh) || !sh.uzak || !uzakHedefUlasilamiyor(sh.err) {
+		t.Fatalf("uzak kaynaklı, hedef-erişilemez sınıfında hata beklenirdi: %v", err)
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE id=?`, idler[0]) != 1 || !varMi(filepath.Join(o.kok, "c_ks", dosyalar[0])) {
+		t.Error("süre sınırı aşılınca satır + dosya KORUNMALI")
+	}
+}
+
+// ---------------------------------------------------------------- devre kesici (aynı izin ölü hedefi)
+
+func TestUzakHedefUlasilamiyor_Siniflandirma(t *testing.T) {
+	for _, c := range []struct {
+		hata string
+		bek  bool
+	}{
+		{"lftp: Login failed: 530 Login incorrect", true},
+		{"lftp: cd: Fatal error: Could not resolve host name x.invalid", true},
+		{"lftp: Connection refused", true},
+		{"lftp: Fatal error: Host key verification failed", true},
+		{"genel hedef (/a): lftp: signal: killed", true},
+		{"context deadline exceeded", true},
+		{"lftp: connect: No route to host", true},
+		{"lftp: Connection timed out", true},
+		{"lftp: cannot connect to ftp.x.invalid", true},
+		{"lftp: getaddrinfo: Name or service not known", true},
+		{"lftp: connect: Network is unreachable", true},
+		{"lftp: Timeout - reconnecting", true},
+		{"lftp: Access failed: 550 Permission denied", false},
+		{"uzak kopya silme komutundan SONRA hâlâ listeleniyor (/a/b) — hedefteki izinleri kontrol edin", false},
+		{"başka bir hata", false},
+	} {
+		if got := uzakHedefUlasilamiyor(errors.New(c.hata)); got != c.bek {
+			t.Errorf("%q → %v, beklenen %v", c.hata, got, c.bek)
+		}
+	}
+	if !uzakHedefUlasilamiyor(ErrLftpYok) || !uzakHedefUlasilamiyor(fmt.Errorf("x: %w", context.DeadlineExceeded)) || uzakHedefUlasilamiyor(nil) {
+		t.Error("ErrLftpYok/DeadlineExceeded erişilemez sayılmalı; nil sayılmamalı")
+	}
+}
+
+// Ölü hedefli hesap (5 yetim, ID'leri küçük) turda TEK deneme alır; ID'si büyük sağlıklı hesap (3 yetim) temizlenir.
+// Dosyaya özgü hata (izin) kesiciyi AÇMAZ: o hesabın tüm satırları denenir.
+func TestSupur_DevreKesici_OluHedefTekDeneme_SaglikliHesapTemizlenir(t *testing.T) {
+	o := dgYeni(t)
+	sahte := yetimUzakSahte(t)
+	lg := logYakala(t)
+	sahte.hata = func(d *Destination, dosya string) error {
+		if strings.HasPrefix(dosya, "c_olu") {
+			return errors.New("lftp: Fatal error: Could not resolve host name olu.invalid")
+		}
+		return nil
+	}
+	o.hesap(3100, "olu.com", "c_olu", 5, "", 5)
+	o.hesap(3101, "iyi.com", "c_iyi", 5, "", 3)
+	kSil(t, o.db, 3100, "olu.com", "c_olu")
+	kSil(t, o.db, 3101, "iyi.com", "c_iyi")
+	g113_exec(t, o.db, `UPDATE backups SET son_kullanma=DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE domain_id=0`)
+	SilinenSupur(context.Background(), o.db)
+	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE sistem_kullanici='c_olu' AND domain_id=0`); n != 5 {
+		t.Errorf("ölü hedefli hesabın 5 yetimi de KORUNMALI: %d", n)
+	}
+	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE sistem_kullanici='c_iyi'`); n != 0 {
+		t.Errorf("🔴 sağlıklı hesabın yetimleri ölü hedefin arkasında kaldı: %d/3 satır duruyor", n)
+	}
+	say := map[string]int{}
+	sahte.mu.Lock()
+	for _, c := range sahte.cagrilar {
+		say[c.dosya[:strings.Index(c.dosya, "-")]]++
+	}
+	sahte.mu.Unlock()
+	if say["c_olu"] != 1 || say["c_iyi"] != 3 {
+		t.Errorf("c_olu TEK deneme, c_iyi 3 deneme beklenirdi: %v", say)
+	}
+	if g := lg.String(); !strings.Contains(g, "3 yedek silindi") || !strings.Contains(g, "1 silinemedi") || !strings.Contains(g, "4 denenmedi") {
+		t.Errorf("özet günlüğü silinen/silinemeyen/denenmeyen sayılarını söylemeli: %q", g)
+	}
+}
+
+func TestSupur_DevreKesici_DosyayaOzguHataKesiciyiAcmaz(t *testing.T) {
+	o := dgYeni(t)
+	sahte := yetimUzakSahte(t)
+	logYakala(t)
+	sahte.hata = func(d *Destination, dosya string) error {
+		if strings.HasSuffix(dosya, "-000001.tar.gz") { // yalnız bir dosya silinemiyor (izin)
+			return errors.New("lftp: Access failed: 550 Permission denied")
+		}
+		return nil
+	}
+	o.hesap(3110, "izin.com", "c_izin", 5, "", 4)
+	kSil(t, o.db, 3110, "izin.com", "c_izin")
+	g113_exec(t, o.db, `UPDATE backups SET son_kullanma=DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE domain_id=0`)
+	SilinenSupur(context.Background(), o.db)
+	if n := sahte.say(); n != 4 {
+		t.Errorf("dosyaya özgü hata kesiciyi açmamalı: 4 satırın 4'ü de denenmeli, %d", n)
+	}
+	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE sistem_kullanici='c_izin'`); n != 1 {
+		t.Errorf("yalnız silinemeyen tek satır kalmalı: %d", n)
+	}
+}
+
+// Yönetici silme ucu da aynı kesiciyi kullanır: ölü hedefte TEK uzak deneme, 409 + uzagi_yoksay=true, hepsi korunur.
+func TestSilinenSil_DevreKesici_OluHedefTekDeneme(t *testing.T) {
+	o := dgYeni(t)
+	sahte := yetimUzakSahte(t)
+	logYakala(t)
+	sahte.hata = func(*Destination, string) error { return errors.New("lftp: Connection refused") }
+	o.hesap(3120, "kesici.com", "c_kes", 5, "", 5)
+	kSil(t, o.db, 3120, "kesici.com", "c_kes")
+	kod, g := advIstek(o.r, "DELETE", "/s/c_kes", "")
+	m := dgJSON(t, g)
+	if kod != 409 || m["uzagi_yoksay"] != true {
+		t.Errorf("ölü hedef → 409 uzagi_yoksay=true: %d %s", kod, g)
+	}
+	if n := sahte.say(); n != 1 {
+		t.Errorf("TEK uzak deneme beklenirdi: %d", n)
+	}
+	if !strings.Contains(fmt.Sprint(m["hata"]), "5 yedek silinemedi") {
+		t.Errorf("5 yedeğin hepsi silinemedi sayılmalı: %s", g)
+	}
+	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=0`); n != 5 {
+		t.Errorf("hepsi korunmalı: %d", n)
+	}
+	// uzağı yoksayınca hepsi silinir (kesici yalnız uzak adım içindir)
+	kod, g = advIstek(o.r, "DELETE", "/s/c_kes?uzagi_yoksay=1", "")
+	if kod != 200 || g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=0`) != 0 {
+		t.Errorf("uzağı yoksayınca 5 yedek silinmeli: %d %s", kod, g)
+	}
+}
+
+// Dosyaya özgü hata (izin) yönetici ucunda da kesiciyi AÇMAZ: tüm satırlar denenir, yalnız silinemeyen kalır (409, uzagi_yoksay=true).
+func TestSilinenSil_DevreKesici_DosyayaOzguHataKesiciyiAcmaz(t *testing.T) {
+	o := dgYeni(t)
+	sahte := yetimUzakSahte(t)
+	logYakala(t)
+	sahte.hata = func(d *Destination, dosya string) error {
+		if strings.HasSuffix(dosya, "-000001.tar.gz") {
+			return errors.New("lftp: Access failed: 550 Permission denied")
+		}
+		return nil
+	}
+	o.hesap(3130, "dosya.com", "c_dos", 5, "", 4)
+	kSil(t, o.db, 3130, "dosya.com", "c_dos")
+	kod, g := advIstek(o.r, "DELETE", "/s/c_dos", "")
+	m := dgJSON(t, g)
+	if kod != 409 || m["uzagi_yoksay"] != true || m["silinen"] != float64(3) {
+		t.Errorf("3 satır silinmeli, 1'i uzak dosya hatasıyla kalmalı (409, uzagi_yoksay): %d %s", kod, g)
+	}
+	if n := sahte.say(); n != 4 {
+		t.Errorf("dosyaya özgü hata kesiciyi açmamalı: 4 satırın 4'ü de denenmeli: %d", n)
+	}
+	if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE sistem_kullanici='c_dos'`); n != 1 {
+		t.Errorf("yalnız silinemeyen tek satır kalmalı: %d", n)
+	}
+}
+
+// ---------------------------------------------------------------- S2 tek tur
+
+func TestSahipsizIsaretle_AyniAndaTekTur(t *testing.T) {
+	db := silinenDB(t)
+	silinenOrtam(t)
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9990,'canli.test','c_canli')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, boyut_b) VALUES (9991,'c_hayalet-20261001-000000.tar.gz',5)`)
+	sahipsizIsaretKilit.Lock() // başka bir tur sürüyor (ör. açılış turu ile 04:00 turu çakıştı)
+	i, tn := SilinenSahipsizIsaretle(context.Background(), db)
+	sahipsizIsaretKilit.Unlock()
+	if i != 0 || tn != 0 || g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9991 AND silinme IS NULL`) != 1 {
+		t.Fatalf("🔴 devam eden tur varken ikinci tur işaretledi: (%d,%d)", i, tn)
+	}
+	if i, _ := SilinenSahipsizIsaretle(context.Background(), db); i != 1 {
+		t.Errorf("kilit boşalınca tur işaretlemeli: %d", i)
+	}
+}
+
+// ---------------------------------------------------------------- silinen_yedek_gun okunamazsa SİLME yönünde yorumlanmaz
+
+func TestSilinenAyar_OkunamazsaSaklamaYonundeDavranir(t *testing.T) {
+	// Okuma hatası ("tablo yok" ile benzetilir) ≠ ayarsız: GET 500; iz yazımı süresiz saklar; S2 işaretlemeyi sonraya bırakır.
+	t.Run("GET 500", func(t *testing.T) {
+		o := dgYeni(t)
+		logYakala(t)
+		h := &Handlers{DB: o.db}
+		w := httptest.NewRecorder()
+		h.SilinenAyarGet(w, httptest.NewRequest("GET", "/x", nil))
+		if w.Code != 200 {
+			t.Fatalf("ayar tablosu varken 200 beklenirdi: %d %s", w.Code, w.Body.String())
+		}
+		g113_exec(t, o.db, `DROP TABLE cp_ayarlar`)
+		w = httptest.NewRecorder()
+		h.SilinenAyarGet(w, httptest.NewRequest("GET", "/x", nil))
+		if w.Code != 500 || strings.Contains(w.Body.String(), `"gun"`) {
+			t.Errorf("🔴 okunamayan ayar 200+null (= 'ayarsız') gibi gösterilmemeli: %d %s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("iz yazımı süresiz saklar", func(t *testing.T) {
+		o := dgYeni(t)
+		logYakala(t)
+		o.hesap(3200, "oku.com", "c_oku", 5, "", 2)
+		ctx := context.Background()
+		iz := SilinenIzHazirla(ctx, o.db, 3200, "oku.com", "c_oku")
+		g113_exec(t, o.db, `DELETE FROM domains WHERE id=3200`)
+		g113_exec(t, o.db, `DROP TABLE cp_ayarlar`)
+		iz.Yaz(ctx, o.db)
+		if n := g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND silinme IS NOT NULL AND son_kullanma IS NULL`); n != 2 {
+			t.Errorf("🔴 ayar okunamadı: yetimler süresiz saklanmalı (son_kullanma NULL), %d/2", n)
+		}
+	})
+	t.Run("S2 sonraya bırakır", func(t *testing.T) {
+		db := silinenDB(t)
+		silinenOrtam(t)
+		logYakala(t)
+		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9992,'canli.test','c_canli')`)
+		g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, boyut_b) VALUES (9993,'c_hayalet2-20261001-000000.tar.gz',5)`)
+		g113_exec(t, db, `DROP TABLE cp_ayarlar`)
+		if i, _ := SilinenSahipsizIsaretle(context.Background(), db); i != 0 || g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=9993 AND silinme IS NULL`) != 1 {
+			t.Errorf("🔴 ayar okunamazken S2 yanlış süreyle işaretledi: %d", i)
+		}
+	})
+	t.Run("kalıntı ayırma süresiz saklar", func(t *testing.T) {
+		db := silinenDB(t)
+		silinenOrtam(t)
+		logYakala(t)
+		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9994,'yeni.test','c_yeni')`)
+		g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, boyut_b) VALUES (9994,'c_eskisahip-20261001-000000.tar.gz',5)`)
+		g113_exec(t, db, `DROP TABLE cp_ayarlar`)
+		if n := YetimKalintilariniAyir(context.Background(), db, 9994); n != 1 {
+			t.Fatalf("kalıntı yine de yeni müşteriden ayrılmalı: %d", n)
+		}
+		if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND son_kullanma IS NULL AND silinme IS NOT NULL`) != 1 {
+			t.Error("🔴 ayar okunamadı: kalıntı süresiz saklanmalı")
+		}
+	})
+}
+
+// ---------------------------------------------------------------- A2: kalıntı ayırma bütçesi (30 sn) ağır kilitte kısa bütçeye düşmez
+
+// Kalıntı satırı 4 sn başka bir işlem kilitli tutuyor: eski 3 sn'lik iz bütçesi UPDATE'i yarıda keser ve eski müşterinin yedeği yeni
+// müşteriye görünür kalırdı; kalintiZamanAsimi (30 sn) beklemeyi kaldırır.
+func TestYetimKalintilariniAyir_KilitliSatirBeklenir(t *testing.T) {
+	db := silinenDB(t)
+	silinenOrtam(t)
+	logYakala(t)
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (9995,'yeni.test','c_yeni2')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, boyut_b) VALUES (9995,'c_eskisahip2-20261001-000000.tar.gz',5)`)
+	tutan, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tutan.Rollback()
+	if _, err := tutan.Exec(`SELECT id FROM backups WHERE domain_id=9995 FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(4 * time.Second)
+		_ = tutan.Rollback()
+	}()
+	if n := YetimKalintilariniAyir(context.Background(), db, 9995); n != 1 {
+		t.Errorf("🔴 kilitli kalıntı satırı beklenip işaretlenmeliydi (bütçe ≥ 30 sn): %d", n)
 	}
 }

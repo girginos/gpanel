@@ -140,6 +140,9 @@ func TestSemaYapiDogrula_TemizVeBozukDurum(t *testing.T) {
 			`ALTER TABLE backup_yetim_hedefler DROP KEY uk_yetim_hedef_domain`, "uk_yetim_hedef_domain"},
 		{"fk-geri-geldi", `ALTER TABLE backups ADD CONSTRAINT fk_backup_domain FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE`,
 			`ALTER TABLE backups DROP FOREIGN KEY fk_backup_domain`, "backups.fk_backup_domain FK'si hala var"},
+		// Göç yalnız fk_backup_domain adını kaldırır: başka adla duran FK da yakalanmalı (CASCADE ile yedek satırları giderdi).
+		{"fk-baska-adla", `ALTER TABLE backups ADD CONSTRAINT backups_eski_fk FOREIGN KEY (domain_id) REFERENCES domains(id) ON DELETE CASCADE`,
+			`ALTER TABLE backups DROP FOREIGN KEY backups_eski_fk`, "backups.backups_eski_fk FK'si hala var"},
 	} {
 		exec(c.boz)
 		s := semaYapiDogrula(db)
@@ -150,6 +153,22 @@ func TestSemaYapiDogrula_TemizVeBozukDurum(t *testing.T) {
 		if s := semaYapiDogrula(db); len(s) != 0 {
 			t.Errorf("%s: onarım sonrası temiz olmalı: %v", c.ad, s)
 		}
+	}
+}
+
+// Yapı OKUNAMIYORSA (sorgu başarısız) sorun uydurulmaz ama sessiz de geçilmez: günlüğe yazılır.
+func TestSemaYapiDogrula_SorguBasarisizsaSorunUretmezAmaLoglar(t *testing.T) {
+	db := semaTestDB(t)
+	_ = db.Close() // sonraki her sorgu başarısız
+	var gunluk bytes.Buffer
+	eski := log.Writer()
+	log.SetOutput(&gunluk)
+	defer log.SetOutput(eski)
+	if s := semaYapiDogrula(db); len(s) != 0 {
+		t.Errorf("okunamayan yapı için sorun uydurulmamalı: %v", s)
+	}
+	if !strings.Contains(gunluk.String(), "sema yapi sorgusu basarisiz (backups FK)") {
+		t.Errorf("okunamayan FK sorgusu günlüğe yazılmalı: %q", gunluk.String())
 	}
 }
 
