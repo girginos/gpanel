@@ -182,6 +182,53 @@ yeni_tablolari_kenara_al() {
 }
 # <<< geri-donus-kapisi
 
+# >>> goc-dizini-geri
+# 🔴 GÖÇ DİZİNİ DE ROLLBACK'TE GERİ ALINIR. 8. adım paketin göç dosyalarını $MIGR'e açar. Rollback
+# ikiliyi ve DB'yi geri alır; dizine dokunmazsa ESKİ ikili geri alınmış DB ile açılırken dizindeki TÜM
+# .sql dosyalarını okur ve defterde (dump'tan geri geldi) olmayanı YENİDEN UYGULAR → "geri alınmış"
+# sistem eski ikili + YENİ şema olur. 181 provasında ölçüldü: sağlıksız açılış → rollback → eski ikili
+# 0217'yi yeniden çalıştırdı (FK yeniden düştü, tablo geri geldi, defter 128).
+MIGR_BAK=""
+
+# goc_dizini_yedekle — 8. adımdan ÖNCE çağrılır. Başarısızlık güncellemeyi DURDURMAZ; yalnız
+# rollback dizini geri alamaz (uyarı verilir).
+goc_dizini_yedekle() {
+  MIGR_BAK="${MIGR%/}.bak"
+  rm -rf "$MIGR_BAK" 2>/dev/null || true
+  if [ -d "$MIGR" ] && cp -a "$MIGR" "$MIGR_BAK" 2>/dev/null; then
+    return 0
+  fi
+  warn "göç dizini yedeklenemedi — rollback göç dosyalarını geri alamayabilir (eski ikili yeni göçü yeniden uygulayabilir)"
+  MIGR_BAK=""
+  return 1
+}
+
+# goc_dizini_geri_al — rollback'te panel DURMUŞKEN çağrılır: bu güncellemenin eklediği göç dosyalarını
+# kaldırır, değişen/silinenleri yedekten geri koyar. Dizin hiçbir anda boş kalmaz (önce sil, sonra
+# üstüne kopyala; rm -rf + cp DEĞİL).
+goc_dizini_geri_al() {
+  [ -n "$MIGR_BAK" ] && [ -d "$MIGR_BAK" ] || return 1
+  local f n=0
+  for f in "$MIGR"/*.sql; do
+    [ -e "$f" ] || continue
+    [ -e "$MIGR_BAK/$(basename "$f")" ] && continue
+    rm -f "$f" && n=$((n + 1))
+  done
+  if ! cp -af "$MIGR_BAK"/. "$MIGR"/ 2>/dev/null; then
+    warn "göç dizini geri konamadı — elle: cp -af $MIGR_BAK/. $MIGR/"
+    return 1
+  fi
+  ok "göç dizini güncelleme öncesine döndürüldü ($n yeni göç dosyası kaldırıldı)"
+}
+
+# goc_dizini_temizle — başarıda yedeği kaldırır (bayat .bak kalmasın).
+goc_dizini_temizle() {
+  [ -n "$MIGR_BAK" ] && rm -rf "$MIGR_BAK" 2>/dev/null
+  MIGR_BAK=""
+  return 0
+}
+# <<< goc-dizini-geri
+
 # çalışan panelin /healthz'inden sürüm (binary'nin --version flag'i YOK, asla çalıştırmıyoruz)
 # 🔴 SAGLIK URL'INI VARSAYMA — env'den OKU. Sabit :8080, portu degistirilmis
 # (girginospanel-port-swap.sh) saglikli bir sunucuda saglik kontrolunu HIC
@@ -704,6 +751,7 @@ if [ -f "$A/migrations.tar.gz" ]; then
   # blogu HIC calismaz ve yeni binary + yeni frontend diskte, eksik migration
   # ile kalir. Ilk reboot'ta panel bozuk semayla acilir.
   mkdir -p "$MIGR" || die "migration dizini olusturulamadi"
+  goc_dizini_yedekle || true   # rollback için (bkz. goc-dizini-geri bloğu)
   tar xzf "$A/migrations.tar.gz" -C "$MIGR" || die "migration arsivi acilamadi — binary/frontend geri alinmali: $BIN.bak"
   ok "migration'lar senkron ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql)"
 fi
@@ -907,6 +955,7 @@ if [ "$HEALTHY" = 1 ]; then
   echo "$RELHASH" > "$MARKER" 2>/dev/null || true   # bu release'i uygulandı olarak işaretle
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
   ok "panel ACTIVE + /healthz OK (${SAGLIK_GECEN:-?} sn)"
+  goc_dizini_temizle   # rollback gerekmedi: göç dizini yedeği bayat kalmasın
   # SELinux modu bildirimi: kurallar/etiketler HER modda yazılır (selinux_temel); burada yalnız mod
   # raporlanır, ASLA değiştirilmez.
   case "$(getenforce 2>/dev/null || echo Disabled)" in
@@ -1036,6 +1085,10 @@ else
   # migration'ın EKLEDİĞİ tablolar dump'ta olmadığı için kalır (eski binary onları
   # görmez, zararsız). Kolon/veri değişiklikleri geri alınır.
   systemctl stop girginospanel >/dev/null 2>&1 || true
+
+  # Göç dizinini güncelleme öncesine döndür: yoksa ESKİ ikili açılırken bu güncellemenin göç
+  # dosyalarını geri alınmış DB'ye yeniden uygular (bkz. goc-dizini-geri bloğu).
+  goc_dizini_geri_al || true
 
   # 10e'nin geçirdiği birimi geri koy: ESKİ ikili kimlikli birimle açılamaz (sırları
   # yalnız ortamdan okur). env dosyası hiç değişmedi → eski birim + eski ikili tam eski hal.
