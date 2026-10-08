@@ -63,7 +63,7 @@ export default function BackupJobDetayPage() {
   const { jid } = useParams()
   const nav = useNavigate()
   const [d, setD] = useState<Detay | null>(null)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   // Varsayılan: HİÇBİRİ seçili değil — tüm domainler solda cevir("Boş") panelinde başlar,
   // yalnız kullanıcının sağa taşıdıkları geri yüklenir. Poll (setD) seçime DOKUNMAZ.
   const [secili, setSecili] = useState<Set<number>>(new Set())
@@ -211,7 +211,7 @@ function TransferListe({ items, secili, onDegis }: {
   const bosF = f(bos, araBos)
   const secF = f(sec, araSec)
 
-  const tasi = (id: number, ekle: boolean) => { const n = new Set(secili); ekle ? n.add(id) : n.delete(id); onDegis(n) }
+  const tasi = (id: number, ekle: boolean) => { const n = new Set(secili); if (ekle) n.add(id); else n.delete(id); onDegis(n) }
   const hepsiSaga = () => { const n = new Set(secili); bosF.forEach(k => n.add(k.domain_id)); onDegis(n) }
   const hepsiSola = () => { const n = new Set(secili); secF.forEach(k => n.delete(k.domain_id)); onDegis(n) }
 

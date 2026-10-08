@@ -449,7 +449,7 @@ export default function HomePage() {
                 <CartesianGrid strokeDasharray="3 3" stroke={P.izgara} vertical={false} />
                 <XAxis dataKey="t" axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} interval="preserveStartEnd" minTickGap={28} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} ticks={[0, 25, 50, 75, 100]} domain={[0, 100]} width={34} />
-                <Tooltip contentStyle={TIP_STIL} cursor={IMLEC} formatter={(v: any) => [`%${v}`, tab === 'cpu' ? 'CPU' : tab === 'bellek' ? cevir('Bellek') : cevir('Disk')]} />
+                <Tooltip contentStyle={TIP_STIL} cursor={IMLEC} formatter={(v) => [`%${v}`, tab === 'cpu' ? 'CPU' : tab === 'bellek' ? cevir('Bellek') : cevir('Disk')]} />
                 <Area type="monotone" dataKey={tab} stroke={TAB_RENK[tab]} strokeWidth={2} fill={`url(#gpk-${tab})`} dot={false} activeDot={{ r: 3, fill: TAB_RENK[tab] }} isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
@@ -532,8 +532,8 @@ export default function HomePage() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={P.izgara} vertical={false} />
                 <XAxis dataKey="t" axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} interval="preserveStartEnd" minTickGap={28} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} width={58} tickFormatter={(v: any) => fmtRate(v).replace('/s', '')} />
-                <Tooltip contentStyle={TIP_STIL} cursor={IMLEC} formatter={(v: any, n: any) => [fmtRate(v), n === 'gelen' ? cevir('Gelen Trafik') : cevir('Giden Trafik')]} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: P.eksen, fontSize: 12 }} width={58} tickFormatter={(v: number) => fmtRate(v).replace('/s', '')} />
+                <Tooltip contentStyle={TIP_STIL} cursor={IMLEC} formatter={(v, n) => [fmtRate(Number(v)), n === 'gelen' ? cevir('Gelen Trafik') : cevir('Giden Trafik')]} />
                 <Area type="monotone" dataKey="gelen" stroke={P.gelen} strokeWidth={2} fill="url(#gpt-in)" dot={false} isAnimationActive={false} />
                 <Area type="monotone" dataKey="giden" stroke={P.giden} strokeWidth={2} fill="url(#gpt-out)" dot={false} isAnimationActive={false} />
               </AreaChart>

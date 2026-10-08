@@ -63,8 +63,8 @@ export default function BackupYonetimiPage() {
   useTranslation() // dil re-render aboneligi
   const [o, setO] = useState<Ozet | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [yedekliyor, setYedekliyor] = useState(false)
   const [driveSayac, setDriveSayac] = useState(0)
   const [uzakSayac, setUzakSayac] = useState(0) // Genel Yedek Ayarları hedefi değiştirince Drive kartı yenilenir

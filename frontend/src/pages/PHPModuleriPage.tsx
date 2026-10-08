@@ -181,7 +181,7 @@ export default function PHPModuleriPage({ gomulu, secilenler, setSecilenler }: {
   })
   const setAktifSurum = (s: string) => {
     setAktifSurumState(s)
-    try { localStorage.setItem('gosp.phpModul.surum', s) } catch {}
+    try { localStorage.setItem('gosp.phpModul.surum', s) } catch { /* depolama kapalı: tercih kalıcı olmaz */ }
   }
   const [exts, setExts] = useState<Ext[]>([])
   const [yuk, setYuk] = useState(true)

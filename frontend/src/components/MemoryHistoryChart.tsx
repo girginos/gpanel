@@ -49,8 +49,8 @@ export default function MemoryHistoryChart() {
       try {
         const r = await api.get<Yanit>(`/system/load-history?saat=${saat}`)
         if (on) { setD(r.data); setYetkiYok(false) }
-      } catch (e: any) {
-        if (on && e?.response?.status === 403) setYetkiYok(true)
+      } catch (e) {
+        if (on && (e as { response?: { status?: number } })?.response?.status === 403) setYetkiYok(true)
       }
     }
     tick()

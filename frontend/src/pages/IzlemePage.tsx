@@ -150,29 +150,33 @@ function DomainIzleme() {
     return () => { iptal = true }
   }, [])
 
+  // Eski domainin geç gelen sağlık yanıtı yeni seçimin durumunu ezmesin.
+  const probeNesli = useRef(0)
   function probet(id: number) {
+    const n = ++probeNesli.current
     setHSorgulaniyor(true); setHealth(null)
-    api.get<Health>(`/domains/${id}/health`).then(r => setHealth(r.data))
-      .catch(e => setHealth({ url: '', durum_kodu: 0, yanit_suresi_ms: 0, erisilebilir: false, hata: apiHata(e), sema: '', boyut_byte: 0 }))
-      .finally(() => setHSorgulaniyor(false))
+    api.get<Health>(`/domains/${id}/health`).then(r => { if (n === probeNesli.current) setHealth(r.data) })
+      .catch(e => { if (n === probeNesli.current) setHealth({ url: '', durum_kodu: 0, yanit_suresi_ms: 0, erisilebilir: false, hata: apiHata(e), sema: '', boyut_byte: 0 }) })
+      .finally(() => { if (n === probeNesli.current) setHSorgulaniyor(false) })
   }
 
   useEffect(() => {
     if (!secili) return
     probet(secili)
     setAccessLog([]); setErrorLog([]); setLogHata(null)
+    let iptal = false // domain değişince/unmount'ta eski yanıtlar yok sayılır
 
     function logCek() {
       api.get<{ satirlar: string[]; mevcut: boolean }>(`/domains/${secili}/logs/oku?dosya=access&son=80`)
-        .then(r => setAccessLog(r.data.satirlar || []))
-        .catch(e => setLogHata(apiHata(e)))
+        .then(r => { if (!iptal) setAccessLog(r.data.satirlar || []) })
+        .catch(e => { if (!iptal) setLogHata(apiHata(e)) })
       api.get<{ satirlar: string[]; mevcut: boolean }>(`/domains/${secili}/logs/oku?dosya=error&son=40`)
-        .then(r => setErrorLog(r.data.satirlar || []))
-        .catch(hataYakala(cevir("Hata günlüğü alınamadı")))
+        .then(r => { if (!iptal) setErrorLog(r.data.satirlar || []) })
+        .catch(e => { if (!iptal) hataYakala(cevir("Hata günlüğü alınamadı"))(e) })
     }
     logCek()
     const t = setInterval(logCek, POLL_MS)
-    return () => clearInterval(t)
+    return () => { iptal = true; clearInterval(t) }
   }, [secili])
 
   // Auto-scroll to bottom on log update
@@ -262,8 +266,8 @@ function SunucuLoglari() {
     setYuk(true); setHata(null)
     const _n = ++yukleNesli.current
     api.get('/admin/system/loglar', { params: { kaynak: k, son: n } })
-      .then((r: any) => { if (_n !== yukleNesli.current) return; setSatirlar(r.data.satirlar || []); if (r.data.kaynaklar) setKaynaklar(r.data.kaynaklar) })
-      .catch((e: any) => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
+      .then((r) => { if (_n !== yukleNesli.current) return; setSatirlar(r.data.satirlar || []); if (r.data.kaynaklar) setKaynaklar(r.data.kaynaklar) })
+      .catch((e) => { if (_n !== yukleNesli.current) return; const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => { if (_n === yukleNesli.current) setYuk(false) })
   }
   useEffect(() => { yukle(kaynak, son); return () => { yukleNesli.current++ } /* eslint-disable-next-line */ }, [kaynak, son])

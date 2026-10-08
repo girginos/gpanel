@@ -55,8 +55,8 @@ export default function LoadHistoryChart() {
       try {
         const r = await api.get<Yanit>(`/system/load-history?saat=${saat}`)
         if (on) { setD(r.data); setYetkiYok(false) }
-      } catch (e: any) {
-        if (on && e?.response?.status === 403) setYetkiYok(true)
+      } catch (e) {
+        if (on && (e as { response?: { status?: number } })?.response?.status === 403) setYetkiYok(true)
       }
     }
     tick()
@@ -252,13 +252,13 @@ export default function LoadHistoryChart() {
   )
 }
 
-function SmoothLine({ gg, data, k, renk, w, op }: { gg: any; data: Nokta[]; k: keyof Nokta; renk: string; w: number; op: number }) {
+function SmoothLine({ gg, data, k, renk, w, op }: { gg: { xAt: (i: number) => number; yAt: (v: number) => number }; data: Nokta[]; k: keyof Nokta; renk: string; w: number; op: number }) {
   // gg.line1 is precomputed for yuk1; for others we recompute via same smoother
   const path = smoothOf(gg, data, k)
   return <path d={path} fill="none" stroke={renk} strokeWidth={w} strokeLinejoin="round" strokeLinecap="round" opacity={op} />
 }
 
-function smoothOf(gg: any, data: Nokta[], key: keyof Nokta): string {
+function smoothOf(gg: { xAt: (i: number) => number; yAt: (v: number) => number }, data: Nokta[], key: keyof Nokta): string {
   const xs = data.map((_, i) => gg.xAt(i))
   const ys = data.map(p => gg.yAt(p[key] as number))
   const n = xs.length

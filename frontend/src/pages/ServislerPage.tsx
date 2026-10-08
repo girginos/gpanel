@@ -63,8 +63,8 @@ export default function ServislerPage() {
   const [liste, setListe] = useState<Servis[]>([])
   const [yukleniyor, setYukleniyor] = useState(true)
   const [islemBirim, setIslemBirim] = useState<string | null>(null)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const toast = useToast()
 
   async function getir() {

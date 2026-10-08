@@ -362,7 +362,13 @@ export default function DomainBackupsPage() {
       if (iptal || !r.data.aktif || r.data.bitti) return
       setIlerleme(r.data); setIsleniyor(true); ilerlemeIzle()
     }).catch(() => { /* yoklama isteğe bağlı */ })
-    return () => { iptal = true; yukleNesli.current++ }
+    return () => {
+      iptal = true; yukleNesli.current++
+      // Unmount / domain değişiminde ilerleme yoklaması durdurulur (bellek-ağ sızıntısı +
+      // eski domainin ilerlemesinin yeni domainin durumuna yazılması).
+      if (ilerlemeTimer.current) { window.clearInterval(ilerlemeTimer.current); ilerlemeTimer.current = null }
+      setIlerleme(null); setIsleniyor(false)
+    }
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function scheduleKaydet(yeni: Schedule) {
@@ -462,14 +468,21 @@ export default function DomainBackupsPage() {
     const tok = useAuth.getState().token || ''
     fetch(`/api/v1/domains/${id}/backups/${y.id}/indir`, { headers: { Authorization: `Bearer ${tok}` } })
       // Askı 403'ü: askı sayfasına geçilir; hata gövdesi dosya diye indirilmez.
-      .then(async r => ((await fetchAskiKontrol(r, tok)) ? null : r.blob()))
+      .then(async r => {
+        if (await fetchAskiKontrol(r, tok)) return null
+        // Hata gövdesi (404/500 JSON-HTML) yedek/dosya diye indirilmesin.
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.blob()
+      })
       .then(blob => {
         if (!blob) return
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
         a.download = y.dosya
         a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000)
       })
+      .catch(async err => { await bilgi({ baslik: cevir('Bilgi'), mesaj: cevir("İndirme başarısız:") + ' ' + (err instanceof Error ? err.message : String(err)), ton: 'tehlike' }) })
   }
 
   return (

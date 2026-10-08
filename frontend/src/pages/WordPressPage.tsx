@@ -62,7 +62,7 @@ export default function WordPressPage() {
   const [domainId, setDomainId] = useState<number | null>(null)
   const [tum, setTum] = useState<TumKurulum[]>([])
   const [tumYuk, setTumYuk] = useState(true)
-  const [hata, setHata] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
   const [kuruyor, setKuruyor] = useState(false)
   const [sonuc, setSonuc] = useState<Sonuc | null>(null)
   // Parola yalnız kurulum yanıtında (POST) bir kez döner (CWE-200); reveal/iste-göster ucu kaldırıldı.

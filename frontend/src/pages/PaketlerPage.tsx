@@ -146,8 +146,8 @@ export default function PaketlerPage() {
   const [sonuc, setSonuc] = useState<Paket[]>([])
   const [arandi, setArandi] = useState(false)
   const [yuk, setYuk] = useState(false)
-  const [hata, setHata] = useState<string | null>(null)
-  const [basari, setBasari] = useState<string | null>(null)
+  const [, setHata] = useState<string | null>(null)
+  const [, setBasari] = useState<string | null>(null)
   const [isleniyor, setIsleniyor] = useState<string | null>(null)
   const [outputModal, setOutputModal] = useState<{ baslik: string; output: string } | null>(null)
   const [acik, setAcik] = useState<Set<string>>(new Set())
@@ -193,7 +193,7 @@ export default function PaketlerPage() {
       setGrupDurum(prev => ({ ...prev, [paket]: !suankiKurulu }))
       setOutputModal({
         baslik: cevirT(cevir("{0} çıktısı — {1}"), suankiKurulu ? cevir('Kaldırma') : cevir('Kurulum'), paket),
-        output: (r.data as any).output || '',
+        output: (r.data as { output?: string }).output || '',
       })
       setTimeout(() => setBasari(null), 3500)
     } catch (e) {
