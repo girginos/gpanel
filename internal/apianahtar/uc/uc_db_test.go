@@ -72,7 +72,7 @@ func ucGeciciDB(t *testing.T) *sql.DB {
 	for _, q := range []string{
 		`CREATE TABLE users (id BIGINT UNSIGNED PRIMARY KEY, username VARCHAR(64) NOT NULL,
 			password_hash VARCHAR(255) NOT NULL DEFAULT '', full_name VARCHAR(255) NOT NULL DEFAULT '',
-			role ENUM('admin','reseller','user') NOT NULL DEFAULT 'user',
+			role ENUM('admin','reseller','user') NOT NULL DEFAULT 'user', reseller_id BIGINT UNSIGNED NULL,
 			status ENUM('active','suspended') NOT NULL DEFAULT 'active',
 			totp_secret VARCHAR(64) NOT NULL DEFAULT '', totp_enabled TINYINT(1) NOT NULL DEFAULT 0,
 			totp_last_step BIGINT NOT NULL DEFAULT 0, token_gecersiz_ts BIGINT NOT NULL DEFAULT 0,
@@ -80,7 +80,13 @@ func ucGeciciDB(t *testing.T) *sql.DB {
 			max_domain INT NOT NULL DEFAULT 0, max_disk_mb BIGINT NOT NULL DEFAULT 0,
 			max_trafik_mb BIGINT NOT NULL DEFAULT 0)`,
 		`CREATE TABLE domains (id BIGINT UNSIGNED PRIMARY KEY, alan_adi VARCHAR(255) NOT NULL,
+			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '', is_demo TINYINT NOT NULL DEFAULT 0,
 			reseller_id BIGINT UNSIGNED NULL, plan_id BIGINT UNSIGNED NULL)`,
+		// Bayi silme arka plan işi (toplu iş kaydı): 202 döner, bitene kadar beklenir.
+		`CREATE TABLE cp_toplu_isler (id BIGINT AUTO_INCREMENT PRIMARY KEY, tip VARCHAR(24) NOT NULL, durum VARCHAR(16) NOT NULL DEFAULT 'calisiyor',
+			toplam INT NOT NULL DEFAULT 0, tamamlanan INT NOT NULL DEFAULT 0, basari INT NOT NULL DEFAULT 0, hata INT NOT NULL DEFAULT 0,
+			aktif_domain VARCHAR(255) NOT NULL DEFAULT '', parametre TEXT, detay MEDIUMTEXT, baslatan VARCHAR(64) NOT NULL DEFAULT '',
+			baslangic TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, bitis TIMESTAMP NULL)`,
 		`CREATE TABLE service_plans (id BIGINT UNSIGNED PRIMARY KEY, reseller_id BIGINT NULL)`,
 		`CREATE TABLE dns_template (id BIGINT UNSIGNED PRIMARY KEY, reseller_id BIGINT NULL)`,
 		`CREATE TABLE audit_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -463,12 +469,21 @@ func TestAPIAnahtarUctanUca(t *testing.T) {
 		t.Fatalf("iptal nedeni: %q", neden)
 	}
 	// ── Bayi silinince anahtarları iptal ──
-	if s := ucIstek(t, h, "DELETE", "/api/v1/resellers/9", jK, nil); s.kod != 200 {
+	if s := ucIstek(t, h, "DELETE", "/api/v1/resellers/9", jK, nil); s.kod != 202 {
 		t.Fatalf("bayi silme: %d %s", s.kod, s.govde)
+	}
+	for i := 0; i < 200; i++ { // arka plan işi: bitene kadar bekle
+		var d string
+		if err := db.QueryRow(`SELECT durum FROM cp_toplu_isler ORDER BY id DESC LIMIT 1`).Scan(&d); err == nil && d != "calisiyor" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	_ = db.QueryRow(`SELECT iptal_neden FROM api_anahtarlari WHERE id=?`, c.Kayit.ID).Scan(&neden)
 	if neden != "bayi_silindi" || ucIstek(t, h, "GET", "/api/v1/domains", c.Anahtar, nil).kod != 401 {
-		t.Fatalf("silinen bayinin anahtarı: neden=%q", neden)
+		var jd, jdet string
+		_ = db.QueryRow(`SELECT durum, COALESCE(detay,'') FROM cp_toplu_isler ORDER BY id DESC LIMIT 1`).Scan(&jd, &jdet)
+		t.Fatalf("silinen bayinin anahtarı: neden=%q iş=%s %s", neden, jd, jdet)
 	}
 
 	// ── Anahtar trafiği oturum boşta damgasına dokunmaz (hiç JWT kullanmamış bayi_d) ──
