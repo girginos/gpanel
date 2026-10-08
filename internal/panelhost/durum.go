@@ -68,9 +68,7 @@ func DurumOku() Durum {
 			t := strings.TrimSpace(ln)
 			if strings.HasPrefix(t, "server_name ") {
 				t = strings.TrimSuffix(strings.TrimPrefix(t, "server_name "), ";")
-				for _, ad := range strings.Fields(t) {
-					d.Izinliler = append(d.Izinliler, ad)
-				}
+				d.Izinliler = append(d.Izinliler, strings.Fields(t)...)
 				break
 			}
 		}

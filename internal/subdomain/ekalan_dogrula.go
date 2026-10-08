@@ -29,8 +29,6 @@ var ekYasakliSonekler = []string{
 	".local", ".localhost", ".internal", ".localdomain", ".lan", ".home.arpa", ".arpa", ".invalid", ".onion",
 }
 
-var errEkAdGecersiz = errors.New("geçersiz alan adı")
-
 // ekAdGuvenli — ad, dosya adı/nginx/zone için güvenli (ekAlanAdiDogrula çıktısı) mi?
 func ekAdGuvenli(ad string) bool {
 	return len(ad) <= 253 && reEkAd.MatchString(ad) && !strings.Contains(ad, "..")

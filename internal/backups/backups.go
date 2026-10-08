@@ -529,11 +529,6 @@ var (
 	yedekAktif = map[int64]string{}
 )
 
-func yedekBasla(id int64) bool {
-	_, ok := yedekBaslaTur(id, "manuel")
-	return ok
-}
-
 // yedekBaslaTur: kilidi tur adına almayı dener; doluysa mevcut sahibin türünü döner.
 func yedekBaslaTur(id int64, tur string) (mevcut string, ok bool) {
 	yedekMu.Lock()

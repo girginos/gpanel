@@ -17,13 +17,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// homeAltiAc — /home/<sk> köküne göre `rel`'i, yol boyunca HİÇBİR symlink
-// izlemeden açar. flags/mode os.OpenFile ile aynı anlamda.
-func homeAltiAc(sk, rel string, flags int, mode uint32) (*os.File, error) {
-	return homeAltiAcKok("/home", sk, rel, flags, mode)
-}
-
-// homeAltiAcKok — homeAltiAc'ın ev kökü parametreli hali (testler t.TempDir verir).
+// homeAltiAcKok — /home/<sk> (evKok) köküne göre `rel`'i, yol boyunca HİÇBİR symlink
+// izlemeden açar. flags/mode os.OpenFile ile aynı anlamda; testler evKok olarak t.TempDir verir.
 func homeAltiAcKok(evKok, sk, rel string, flags int, mode uint32) (*os.File, error) {
 	home := filepath.Join(evKok, sk)
 	// Home kökünü aç: bu dizinin KENDİSİ symlink olmamalı (tenant onu değiştiremez;

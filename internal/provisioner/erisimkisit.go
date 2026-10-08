@@ -410,7 +410,7 @@ func HealErisimSapmasi() {
 		// `allow 1.2.3.4` varken dosyada `allow 9.9.9.9` yazan bir vhost'u
 		// "tutarlı" sayıyordu — sapmanın en tehlikeli biçimi (yanlış IP'ye
 		// açık kalmak) tam da görünmez olan biçimdi.
-		if ErisimSapmasiVar(string(b), beklenen) == false {
+		if !ErisimSapmasiVar(string(b), beklenen) {
 			continue // tutarlı
 		}
 		log.Printf("🔴 erisim kisitlama SAPMASI: %s — dosya ile DB tutmuyor — yeniden render ediliyor", d.sk)
