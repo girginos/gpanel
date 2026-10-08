@@ -226,6 +226,11 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.vekilKur(ad, e.soket).ServeHTTP(w, r)
+}
+
+// vekilKur — eklentinin unix soketine giden ters vekil (kimlik başlıklarını çekirdek yazar).
+func (h *Handlers) vekilKur(ad, soket string) *httputil.ReverseProxy {
 	rp := &httputil.ReverseProxy{
 		Transport: &http.Transport{
 			// 🔴 KANAMA fix: bu Transport HER istek icin yeniden uretiliyor. keep-alive
@@ -242,7 +247,7 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 				// zaten ayakta; bu yalnız geçici pencereyi ŞEFFAF yapar.
 				var son error
 				for i := 0; i < 6; i++ {
-					c, err := d.DialContext(ctx, "unix", e.soket)
+					c, err := d.DialContext(ctx, "unix", soket)
 					if err == nil {
 						return c, nil
 					}
@@ -260,6 +265,11 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 		Director: func(req *http.Request) {
 			req.URL.Scheme = "http"
 			req.URL.Host = "eklenti" // unix soket — host anlamsız, sabit
+			// 🔴 ReverseProxy hop-by-hop başlıkları Director'DAN SONRA siler: istemci
+			// "Connection: X-Gosp-Rol" (ya da -Sahip/-Uid) gönderirse aşağıda eklenen
+			// güvenilir kimlik başlıkları eklentiye ULAŞMAZDI (bayide X-Gosp-Sahip
+			// kapsamı düşer). Kimlik başlıklarını adlandıran Connection belirteçleri atılır.
+			gospBaglantiTemizle(req.Header)
 			// /api/v1/eklenti/ai/sohbetler → /sohbetler
 			on := "/api/v1/eklenti/" + ad
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, on)
@@ -307,7 +317,26 @@ func (h *Handlers) Proxy(w http.ResponseWriter, r *http.Request) {
 				"Bu modül şu an hazırlanıyor ya da yeniden başlatılıyor. Lütfen birkaç saniye sonra tekrar deneyin.")
 		},
 	}
-	rp.ServeHTTP(w, r)
+	return rp
+}
+
+// gospBaglantiTemizle — Connection başlığındaki "X-Gosp-*" belirteçlerini kaldırır
+// (diğer belirteçler, ör. keep-alive/upgrade, korunur).
+func gospBaglantiTemizle(h http.Header) {
+	var kalan []string
+	for _, v := range h.Values("Connection") {
+		for _, t := range strings.Split(v, ",") {
+			t = strings.TrimSpace(t)
+			if t == "" || strings.HasPrefix(strings.ToLower(t), "x-gosp-") {
+				continue
+			}
+			kalan = append(kalan, t)
+		}
+	}
+	h.Del("Connection")
+	if len(kalan) > 0 {
+		h.Set("Connection", strings.Join(kalan, ", "))
+	}
 }
 
 // SaglikTara — tüm eklentilerin soketini yoklar, cp_eklentiler.saglik günceller.
