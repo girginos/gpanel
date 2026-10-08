@@ -22,6 +22,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -228,6 +232,43 @@ func TestYalitimliIslem_BinlogStatementKipi_VarsayilanYalitimaDuser(t *testing.T
 	}
 	if c := atomic.LoadInt32(cagri); c != 2 {
 		t.Errorf("UPDATE iki kez denenmeli (RC → varsayılan): %d", c)
+	}
+}
+
+// rows.Err(): `SELECT DISTINCT iz_id … FOR UPDATE` sonuç satırları okunurken InnoDB kilitlenmesi (1213) Query'de değil rows.Next/Err'de
+// görünür ve işlemi sunucuda geri alır. Hata görülmezse eskiden UPDATE otomatik commit'te sürerdi. (B5 hedef domain kilidini vurur;
+// bu test YALNIZ ikinci sorgunun satır akışını bozar.)
+func TestYetimleriBagla_SatirAkisiHatasi_RowsErrKontrolEdilir(t *testing.T) {
+	o := dgYeni(t)
+	yetimUzakSahte(t)
+	logYakala(t)
+	o.hesap(3600, "ra.com", "c_ra", 5, "ftp.r.invalid", 3)
+	kSil(t, o.db, 3600, "ra.com", "c_ra")
+	dgDomain(t, o.db, 3601, "ra.com", "c_ra", 5)
+	var adi string
+	if err := o.db.QueryRow(`SELECT DATABASE()`).Scan(&adi); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mysql.ParseDSN(os.Getenv("GOSP_TEST_GECICI_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DBName = adi
+	baz, err := mysql.NewConnector(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db2 := sql.OpenDB(&dgHataBaglayici{Connector: baz, hedef: "DISTINCT iz_id"})
+	defer db2.Close()
+	n, err := yetimleriBagla(context.Background(), db2, 3601, `sistem_kullanici=?`, "c_ra")
+	if err == nil || n != 0 || !kilitHatasi(err) {
+		t.Errorf("🔴 satır akışındaki 1213 hata olarak dönmeli (n=%d err=%v)", n, err)
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=3601`) != 0 || g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=0`) != 3 {
+		t.Error("hata durumunda HİÇBİR satır bağlanmamalı (UPDATE otomatik commit'te sürmemeli)")
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 1 {
+		t.Error("anlık görüntü yerinde kalmalı")
 	}
 }
 
@@ -629,6 +670,10 @@ func TestPutDestination_ParolaYalnizAyniHedefIcinKorunur(t *testing.T) {
 	if kod, g := put(`{"tip":"ftp","host":"yeni.invalid","port":21,"kullanici":"u","parola":"","uzak_dizin":"/","aktif":true}`); kod != 400 || !strings.Contains(g, "parola zorunlu") {
 		t.Errorf("kayıtlı parola boşken boş parola → 400 'parola zorunlu': %d %s", kod, g)
 	}
+	// kayıtlı parola yoksa taşınacak bir parola da yok: farklı hosta geçmek "hedef değişti" DEĞİL, yeni kayıt gibi "parola zorunlu" der
+	if kod, g := put(`{"tip":"ftp","host":"baska.invalid","port":21,"kullanici":"u","parola":"","uzak_dizin":"/","aktif":true}`); kod != 400 || !strings.Contains(g, "parola zorunlu") || strings.Contains(g, "hedef değişti") {
+		t.Errorf("kayıtlı parola boşken farklı hosta boş parola → 400 'parola zorunlu' (hedef değişti DEĞİL): %d %s", kod, g)
+	}
 }
 
 // TestDestination (kaydetmeden deneme; müşteriye de açık): kayıtlı parola farklı hosta GÖNDERİLMEZ — ağa çıkmadan 400.
@@ -702,6 +747,28 @@ func TestLftpArtiklariniTemizle(t *testing.T) {
 	}
 }
 
+// Açılışta çağrılan sarmalayıcı: os.TempDir() ve 10 DAKİKA eşiği (9 dk'lık betik çalışan bir işin olabilir, 11 dk'lık artıktır).
+func TestLftpArtiklariniTemizle_SarmalayiciTempDirVe10Dakika(t *testing.T) {
+	dizin := t.TempDir()
+	t.Setenv("TMPDIR", dizin)
+	yaz := func(ad string, yas time.Duration) string {
+		yol := filepath.Join(dizin, ad)
+		if err := os.WriteFile(yol, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gecmis := time.Now().Add(-yas)
+		_ = os.Chtimes(yol, gecmis, gecmis)
+		return yol
+	}
+	dokuz, onbir := yaz("gosp-lftp-1.cmd", 9*time.Minute), yaz("gosp-lftp-2.cmd", 11*time.Minute)
+	if n := LftpArtiklariniTemizle(); n != 1 {
+		t.Errorf("yalnız 10 dk'dan eski betik silinmeli: %d", n)
+	}
+	if !varMi(dokuz) || varMi(onbir) {
+		t.Errorf("9 dk'lık kalmalı, 11 dk'lık silinmeli: dokuz=%v onbir=%v", varMi(dokuz), varMi(onbir))
+	}
+}
+
 // ---------------------------------------------------------------- D6: S2 toplu işaretleme eşiği
 
 func TestS2_Esik_TopluIsaretlemeKorunur(t *testing.T) {
@@ -755,6 +822,20 @@ func TestS2_Esik_TopluIsaretlemeKorunur(t *testing.T) {
 		}
 		if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=5 AND silinme IS NULL`) != 300 {
 			t.Error("canlı domainin satırlarına dokunulmamalı")
+		}
+	})
+	t.Run("domains BOŞ ve aday > eşik: adaylar toplamın yarısından az olsa bile ATLANIR (tek başına yetmez)", func(t *testing.T) {
+		db := kDB(t)
+		logs := logYakala(t)
+		for i := 0; i < 300; i++ { // zaten işaretli yetimler toplamı şişirir
+			silinenYetim(t, db, 9500, "y.test", "c_yet", fmt.Sprintf("c_yet-20261001-%06d.tar.gz", i), 0, "NULL")
+		}
+		ekle(t, db, 9001, "c_orf", 101) // 101 aday / 401 toplam (< %50) ama domains tablosu BOŞ
+		if m, _ := SilinenSahipsizIsaretle(context.Background(), db); m != 0 {
+			t.Errorf("domains boşken işaretlenmemeli: %d", m)
+		}
+		if !strings.Contains(logs.String(), "ATLANDI") {
+			t.Errorf("🔴 günlük beklenirdi: %s", logs.String())
 		}
 	})
 	t.Run("tam yarı (aday*2 == toplam) eşik aşılmaz → işaretlenir", func(t *testing.T) {
@@ -1000,5 +1081,236 @@ func TestRestore_BaglanmisKurtarmaYedegi_UcUcaCalisir(t *testing.T) {
 	dgDomain(t, o.db, 2402, "baska.com", "c_baskah", 5)
 	if kod, _ := cagir(2402, bid); kod != 404 {
 		t.Errorf("yedek başka domain üzerinden geri yüklenemez: %d", kod)
+	}
+}
+
+// ---------------------------------------------------------------- yalıtım / döngü güvenceleri
+
+// yalitimliIslem READ COMMITTED açar (boşluk kilidi yok → komşu sk/domain_id aralıklarında kilitlenme olmaz). Not: `SET TRANSACTION`
+// yalnız SONRAKİ işlemi etkiler ve @@tx_isolation oturum değerini gösterir; işlemin gerçek yalıtımı INNODB_TRX'ten okunur.
+func TestYalitimliIslem_ReadCommittedAcar(t *testing.T) {
+	db := kDB(t)
+	g113_exec(t, db, `CREATE TABLE yi_deneme (a INT)`)
+	var iso string
+	if err := yalitimliIslem(context.Background(), db, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO yi_deneme VALUES (1)`); err != nil { // InnoDB işlemini başlat
+			return err
+		}
+		return tx.QueryRow(`SELECT trx_isolation_level FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id = CONNECTION_ID()`).Scan(&iso)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if iso != "READ COMMITTED" {
+		t.Errorf("işlem READ COMMITTED olmalı: %q", iso)
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM yi_deneme`) != 1 {
+		t.Error("başarılı işlem commit edilmeli")
+	}
+	// fn hata dönerse geri alınır (yazma kalmaz)
+	hata := errors.New("fn hatası")
+	if err := yalitimliIslem(context.Background(), db, func(tx *sql.Tx) error {
+		_, _ = tx.Exec(`INSERT INTO yi_deneme VALUES (2)`)
+		return hata
+	}); !errors.Is(err, hata) {
+		t.Fatalf("fn hatası aynen dönmeli: %v", err)
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM yi_deneme`) != 1 {
+		t.Error("hata durumunda işlem geri alınmalı")
+	}
+}
+
+// Araya giren bağlama (yetim artık canlı) hata DEĞİLDİR: silme ucu 200 döner, kurtarılan yedeğe dokunmaz, kurtarılan satır sayılmaz.
+func TestSilinenSil_ArayaBaglanan_HataSayilmaz_200(t *testing.T) {
+	o := dgYeni(t)
+	logYakala(t)
+	dosyalar, _ := o.hesap(2500, "ara.com", "c_ara", 5, "", 2)
+	kSil(t, o.db, 2500, "ara.com", "c_ara")
+	dgDomain(t, o.db, 2501, "ara.com", "c_ara", 5)
+	eski := yetimUzakSil
+	t.Cleanup(func() { yetimUzakSil = eski })
+	var bir bool
+	yetimUzakSil = func(ctx context.Context, db *sql.DB, d *Destination, dosya string) error {
+		if !bir {
+			bir = true
+			dgBagla(t, o.r, "c_ara", 2501, false) // uzak silme sürerken sahibi yedekleri kurtarır
+		}
+		return nil
+	}
+	kod, g := advIstek(o.r, "DELETE", "/s/c_ara", "")
+	m := dgJSON(t, g)
+	if kod != 200 || m["ok"] != true || m["silinen"] != float64(0) {
+		t.Errorf("araya bağlanan satırlar atlanır, hata sayılmaz → 200 silinen=0: %d %s", kod, g)
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=2501 AND tip='kurtarma'`) != 2 {
+		t.Error("kurtarılan canlı yedekler yerinde kalmalı")
+	}
+	for _, d := range dosyalar {
+		if !varMi(filepath.Join(o.kok, "c_ara", d)) {
+			t.Errorf("kurtarılan yedek dosyası silindi: %s", d)
+		}
+	}
+}
+
+// Başarısız satırlar aynı turda yeniden denenip döngüyü kilitlemez (imleç onları geçer): kalıcı uzak hatada süpürme hızla biter.
+func TestSupur_BasarisizSatirlarDonguyuKilitlemez(t *testing.T) {
+	o := dgYeni(t)
+	sahte := yetimUzakSahte(t)
+	logYakala(t)
+	sahte.hata = func(*Destination, string) error { return errors.New("uzak kapalı") }
+	for i := 0; i < 450; i++ { // 3 parti (200+200+50): hepsi başarısız
+		silinenYetim(t, o.db, 2600, "bk.com", "c_bk", fmt.Sprintf("c_bk-20261001-%06d.tar.gz", i), 0, "DATE_SUB(NOW(), INTERVAL 1 HOUR)")
+	}
+	ctx, iptal := context.WithTimeout(context.Background(), 20*time.Second)
+	defer iptal()
+	t0 := time.Now()
+	SilinenSupur(ctx, o.db)
+	if ctx.Err() != nil || time.Since(t0) > 15*time.Second {
+		t.Fatalf("başarısız satırlar süpürmeyi kilitledi (aynı satırlar tekrar tekrar denendi): %v", time.Since(t0))
+	}
+	if n := sahte.say(); n != 450 {
+		t.Errorf("her satır TAM BİR kez denenmeli: %d", n)
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=0`) != 450 {
+		t.Error("başarısız satırların hepsi KORUNMALI")
+	}
+}
+
+// Devralma/bağlama önce hedef domainin VARLIĞINI doğrular ve domain işlem boyunca kilitlenir (silinemez).
+func TestYetimleriBagla_HedefDomainKilitlenir(t *testing.T) {
+	o := dgYeni(t)
+	yetimUzakSahte(t)
+	o.hesap(2700, "kil.com", "c_kil", 5, "", 1)
+	kSil(t, o.db, 2700, "kil.com", "c_kil")
+	dgDomain(t, o.db, 2701, "kil.com", "c_kil", 5)
+	if _, err := yetimleriBagla(context.Background(), o.db, 2799, "sistem_kullanici=?", "c_kil"); !errors.Is(err, errHedefDomainYok) {
+		t.Fatalf("olmayan hedef domain → errHedefDomainYok: %v", err)
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=2799`) != 0 || g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE domain_id=0`) != 1 {
+		t.Error("olmayan domaine HİÇBİR satır bağlanmamalı")
+	}
+}
+
+// A2: `domains` satırını yazan HER üretim yolu (INSERT INTO domains) satırı yazar yazmaz YetimKalintilariniAyir'i çağırmalı: kimlik
+// yeniden kullanılmış bir domainin eski yedek kalıntıları yeni müşteriye görünmesin. Yeni bir domain oluşturma yolu eklenirse bu test
+// onu zorunlu kılar (bilinçli izin listesi yok).
+func TestA2_DomainSatiriYazanYollar_KalintiAyirmayiCagirir(t *testing.T) {
+	bulunan := 0
+	for _, kok := range []string{"..", "../../cmd"} {
+		_ = filepath.WalkDir(kok, func(yol string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(yol, ".go") || strings.HasSuffix(yol, "_test.go") {
+				return nil
+			}
+			f, e := parser.ParseFile(token.NewFileSet(), yol, nil, 0)
+			if e != nil {
+				return nil
+			}
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil {
+					continue
+				}
+				yazar, cagirir := false, false
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					switch x := n.(type) {
+					case *ast.BasicLit:
+						if x.Kind == token.STRING && strings.Contains(strings.ToUpper(x.Value), "INSERT INTO DOMAINS") {
+							yazar = true
+						}
+					case *ast.CallExpr:
+						switch fun := x.Fun.(type) {
+						case *ast.SelectorExpr:
+							if fun.Sel.Name == "YetimKalintilariniAyir" {
+								cagirir = true
+							}
+						case *ast.Ident:
+							if fun.Name == "olusturKalintiAyir" {
+								cagirir = true
+							}
+						}
+					}
+					return true
+				})
+				if yazar {
+					bulunan++
+					if !cagirir {
+						t.Errorf("%s: %s `INSERT INTO domains` yazıyor ama YetimKalintilariniAyir çağırmıyor (kimlik yeniden kullanımında eski yedekler yeni müşteriye görünür)", filepath.ToSlash(yol), fn.Name.Name)
+					}
+				}
+			}
+			return nil
+		})
+	}
+	if bulunan < 2 {
+		t.Errorf("INSERT INTO domains yazan en az 2 üretim yolu bekleniyordu (domains.Create, tasima): %d — arama bozuk olabilir", bulunan)
+	}
+}
+
+// ---------------------------------------------------------------- rows.Err(): kısmi veri ASLA başarı gibi sunulmaz
+
+func rowsErrDB(t *testing.T, o *dgOrtam, ipucu string) *sql.DB {
+	t.Helper()
+	var adi string
+	if err := o.db.QueryRow(`SELECT DATABASE()`).Scan(&adi); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mysql.ParseDSN(os.Getenv("GOSP_TEST_GECICI_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DBName = adi
+	baz, err := mysql.NewConnector(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db2 := sql.OpenDB(&dgHataBaglayici{Connector: baz, hedef: ipucu})
+	db2.SetMaxOpenConns(8)
+	t.Cleanup(func() { _ = db2.Close() })
+	return db2
+}
+
+// Satır akışı ortada koparsa (rows.Next false → rows.Err) liste/özet/silme uçları yarım veriyi başarı gibi dönmez: 500.
+func TestRowsErr_ListeOzetSilinen_YarimVeriBasariGibiDonmez(t *testing.T) {
+	o := dgYeni(t)
+	yetimUzakSahte(t)
+	logYakala(t)
+	o.hesap(3700, "re.com", "c_re", 0, "", 2)
+	dgDomain(t, o.db, 3701, "canli-re.com", "c_canlire", 0)
+	g113_exec(t, o.db, `INSERT INTO backups (domain_id, dosya) VALUES (3701, ?)`, dgAd("c_canlire", 0))
+	kSil(t, o.db, 3700, "re.com", "c_re")
+	silinenYetim(t, o.db, 3702, "re2.com", "c_re2", dgAd("c_re2", 0), 0, "DATE_SUB(NOW(), INTERVAL 1 HOUR)")
+	for _, c := range []struct {
+		ad, ipucu, metot, yol string
+		yonlendir             func(*Handlers) http.HandlerFunc
+	}{
+		{"domain yedek listesi", "FROM backups b WHERE b.domain_id=?", "GET", "/d/3701/backups", func(h *Handlers) http.HandlerFunc { return h.List }},
+		{"yönetici özeti", "FROM domains ORDER BY alan_adi", "GET", "/ozet", func(h *Handlers) http.HandlerFunc { return h.Ozet }},
+		{"silinmiş hesap listesi", "ORDER BY silinme DESC", "GET", "/s", func(h *Handlers) http.HandlerFunc { return h.SilinenListe }},
+	} {
+		db2 := rowsErrDB(t, o, c.ipucu)
+		h := &Handlers{DB: db2}
+		r := chi.NewRouter()
+		r.Get("/d/{id}/backups", h.List)
+		r.Get("/ozet", h.Ozet)
+		r.Get("/s", h.SilinenListe)
+		kod, g := advIstek(r, c.metot, c.yol, "")
+		if kod != http.StatusInternalServerError || strings.Contains(g, "c_canlire-") || strings.Contains(g, `"sk":"c_re`) {
+			t.Errorf("%s: satır akışı koparsa 500 beklenirdi (yarım veri başarı gibi dönmemeli): %d %s", c.ad, kod, g)
+		}
+	}
+	// DELETE /s/{sk}: kayıt listesi okunurken akış koparsa hiçbir şey silinmez, 500
+	db2 := rowsErrDB(t, o, "SELECT id, iz_id, dosya FROM backups")
+	r := chi.NewRouter()
+	r.Delete("/s/{sk}", (&Handlers{DB: db2}).SilinenSil)
+	if kod, g := advIstek(r, "DELETE", "/s/c_re", ""); kod != http.StatusInternalServerError {
+		t.Errorf("silme: kayıt listesi okunamazsa 500: %d %s", kod, g)
+	}
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE sistem_kullanici='c_re' AND domain_id=0`) != 2 {
+		t.Error("liste okunamadıysa hiçbir yetim silinmemeli")
+	}
+	// süpürme partisi okunamazsa panik/silme yok, tur sessizce biter
+	db3 := rowsErrDB(t, o, "SELECT id, iz_id, sistem_kullanici, dosya, boyut_b")
+	SilinenSupur(context.Background(), db3)
+	if g113_say(t, o.db, `SELECT COUNT(*) FROM backups WHERE sistem_kullanici='c_re2'`) != 1 {
+		t.Error("parti okunamadıysa hiçbir şey silinmemeli")
 	}
 }

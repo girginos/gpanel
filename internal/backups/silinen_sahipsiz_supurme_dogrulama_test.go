@@ -609,11 +609,12 @@ func TestDG_H3b_KilitliBackupsTablosu_VarsayilanBaglam_EnKotuGecikmeSiniri(t *te
 	}
 	toplam := time.Since(t0)
 	dgOlcum(t, "kilitli backups tablosu: IzHazirla=%v, toplam(IzHazirla+Yaz)=%v", hazir, toplam)
-	if toplam > izZamanAsimi*2+time.Second {
-		t.Errorf("🔴 silme isteğine eklenen en kötü gecikme %v (iz hazırlama + yazma, her biri %v ile sınırlı: ≤ %v beklenirdi)", toplam, izZamanAsimi, izZamanAsimi*2+time.Second)
+	// Karar (koordinatör): iz hazırlama/yazma zaman aşımı 3 sn — kilitli tabloda silme isteğine eklenen gecikme ≈ 3 sn (eskiden +10 sn).
+	if izZamanAsimi != 3*time.Second {
+		t.Errorf("izZamanAsimi 3 sn olmalı: %v", izZamanAsimi)
 	}
-	if toplam > izZamanAsimi+2*time.Second {
-		t.Logf("not: gecikme %v — iz hazırlama kilitli tabloya değmediği için normalde yalnız yazma süresi (%v) kadardır", toplam, izZamanAsimi)
+	if toplam > 7*time.Second {
+		t.Errorf("🔴 silme isteğine eklenen en kötü gecikme %v (iz hazırlama + yazma, her biri 3 sn ile sınırlı: ≤ 7 sn beklenirdi)", toplam)
 	}
 }
 

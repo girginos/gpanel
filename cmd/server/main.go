@@ -1566,6 +1566,12 @@ func semaDogrula(d *sql.DB) {
 			eksik = append(eksik, b.tablo+"."+b.kolon)
 		}
 	}
+	semaRaporla(eksik, semaYapiDogrula(d), len(beklenen))
+}
+
+// semaRaporla — semaDogrula'nin sonucunu gunluge yazar: eksik kolonlar ve yapisal sorunlar 🔴 satirlariyla (sessiz gecmez);
+// BASARI mesaji yalniz ikisi de bossa basilir (yapi bozukken "tamami mevcut" demek yalan olurdu).
+func semaRaporla(eksik, bozuk []string, kontrol int) {
 	if len(eksik) > 0 {
 		log.Printf("🔴 SEMA EKSIK — su kolonlar YOK: %s", strings.Join(eksik, ", "))
 		log.Printf("🔴 Ilgili paneldeki alanlar GORUNMEYECEK. Goc dosyalari " +
@@ -1574,7 +1580,6 @@ func semaDogrula(d *sql.DB) {
 	}
 	// Kolon varligi YETMEZ: 0217'nin yapisal sonuclari (tur, indeks, FK) da dogrulanir. Eksik/yanlis olan
 	// 🔴 yazilir — sessiz gecmez (paneli durdurmaz, ilgili ozellik bozuk calisir).
-	bozuk := semaYapiDogrula(d)
 	if len(bozuk) > 0 {
 		log.Printf("🔴 SEMA YAPISI BOZUK — %s", strings.Join(bozuk, " | "))
 		log.Printf("🔴 0217 (silinmis hesap yedekleri) tam uygulanmamis: goc defteri o dosyayi 'uygulandi' saymis olabilir " +
@@ -1584,7 +1589,7 @@ func semaDogrula(d *sql.DB) {
 	if len(eksik) > 0 || len(bozuk) > 0 {
 		return
 	}
-	log.Printf("sema dogrulama: kritik kolonlarin tamami mevcut (%d kontrol)", len(beklenen))
+	log.Printf("sema dogrulama: kritik kolonlarin tamami mevcut (%d kontrol)", kontrol)
 }
 
 // semaYapiDogrula — kolon varligindan fazlasini isteyen YAPISAL kontroller (information_schema). Dondurulen her girdi

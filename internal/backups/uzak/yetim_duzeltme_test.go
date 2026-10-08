@@ -38,6 +38,10 @@ func TestIsListe_SilinmisHostingAlanAdiYetimSatirdanTamamlanir(t *testing.T) {
 	if _, err := o.db.Exec(`UPDATE backups SET alan_adi='silinmis.example' WHERE id=?`, silinen); err != nil {
 		t.Fatal(err)
 	}
+	// canlı hostingin satırında eski/yanlış bir alan_adi kalmış olsa bile domains'teki GÜNCEL ad kazanır
+	if _, err := o.db.Exec(`UPDATE backups SET alan_adi='eski-ad.example' WHERE id=?`, canli); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := o.db.Exec(`DELETE FROM domains WHERE id=2`); err != nil {
 		t.Fatal(err)
 	}
