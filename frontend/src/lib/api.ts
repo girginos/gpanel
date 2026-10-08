@@ -15,6 +15,8 @@ export const api = axios.create({
 // Genel 30 sn sınırı yanıtı beklemeden keser, sürmekte/bitmiş bir işi "başarısız"
 // gösterir ve aceleyle yeniden denemeye iterdi (2026-10-03: "Yeni Domain" 30 sn'de
 // kesildi). Bu çağrılar sunucu üst sınırı kadar bekler. Panel vekili 3600 sn.
+// Silinmiş hesap yedeklerinde kalıcı silme (uzak depo kopyaları dahil, dakikalar sürebilir) ve
+// domaine bağlama da bu sınıftadır: components/YedekSilinenler iki çağrıda UZUN_ISTEK kullanır.
 export const UZUN_ISTEK = { timeout: 15 * 60_000 }
 // Dakikalar sürebilen tek parça işlemler: geri yükleme (uzak indirme), site kopyası.
 export const COK_UZUN_ISTEK = { timeout: 60 * 60_000 }

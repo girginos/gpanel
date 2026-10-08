@@ -12,6 +12,7 @@ import YedekGenelAyar from '@/components/YedekGenelAyar'
 import YedekGoogleDrive from '@/components/YedekGoogleDrive'
 import YedekUzakKopya from '@/components/YedekUzakKopya'
 import YedekSilinenler from '@/components/YedekSilinenler'
+import { yedekAdedi } from '@/lib/silinenYedek'
 import { Button, butonSinifi } from '@/components/ui'
 import { useToast } from '@/components/Toast'
 import { useDialog } from '@/components/Dialog'
@@ -24,6 +25,7 @@ const BACKUP_EN: Record<string, string> = {
   'Toplam Yedek': 'Total Backups',
   'Domain Sayısı': 'Domain Count',
   'Aktif Uzak Hedef': 'Active Remote Target',
+  'Silinmiş hesap yedekleri': 'Deleted account backups',
   'Otomatik yedekleme:': 'Automatic backup:',
   'Her gün 03:00': 'Every day 03:00',
   'Başlatılıyor…': 'Starting…',
@@ -45,15 +47,14 @@ const BACKUP_EN: Record<string, string> = {
   'Durduruluyor…': 'Stopping…',
   'İşi durdurmak istediğinize emin misiniz? Süren yedek yarıda kesilir, yarım dosya silinir. Tamamlanan yedekler korunur.': 'Are you sure you want to stop the job? The running backup is aborted and its partial file removed. Completed backups are kept.',
   'İş durduruldu.': 'Job stopped.',
-  'İş durdurulamadı': 'Could not stop the job',
-  'iptal': 'cancelled',
   'manuel': 'manual',
   'İşlem başarısız': 'Operation failed',
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (BACKUP_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
 type OzetSatir = { domain_id: number; alan_adi: string; sayi: number; toplam_b: number; son_yedek: string }
-type Ozet = { domainler: OzetSatir[]; toplam_boyut_b: number; toplam_yedek: number; hedef_sayisi: number; zamanlama: string }
+// silinen_*: silinmiş hesapların saklanan (yetim) yedekleri; eski sunucuda yok → kart gizli.
+type Ozet = { domainler: OzetSatir[]; toplam_boyut_b: number; toplam_yedek: number; hedef_sayisi: number; zamanlama: string; silinen_sayi?: number; silinen_boyut_b?: number }
 export type Job = {
   id: number; tur: string; islem: string; durum: string
   toplam: number; tamamlanan: number; basari: number; hata: number
@@ -82,6 +83,8 @@ export default function BackupYonetimiPage() {
     return () => { if (timer.current) window.clearInterval(timer.current) }
   }, [])
 
+  const silinenSayi = o?.silinen_sayi ?? 0
+  const silinenVar = silinenSayi > 0
   const calisan = jobs.some(j => j.durum === 'calisiyor')
   const oncekiCalisan = useRef(calisan)
   useEffect(() => {
@@ -118,11 +121,15 @@ export default function BackupYonetimiPage() {
       </div>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">{cevir('Yedekleme ve geri yükleme işleri Plesk tarzı listelenir. Bir işe tıklayarak kendi sayfasında domainleri seçip tam / SQL / dosya bazında geri yükleyin.')}</p>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div className={`grid grid-cols-2 ${silinenVar ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-3 mb-5`}>
         <Kpi et={cevir("Toplam Yedek Boyutu")} v={o ? fmtByte(o.toplam_boyut_b) : '—'} renk="sky" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M5 4h11l3 3v13a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1zM8 4v5h6V4M8 15h8"/></svg>} />
         <Kpi et={cevir("Toplam Yedek")} v={o ? String(o.toplam_yedek) : '—'} renk="violet" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/></svg>} />
         <Kpi et={cevir("Domain Sayısı")} v={o ? String(o.domainler.length) : '—'} renk="teal" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.4 3.8 5.6 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.6-3.8-9S9.5 5.4 12 3z"/></svg>} />
         <Kpi et={cevir("Aktif Uzak Hedef")} v={o ? String(o.hedef_sayisi) : '—'} renk="emerald" ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M7 18a4 4 0 010-8 5 5 0 019.6-1.3A3.5 3.5 0 0117 18H7z"/></svg>} alt="S3 / SFTP" />
+        {/* Yalnız silinmiş hesap yedeği varsa çizilir (0 → kart yok, 4 sütun). Mobilde (2 sütun) tek başına kalmasın diye tam genişlik. */}
+        {silinenVar && (
+          <Kpi et={cevir("Silinmiş hesap yedekleri")} v={fmtByte(o?.silinen_boyut_b ?? 0)} renk="amber" sinif="col-span-2 lg:col-span-1" alt={yedekAdedi(silinenSayi, i18n.language === 'en')} ikon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M3 4h18v4H3zM5 8v11a1 1 0 001 1h12a1 1 0 001-1V8M10 12h4"/></svg>} />
+        )}
       </div>
 
       <YedekGenelAyar driveSayac={driveSayac} onUzakDegisti={() => setUzakSayac(n => n + 1)} />
@@ -150,7 +157,7 @@ export default function BackupYonetimiPage() {
         </div>
       </div>
 
-      <YedekSilinenler />
+      <YedekSilinenler onDegisti={ozetYukle} />
 
       {o && o.domainler.length > 0 && (
         <details className="mt-4 rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60">
@@ -251,16 +258,17 @@ export function barRenk(durum: string): string {
   return 'bg-red-500'
 }
 
-function Kpi({ et, v, renk, ikon, alt }: { et: string; v: string; renk: string; ikon: React.ReactNode; alt?: string }) {
+function Kpi({ et, v, renk, ikon, alt, sinif }: { et: string; v: string; renk: string; ikon: React.ReactNode; alt?: string; sinif?: string }) {
   const c: Record<string, string> = {
     sky: 'text-sky-600 dark:text-sky-400', violet: 'text-violet-600 dark:text-violet-400',
     teal: 'text-teal-600 dark:text-teal-400', emerald: 'text-emerald-600 dark:text-emerald-400',
+    amber: 'text-amber-600 dark:text-amber-400',
   }
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 p-4">
+    <div className={`rounded-lg border border-slate-200 dark:border-dark-600/60 bg-white dark:bg-dark-700/60 p-4${sinif ? ' ' + sinif : ''}`}>
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-400 font-semibold">{ikon} {et}</div>
       <div className={`text-2xl font-semibold mt-1 ${c[renk] || 'text-slate-700 dark:text-slate-200'}`}>{v}</div>
-      {alt && <div className="text-[11px] text-slate-400 mt-0.5">{alt}</div>}
+      {alt && <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{alt}</div>}
     </div>
   )
 }

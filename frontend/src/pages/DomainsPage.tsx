@@ -9,6 +9,8 @@ import { Ikon, I } from '@/components/Ikon'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata, sonucBelirsiz, UZUN_ISTEK } from '@/lib/api'
 import { varsayilanPlanSec } from '@/lib/bayiPlan'
+import { yedekAdedi } from '@/lib/silinenYedek'
+import i18nDil from '@/lib/i18n'
 import Breadcrumb from '@/components/Breadcrumb'
 import EmptyState from '@/components/EmptyState'
 import { T } from '@/lib/tablo'
@@ -43,6 +45,8 @@ type OlusturmaSonuc = {
   alan_adi: string; sistem_kullanici: string; ftp_user: string; ftp_host: string
   db_host: string; db_user: string; db_adi: string
   olusturulan_parolalar: { ftp: string; db: string }
+  // yedekleri_devral istendiyse sunucu devralınan yedek sayısını döner (yoksa alan yok).
+  devralinan_yedek?: number
 }
 
 // Domaini kimin actigini gosterir: ad soyad (yoksa kullanici adi) + rol rozeti.
@@ -227,6 +231,12 @@ const DOMAINS_EN: Record<string, string> = {
   "Sunucu yanıtı gecikti — alan adının oluşup oluşmadığı kontrol ediliyor…": "The server response is late — checking whether the domain was created…",
   '"{0}" oluşturuldu (sunucu yanıtı gecikti). Bu yüzden oluşturma parolaları gösterilemedi — FTP parolasını hosting sayfasından yenileyebilirsiniz.': '"{0}" was created (the server response was late), so the generated passwords could not be shown — you can reset the FTP password on the hosting page.',
   "Sunucudan yanıt alınamadı ve alan adı henüz listede görünmüyor. İşlem sunucuda sürüyor olabilir — tekrar oluşturmadan önce birkaç dakika sonra listeyi yenileyin.": "No response from the server and the domain is not in the list yet. It may still be in progress on the server — refresh the list in a few minutes before trying again.",
+  "Aynı alan adıyla silinmiş hesabın saklanan yedeklerini devral": "Take over the stored backups of a deleted account with the same domain name",
+  "Yalnız aynı alan adı ve aynı sahip (yönetici ya da aynı bayi) eşleşirse devralınır.": "Taken over only if both the domain name and the owner (admin or the same reseller) match.",
+  "{0} devralındı": "{0} taken over",
+  "Devralınacak silinmiş yedek bulunamadı": "No deleted backups found to take over",
+  "Yedek devri doğrulanamadı": "Backup takeover unconfirmed",
+  "Devralınan yedek sayısı bilinmiyor — hosting yedek sayfasından kontrol edin.": "The number of backups taken over is unknown — check the hosting’s backup page.",
 }
 
 function useCevir() {
@@ -246,7 +256,10 @@ export default function DomainsPage() {
   //    kapsamlı uçlardır: POST /domains/toplu/durum (AdminVeyaReseller, handler bayinin
   //    reseller_id'siyle süzer), DELETE /domains/{id} (SahipYonetim),
   //    DELETE /domains/{id}/subdomain/{sid} (MusteriScope → bayi sahipliği).
-  const yonetici = yoneticiMi(useRol())
+  const rol = useRol()
+  const yonetici = yoneticiMi(rol)
+  // Silinmiş hesabın yedeklerini devralma onay kutusu yalnız yönetici/bayi içindir (form müşteriye zaten kapalı; kapalı varsayılan).
+  const yedekDevralGoster = yonetici || rol === 'reseller'
   const sahipKolonu = yonetici
   const [items, setItems] = useState<Domain[]>([])
   const [subler, setSubler] = useState<SubGenel[]>([])
@@ -284,6 +297,7 @@ export default function DomainsPage() {
   const [fPHPSurum, setFPHPSurum] = useState('8.3')
   const [fPlanID, setFPlanID] = useState<number | ''>('')
   const [fSqlOlustur, setFSqlOlustur] = useState(false) // SQL varsayilan KAPALI
+  const [fYedekDevral, setFYedekDevral] = useState(false) // silinmiş hesabın yedeklerini devral: varsayilan KAPALI
 
   // Liste yalnızca /domains'e bağlıdır. /plans + /php/versions (yavaş olabilen dnf keşfi)
   // listeyi BLOKLAMAZ — modal açılınca lazy çekilir. Böylece dnf yavaş/kilitliyken bile
@@ -413,7 +427,7 @@ export default function DomainsPage() {
     // yoksa "Başlangıç", o da yoksa ilk plan — lib/bayiPlan.ts) — veri geldiyse hemen ata,
     // gelmediyse modalVeriYukle tamamlanınca atanır.
     const varsayilan = varsayilanPlanSec(planlar)
-    setFAlanAdi(''); setFPHPSurum('8.3'); setFPlanID(varsayilan ? varsayilan.id : '')
+    setFAlanAdi(''); setFPHPSurum('8.3'); setFPlanID(varsayilan ? varsayilan.id : ''); setFYedekDevral(false)
     setOlusturAcik(true)
     modalVeriYukle() // lazy: plan/php sürümleri henüz gelmediyse şimdi çek (listeyi bloklamaz)
   }
@@ -444,6 +458,18 @@ export default function DomainsPage() {
     }
   }
 
+  // Yedek devri sonucu (yalnız kutu işaretliyse çağrılır). Sayı sunucudan gelir (devralinan_yedek); sayı YOKSA
+  // (yanıt alınamadı) "bulunamadı" DENMEZ — sonuç bilinmiyor.
+  function yedekDevriBildir(n: number | undefined) {
+    if (typeof n !== 'number') {
+      toast.uyari(cevir("Yedek devri doğrulanamadı"), cevir("Devralınan yedek sayısı bilinmiyor — hosting yedek sayfasından kontrol edin."))
+    } else if (n > 0) {
+      toast.basari(cevirT(cevir("{0} devralındı"), yedekAdedi(n, i18nDil.language === 'en')))
+    } else {
+      toast.bilgi(cevir("Devralınacak silinmiş yedek bulunamadı"))
+    }
+  }
+
   async function olusturGonder(e: React.FormEvent) {
     e.preventDefault()
     setHata(null)
@@ -453,11 +479,14 @@ export default function DomainsPage() {
       toast.hata(cevir("İşlem başarısız"), cevir("Geçersiz alan adı. Örn: ornek.com veya panel.ornek.com"))
       return
     }
+    const devral = yedekDevralGoster && fYedekDevral
     setOlusturuluyor(true)
     try {
       const body: Record<string, unknown> = { alan_adi: alanAdi, php_surum: fPHPSurum }
       if (fPlanID !== '') body.plan_id = fPlanID
       if (fSqlOlustur) body.sql_olustur = true
+      // Aynı alan adı + aynı sahiple silinmiş hesabın saklanan yedeklerini devral: AÇIK onay (varsayılan kapalı).
+      if (devral) body.yedekleri_devral = true
       // Sağlama 10-40 sn sürer (SELinux, php-fpm/nginx doğrulama); sunucu istemciden
       // kopuk tamamlar → genel 30 sn sınırına takılmasın.
       const r = await api.post<OlusturmaSonuc>('/domains', body, UZUN_ISTEK)
@@ -469,6 +498,7 @@ export default function DomainsPage() {
         : '"{0}" oluşturuldu — Linux user, nginx vhost, PHP-FPM havuzu, FTP hesabı ve DNS zone hazır.'), alanAdi)
       setBasari(m)
       toast.basari(cevir("Oluşturuldu"), m)
+      if (devral) yedekDevriBildir(r.data.devralinan_yedek)
       setTimeout(() => setBasari(null), 8000)
       yukle()
     } catch (e: unknown) {
@@ -478,6 +508,7 @@ export default function DomainsPage() {
           const m = cevirT(cevir('"{0}" oluşturuldu (sunucu yanıtı gecikti). Bu yüzden oluşturma parolaları gösterilemedi — FTP parolasını hosting sayfasından yenileyebilirsiniz.'), alanAdi)
           setBasari(m)
           toast.basari(cevir("Oluşturuldu"), m)
+          if (devral) yedekDevriBildir(undefined)
           yukle()
         } else {
           const m = cevir("Sunucudan yanıt alınamadı ve alan adı henüz listede görünmüyor. İşlem sunucuda sürüyor olabilir — tekrar oluşturmadan önce birkaç dakika sonra listeyi yenileyin.")
@@ -957,6 +988,17 @@ export default function DomainsPage() {
                 <span className="block text-xs text-slate-400 dark:text-slate-500">{cevir("İstemezseniz kapalı bırakın — sonradan Veritabanları sekmesinden açabilirsiniz.")}</span>
               </span>
             </label>
+
+            {yedekDevralGoster && (
+              <label className="flex items-start gap-2.5 mt-3 cursor-pointer select-none">
+                <input type="checkbox" checked={fYedekDevral} disabled={olusturuluyor} onChange={e => setFYedekDevral(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-brand-600 focus:ring-brand-500/40" />
+                <span className="text-sm text-slate-700 dark:text-slate-300">
+                  {cevir("Aynı alan adıyla silinmiş hesabın saklanan yedeklerini devral")}
+                  <span className="block text-xs text-slate-500 dark:text-slate-400">{cevir("Yalnız aynı alan adı ve aynı sahip (yönetici ya da aynı bayi) eşleşirse devralınır.")}</span>
+                </span>
+              </label>
+            )}
           </form>
       </Modal>
 
