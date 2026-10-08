@@ -82,6 +82,20 @@ const RES_EN: Record<string, string> = {
   "İlk bayinizi oluşturun; kendi hosting hesaplarını, planlarını ve DNS şablonunu yönetebilir.": "Create your first reseller; they can manage their own hosting accounts, plans and DNS template.",
   "Parola panoya kopyalandı": "Password copied to clipboard",
   "İşlem başarısız": "Operation failed",
+  "Bayi siliniyor": "Deleting reseller",
+  "Bayi silindi": "Reseller deleted",
+  "Bayi silme kısmen tamamlandı": "Reseller deletion partially completed",
+  "Bayi silinemedi": "Reseller could not be deleted",
+  "şu an": "now",
+  "başarılı": "succeeded",
+  "hata": "errors",
+  "Arka planda sürdür": "Continue in background",
+  "Kapat": "Close",
+  "Bu pencereyi kapatabilirsiniz; silme sunucuda devam eder. Sayfayı yenilerseniz ilerleme yeniden gösterilir.": "You can close this window; deletion continues on the server. If you reload the page the progress is shown again.",
+  "Yedekleri bırakarak sil": "Delete, leaving the backups",
+  "Silme devam ediyor": "Deletion in progress",
+  "İlerlemeyi göster": "Show progress",
+  "Başka bir toplu işlem çalışıyor; bitmesini bekleyin.": "Another bulk operation is running; wait for it to finish.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (RES_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -120,6 +134,9 @@ export default function ResellerlarPage() {
   const [form, setForm] = useState<any>(bos)
   const [kaydet, setKaydet] = useState(false)
   const [silinen, setSilinen] = useState<number | null>(null)
+  // Arka plan silme işi: is = cp_toplu_isler kimliği, bayi = silinen bayi (yedekleri bırakarak yeniden deneme için).
+  const [silIs, setSilIs] = useState<{ is: number; bayi: Reseller | null } | null>(null)
+  const [silModal, setSilModal] = useState(false)
 
   function yukle() {
     setYuk(true)
@@ -127,6 +144,14 @@ export default function ResellerlarPage() {
     api.get<Paket[]>('/reseller-plans').then(r => setPaketler(r.data)).catch(() => setPaketler([]))
   }
   useEffect(yukle, [])
+  // Sayfa yenilendiyse çalışan bayi silme işini yeniden yakala (iş sunucuda sürer).
+  useEffect(() => {
+    api.get<{ is_id: number }>('/domains/toplu/aktif').then(async r => {
+      if (!r.data.is_id) return
+      const d = await api.get<{ tip: string }>(`/domains/toplu/is?id=${r.data.is_id}`)
+      if (d.data.tip === 'bayi_sil') { setSilIs({ is: r.data.is_id, bayi: null }); setSilModal(true) }
+    }).catch(() => { /* iş yok / yetki yok */ })
+  }, [])
 
   function yeniAc() { setForm(bos); setModal('yeni'); setHata(null); setOk(null) }
   function duzenleAc(x: Reseller) {
@@ -165,9 +190,15 @@ export default function ResellerlarPage() {
 
   async function sil(x: Reseller) {
     if (!(await onay({ baslik: cevir('Emin misiniz?'), mesaj: `"${x.kullanici}" ${cevir("bayisi silinsin mi?")}\n\n${cevir("Bayinin tüm hosting hesapları (siteler, dosyalar, veritabanları, e-posta, yedekler) ve müşteri kullanıcıları da KALICI olarak silinir. Geri alınamaz.")}`, ton: 'tehlike', onayIkonu: I.cop }))) return
+    await silBaslat(x, false)
+  }
+
+  async function silBaslat(x: Reseller, yedekleriBirak: boolean) {
     setHata(null); setOk(null); setSilinen(x.id)
-    try { await api.delete(`/resellers/${x.id}`); setOk(cevir('Bayi silindi.')); toast.basari(cevir('Bayi silindi.')); yukle() }
-    catch (err) {
+    try {
+      const r = await api.delete<{ is_id: number }>(`/resellers/${x.id}${yedekleriBirak ? '?uzagi_yoksay=1' : ''}`)
+      setSilIs({ is: r.data.is_id, bayi: x }); setSilModal(true)
+    } catch (err) {
       const m = apiHata(err, cevir('Silinemedi'))
       setHata(m); toast.hata(cevir("İşlem başarısız"), m)
     }
@@ -236,6 +267,18 @@ export default function ResellerlarPage() {
         </div>
       )}
 
+      {silIs && !silModal && (
+        <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/20 px-3 py-2 text-sm">
+          <span className="text-slate-700 dark:text-slate-200">{cevir("Silme devam ediyor")}</span>
+          <Button type="button" variant="outlined" boyut="sm" onClick={() => setSilModal(true)}>{cevir("İlerlemeyi göster")}</Button>
+        </div>
+      )}
+      {silIs && silModal && (
+        <BayiSilModal isID={silIs.is} bayi={silIs.bayi}
+          onGizle={() => setSilModal(false)}
+          onBitti={() => { setSilIs(null); setSilModal(false); yukle() }}
+          onYedekleriBirak={(b) => { setSilIs(null); setSilModal(false); void silBaslat(b, true) }} />
+      )}
       <Modal acik={!!modal} baslik={modal === 'yeni' ? cevir('Yeni Bayi') : modal ? cevirT(cevir("Bayi Düzenle — {0}"), modal.kullanici) : ''}
         onKapat={() => setModal(null)} kapatilamaz={kaydet} genislik="lg"
         alt={<>
@@ -354,5 +397,79 @@ export default function ResellerlarPage() {
         )}
       </Modal>
     </div>
+  )
+}
+
+// BayiSilModal — bayi silme zincirinin CANLI ilerlemesi (modal + ilerleme çubuğu).
+// İş SUNUCUDA arka planda sürer (cp_toplu_isler, tip=bayi_sil): pencere kapansa da
+// sayfa yenilense de devam eder. 1,2 sn'de bir poll eder; ağ hatasında poll DURMAZ.
+type BayiSilDurum = {
+  durum: string; toplam: number; tamamlanan: number; basari: number; hata: number
+  aktif_domain: string; detaylar?: string[]
+}
+
+function BayiSilModal({ isID, bayi, onGizle, onBitti, onYedekleriBirak }: {
+  isID: number; bayi: Reseller | null
+  onGizle: () => void; onBitti: () => void; onYedekleriBirak: (b: Reseller) => void
+}) {
+  const [d, setD] = useState<BayiSilDurum | null>(null)
+  useEffect(() => {
+    let dur = false
+    const tik = async () => {
+      try {
+        const r = await api.get<BayiSilDurum>(`/domains/toplu/is?id=${isID}`)
+        if (dur) return
+        setD(r.data)
+        if (r.data.durum !== 'calisiyor') return // poll biter
+      } catch { /* geçici ağ hatası — poll sürer */ }
+      if (!dur) setTimeout(tik, 1200)
+    }
+    tik()
+    return () => { dur = true }
+  }, [isID])
+
+  const bitti = !!d && d.durum !== 'calisiyor'
+  const yuzde = d && d.toplam > 0 ? Math.round((d.tamamlanan / d.toplam) * 100) : 0
+  const ton: 'basari' | 'tehlike' | 'uyari' | 'bilgi' = !bitti ? 'bilgi' : d!.durum === 'tamam' ? 'basari' : d!.durum === 'kismi' ? 'uyari' : 'tehlike'
+  const baslik = !bitti ? cevir('Bayi siliniyor') : d!.durum === 'tamam' ? cevir('Bayi silindi')
+    : d!.durum === 'kismi' ? cevir('Bayi silme kısmen tamamlandı') : cevir('Bayi silinemedi')
+  const yedekSorunu = bitti && d!.durum === 'hata' && (d!.detaylar || []).some(x => x.includes('uzagi_yoksay'))
+  return (
+    <Modal acik baslik={baslik} ton={ton} genislik="md" kapatilamaz={!bitti} onKapat={bitti ? onBitti : onGizle}
+      alt={bitti ? (<>
+        {yedekSorunu && bayi && (
+          <Button type="button" color="error" variant="soft" ikon={I.cop} onClick={() => onYedekleriBirak(bayi)}>{cevir("Yedekleri bırakarak sil")}</Button>
+        )}
+        <Button type="button" color="primary" ikon={I.onay} onClick={onBitti}>{cevir("Kapat")}</Button>
+      </>) : (
+        <Button type="button" variant="outlined" ikon={I.kapat} onClick={onGizle}>{cevir("Arka planda sürdür")}</Button>
+      )}>
+      <div className="space-y-3" aria-live="polite">
+        <div className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-200">
+          <span>{d ? `${d.tamamlanan}/${d.toplam}` : '…'}</span>
+          <span className="font-semibold">{yuzde}%</span>
+        </div>
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-dark-600"
+          role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={yuzde}>
+          <div className={`h-full rounded-full transition-all duration-500 ${bitti && d!.durum === 'tamam' ? 'bg-emerald-500' : bitti && d!.durum === 'hata' ? 'bg-red-500' : bitti ? 'bg-amber-500' : 'bg-brand-500'}`}
+            style={{ width: `${yuzde}%` }} />
+        </div>
+        {d && (
+          <p className="text-xs text-slate-600 dark:text-slate-400">
+            <span className="inline-flex items-center gap-0.5 align-middle"><Ikon d={I.onay} className="size-3 shrink-0" />{d.basari} {cevir("başarılı")}</span>
+            {d.hata > 0 && <> · <span className="inline-flex items-center gap-0.5 align-middle"><Ikon d={I.kapat} className="size-3 shrink-0" />{d.hata} {cevir("hata")}</span></>}
+            {!bitti && d.aktif_domain ? <> · {cevir("şu an")}: <code className="font-mono">{d.aktif_domain}</code></> : ''}
+          </p>
+        )}
+        {bitti && (d!.detaylar?.length ?? 0) > 0 && (
+          <ul className="max-h-48 space-y-0.5 overflow-auto text-[11px] text-red-700 dark:text-red-300">
+            {d!.detaylar!.slice(0, 30).map((x, i) => (
+              <li key={i}><Ikon d={I.kapat} className="inline-block h-3.5 w-3.5 mr-0.5 align-[-2px]" /> {x}</li>
+            ))}
+          </ul>
+        )}
+        {!bitti && <p className="text-[11px] text-slate-500 dark:text-slate-400">{cevir("Bu pencereyi kapatabilirsiniz; silme sunucuda devam eder. Sayfayı yenilerseniz ilerleme yeniden gösterilir.")}</p>}
+      </div>
+    </Modal>
   )
 }

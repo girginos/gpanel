@@ -1,6 +1,7 @@
 package reseller
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -29,5 +30,20 @@ func bayiAnahtarlariniIptal(r *http.Request, db *sql.DB, bayiID, eden int64, kul
 	if n > 0 {
 		httpx.Denetim(db, r, eden, kul, "api_anahtar.toplu_iptal", bayiAd,
 			fmt.Sprintf("neden=%s iptal edilen=%d", neden, n), kapsam, true)
+	}
+}
+
+// bayiAnahtarlariniIptalSistem: bayiAnahtarlariniIptal'in ARKA PLAN (istek yok) kopyasi —
+// bayi silme zinciri istek bittikten sonra da calisir.
+func bayiAnahtarlariniIptalSistem(ctx context.Context, db *sql.DB, bayiID, eden int64, kul, bayiAd, neden string) {
+	n, err := apianahtar.SahibinTumunuIptal(ctx, db, bayiID, eden, neden)
+	if err != nil {
+		httpx.DenetimSistem(db, eden, kul, "api_anahtar.toplu_iptal", bayiAd,
+			fmt.Sprintf("neden=%s HATA: anahtarlar iptal edilemedi", neden), 0, false)
+		return
+	}
+	if n > 0 {
+		httpx.DenetimSistem(db, eden, kul, "api_anahtar.toplu_iptal", bayiAd,
+			fmt.Sprintf("neden=%s iptal edilen=%d", neden, n), 0, true)
 	}
 }

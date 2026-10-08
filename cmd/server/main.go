@@ -376,6 +376,7 @@ func main() {
 	accountsH := &accounts.Handlers{DB: d}
 	backupsH := &backups.Handlers{DB: d}
 	topluH := &toplu.Handlers{DB: d}
+	toplu.AskidakileriKapat(d) // yeniden baslamadan once 'calisiyor' kalmis isler artik olu
 	backups.StartScheduler(d)
 	backups.StartUzakKopya(d) // şifreli uzak kopya işçisi; ayar KAPALI geldiği için yedek davranışı değişmez
 	// Webhook adresleri panelin GENEL portunu kullanır (kapı modunda müşteri kapısı).

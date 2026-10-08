@@ -219,6 +219,7 @@ const DOMAINS_EN: Record<string, string> = {
   "İşlem başarısız": "Operation failed",
   "IP değiştir": "Change IP",
   "IP değiştirme": "IP change",
+  "Bayi silme": "Reseller deletion",
   "Durum kontrol ediliyor…": "Checking status…",
   "Sonuç belirsiz": "Result unknown",
   "Kuruluyor… ({0} sn)": "Provisioning… ({0} s)",
@@ -1161,7 +1162,7 @@ function TopluIsPaneli({ isID, onBitti }: { isID: number; onBitti: () => void })
   if (!d || kapandi) return null
   const ADLAR: Record<string, string> = {
     dns_reset: cevir('DNS varsayılana sıfırlama'), ssl_kur: cevir("Let's Encrypt SSL kurulumu"),
-    sahip: cevir('Sahip değiştirme'), plan: cevir('Plan değiştirme'), ip: cevir('IP değiştirme'),
+    sahip: cevir('Sahip değiştirme'), plan: cevir('Plan değiştirme'), ip: cevir('IP değiştirme'), bayi_sil: cevir('Bayi silme'),
   }
   const yuzde = d.toplam > 0 ? Math.round((d.tamamlanan / d.toplam) * 100) : 0
   const bitti = d.durum !== 'calisiyor'

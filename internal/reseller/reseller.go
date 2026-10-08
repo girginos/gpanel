@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/middleware"
 	"girginospanel/internal/plans"
+	"girginospanel/internal/toplu"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -382,7 +384,17 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DELETE /resellers/{id} — reseller sil (admin). Altindaki tum hosting + musteri kullanicilari ile birlikte.
+// bayiHosting — bayi silme zincirinde silinecek hosting.
+type bayiHosting struct {
+	id     int64
+	ad, sk string
+	isDemo int
+}
+
+// DELETE /resellers/{id} — reseller sil (admin). Altindaki tum hosting + musteri
+// kullanicilari ile birlikte. ARKA PLAN isi: 202 {is_id,toplam} doner; ilerleme
+// GET /domains/toplu/is?id= ile izlenir (cp_toplu_isler, tip=bayi_sil). Hosting basina
+// birkac sn surdugunden senkron istek zaman asimina ugrardi.
 func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 	// 🔴 ParseInt hatasi 0'a dusuyordu: /resellers/abc ya da /resellers/0 istegi
 	// "DELETE FROM service_plans WHERE reseller_id=0" yoluna, yani KOKUN GLOBAL
@@ -393,116 +405,153 @@ func (h *Handlers) Sil(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz bayi kimliği")
 		return
 	}
-	var rol string
-	if e := h.DB.QueryRowContext(r.Context(), `SELECT role FROM users WHERE id=?`, id).Scan(&rol); e != nil || rol != "reseller" {
+	var rol, bayiAd string
+	if e := h.DB.QueryRowContext(r.Context(), `SELECT role, username FROM users WHERE id=?`, id).Scan(&rol, &bayiAd); e != nil || rol != "reseller" {
 		httpx.WriteError(w, http.StatusNotFound, "bayi bulunamadı")
 		return
 	}
-	// Bayi silinince altındaki HER ŞEY gider: hosting hesapları (vhost, PHP havuzu,
-	// Linux kullanıcısı, DB'ler, yedekler, DNS) ve bayinin müşteri kullanıcıları.
-	// Eskiden hosting varsa 409 dönüyordu; kullanıcı kararı: bayi silmek = hepsini silmek.
-	// Admin'e onay arayüzde alınır (AdminOnly rota). Aynı bayinin askı/silme/plan
-	// işlemleriyle yarışmasın diye bayi kilidi tüm zincir boyunca tutulur.
-	kl := kilit.Bayi(id)
-	kl.Lock()
-	defer kl.Unlock()
-	type hst struct {
-		id     int64
-		ad, sk string
-		isDemo int
-	}
-	var hostlar []hst
-	if rows, e := h.DB.QueryContext(r.Context(),
-		`SELECT id, alan_adi, sistem_kullanici, is_demo FROM domains WHERE reseller_id=? ORDER BY id`, id); e == nil {
-		for rows.Next() {
-			var x hst
-			if rows.Scan(&x.id, &x.ad, &x.sk, &x.isDemo) == nil {
-				hostlar = append(hostlar, x)
-			}
-		}
-		rows.Close()
-	} else {
+	var hostlar []bayiHosting
+	rows, e := h.DB.QueryContext(r.Context(),
+		`SELECT id, alan_adi, sistem_kullanici, is_demo FROM domains WHERE reseller_id=? ORDER BY id`, id)
+	if e != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "hosting listesi okunamadı: "+e.Error())
 		return
 	}
+	for rows.Next() {
+		var x bayiHosting
+		if rows.Scan(&x.id, &x.ad, &x.sk, &x.isDemo) == nil {
+			hostlar = append(hostlar, x)
+		}
+	}
+	rows.Close()
+
 	uid, kul := middleware.Aktor(r)
 	uzagiYoksay := r.URL.Query().Get("uzagi_yoksay") == "1"
-	// 1. geçiş: uzak (FTP/SFTP) yedekler. DB satırı gidince erişim bilgisi de gider;
-	// temizlenemeyen varsa HİÇBİR ŞEY silinmeden dur (kısmi silme olmasın).
+	// toplam = her hosting + son adim (bayi + musteri kayitlari).
+	isID, err := toplu.IsAc(h.DB, "bayi_sil", len(hostlar)+1, fmt.Sprintf(`{"bayi_id":%d}`, id), kul)
+	if errors.Is(err, toplu.ErrMesgul) {
+		httpx.WriteError(w, http.StatusConflict, "zaten çalışan bir toplu işlem var; bitmesini bekleyin")
+		return
+	}
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "iş kaydı açılamadı")
+		return
+	}
+	go h.bayiSilCalistir(isID, id, bayiAd, hostlar, uzagiYoksay, uid, kul)
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"is_id": isID, "toplam": len(hostlar) + 1})
+}
+
+// bayiSilCalistir — bayi silme zinciri (arka plan). Altindaki HER SEY gider: hosting
+// hesaplari (vhost, PHP havuzu, Linux kullanicisi, DB'ler, yedekler, DNS) ve bayinin
+// musteri kullanicilari. Bayi kilidi zincir boyunca tutulur (aski/plan/silme yarismasin).
+// Bir hosting silinemezse DIGERLERI silinmeye devam eder ama bayi KAYDI silinmez
+// (durum=kismi): sorun giderilip silme tekrarlanabilir.
+func (h *Handlers) bayiSilCalistir(isID, id int64, bayiAd string, hostlar []bayiHosting, uzagiYoksay bool, uid int64, kul string) {
+	var detay []string
+	basari, hata := 0, 0
+	bitti := false
+	defer func() {
+		if rc := recover(); rc != nil {
+			log.Printf("bayi %d silme zinciri PANIK: %v", id, rc)
+			detay = append(detay, fmt.Sprintf("beklenmeyen hata: %v", rc))
+			httpx.DenetimSistem(h.DB, uid, kul, "bayi.sil", bayiAd, fmt.Sprintf("panik: %v", rc), 0, false)
+			toplu.IsBitir(h.DB, isID, "hata", detay)
+		} else if !bitti {
+			toplu.IsBitir(h.DB, isID, "hata", detay)
+		}
+	}()
+	kl := kilit.Bayi(id)
+	kl.Lock()
+	defer kl.Unlock()
+	// Istemci kopsa da / panel istegi bitse de yikim yarim kalmasin.
+	ctx := context.Background()
+
+	// 1. gecis: uzak (FTP/SFTP) yedekler. DB satiri gidince erisim bilgisi de gider;
+	// temizlenemeyen varsa HICBIR SEY silinmeden dur (kismi silme olmasin).
 	if !uzagiYoksay {
 		for _, x := range hostlar {
-			if kalan, e := backups.DomainYedekleriniTemizle(r.Context(), h.DB, x.id); kalan > 0 {
-				msg := fmt.Sprintf("%s alan adının uzak depodaki %d yedeği silinemedi; hiçbir şey silinmedi", x.ad, kalan)
+			toplu.IsIlerle(h.DB, isID, 0, 0, 0, x.ad+" (uzak yedekler denetleniyor)")
+			if kalan, e := backups.DomainYedekleriniTemizle(ctx, h.DB, x.id); kalan > 0 {
+				msg := fmt.Sprintf("%s alan adının uzak depodaki %d yedeği silinemedi; hiçbir şey silinmedi. Bağlantıyı düzeltin ya da yönetici olarak yedekleri bırakarak devam edin (uzagi_yoksay).", x.ad, kalan)
 				if e != nil {
 					msg += " (" + e.Error() + ")"
 				}
-				httpx.Denetim(h.DB, r, uid, kul, "bayi.sil", strconv.FormatInt(id, 10), "reddedildi: "+msg, 0, false)
-				httpx.WriteJSON(w, http.StatusConflict, map[string]any{"ok": false, "hata": msg, "uzagi_yoksay": true})
+				httpx.DenetimSistem(h.DB, uid, kul, "bayi.sil", strconv.FormatInt(id, 10), "reddedildi: "+msg, 0, false)
+				detay = append(detay, msg)
+				bitti = true
+				toplu.IsBitir(h.DB, isID, "hata", detay)
 				return
 			}
 		}
 	}
-	// 2. geçiş: yıkım. İstemci kopsa da yarım kalmasın.
-	silCtx := context.WithoutCancel(r.Context())
-	silinenHost := 0
-	for _, x := range hostlar {
-		kap, e := domains.HostingYik(silCtx, h.DB, x.id, x.ad, x.sk, x.isDemo)
+	// 2. gecis: yikim.
+	for i, x := range hostlar {
+		toplu.IsIlerle(h.DB, isID, i, basari, hata, x.ad)
+		kap, e := domains.HostingYik(ctx, h.DB, x.id, x.ad, x.sk, x.isDemo)
 		if e != nil {
-			httpx.Denetim(h.DB, r, uid, kul, "hosting.sil", x.ad, "bayi silme zinciri HATA: "+e.Error(), kap, false)
-			httpx.WriteError(w, http.StatusInternalServerError,
-				fmt.Sprintf("%s silinemedi (%d hosting silindi, bayi duruyor): %v", x.ad, silinenHost, e))
-			return
+			hata++
+			detay = append(detay, x.ad+": "+e.Error())
+			httpx.DenetimSistem(h.DB, uid, kul, "hosting.sil", x.ad, "bayi silme zinciri HATA: "+e.Error(), kap, false)
+			continue
 		}
-		silinenHost++
-		httpx.Denetim(h.DB, r, uid, kul, "hosting.sil", x.ad, "sistem_kullanici="+x.sk+" (bayi silme zinciri)", kap, true)
-		destekiptal.Domain(silCtx, h.DB, x.id, protokol.IptalAlanSilme, uid, kul)
-		domains.HostingYikSonrasi(silCtx, h.DB, x.ad, x.isDemo)
+		basari++
+		httpx.DenetimSistem(h.DB, uid, kul, "hosting.sil", x.ad, "sistem_kullanici="+x.sk+" (bayi silme zinciri)", kap, true)
+		destekiptal.Domain(ctx, h.DB, x.id, protokol.IptalAlanSilme, uid, kul)
+		domains.HostingYikSonrasi(ctx, h.DB, x.ad, x.isDemo)
 	}
-	// Bayinin müşteri kullanıcıları: fk_users_reseller ON DELETE SET NULL olduğundan
-	// silinmezse reseller_id=NULL kalıp SAHİPSİZ (köke ait gibi) hesaplara dönerlerdi.
-	if _, e := h.DB.ExecContext(silCtx, `DELETE FROM users WHERE reseller_id=? AND role='user'`, id); e != nil {
-		log.Printf("bayi %d müşteri kullanıcıları silinemedi: %v", id, e)
+	bitti = true
+	toplu.IsIlerle(h.DB, isID, len(hostlar), basari, hata, "")
+	if hata > 0 {
+		detay = append(detay, "bayi kaydı SİLİNMEDİ: hataları giderip bayiyi tekrar silin (silinen hostingler geri gelmez)")
+		toplu.IsBitir(h.DB, isID, "kismi", detay)
+		return
 	}
-	var bayiAd string
-	_ = h.DB.QueryRowContext(r.Context(), `SELECT username FROM users WHERE id=?`, id).Scan(&bayiAd)
-	// Bayi + planlari TEK islemde gitsin: arada surec olurse bayi silinip planlari
-	// kokun katalogunda oksuz kalmasin.
-	tx, err2 := h.DB.BeginTx(r.Context(), nil)
-	err = err2
+	toplu.IsIlerle(h.DB, isID, len(hostlar), basari, hata, bayiAd+" (bayi kaydı)")
+	if e := h.bayiKaydiniSil(ctx, id); e != nil {
+		detay = append(detay, "bayi kaydı silinemedi: "+e.Error())
+		httpx.DenetimSistem(h.DB, uid, kul, "bayi.sil", bayiAd, "HATA: "+e.Error(), 0, false)
+		toplu.IsBitir(h.DB, isID, "hata", detay)
+		return
+	}
+	bayiAnahtarlariniIptalSistem(ctx, h.DB, id, uid, kul, bayiAd, "bayi_silindi")
+	destekiptal.Bayi(ctx, h.DB, id, true, uid, kul)
+	// Kapsam KOK: bayi artik yok; ID ileride yeniden kullanilirsa yeni bayi
+	// bu kaydi kendi gecmisi sanmasin (kok zaten tum kayitlari gorur).
+	httpx.DenetimSistem(h.DB, uid, kul, "bayi.sil", bayiAd, fmt.Sprintf("silinen bayi id=%d", id), 0, true)
+	toplu.IsIlerle(h.DB, isID, len(hostlar)+1, basari+1, hata, "")
+	toplu.IsBitir(h.DB, isID, "tamam", detay)
+}
+
+// bayiKaydiniSil — musteri kullanicilari + bayi + planlari TEK islemde.
+// Musteri kullanicilari: fk_users_reseller ON DELETE SET NULL oldugundan silinmezse
+// reseller_id=NULL kalip SAHIPSIZ (koke ait gibi) hesaplara donerlerdi.
+func (h *Handlers) bayiKaydiniSil(ctx context.Context, id int64) error {
+	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi: "+err.Error())
-		return
+		return err
 	}
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM users WHERE id=? AND role='reseller'`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE reseller_id=? AND role='user'`, id); err != nil {
 		_ = tx.Rollback()
-		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi: "+err.Error())
-		return
+		return fmt.Errorf("müşteri kullanıcıları silinemedi: %w", err)
 	}
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM service_plans WHERE reseller_id=?
+	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id=? AND role='reseller'`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM service_plans WHERE reseller_id=?
 		   AND id NOT IN (SELECT COALESCE(plan_id,0) FROM domains WHERE plan_id IS NOT NULL)`, id); err != nil {
 		_ = tx.Rollback()
-		httpx.WriteError(w, http.StatusInternalServerError, "planlar silinemedi: "+err.Error())
-		return
+		return fmt.Errorf("planlar silinemedi: %w", err)
 	}
 	// Yetim kayitlar: bayi ID'si ileride yeniden kullanilirsa yeni bayi eskinin
 	// DNS sablonunu devralir ve denetim kayitlarini gorurdu (kimlik sizintisi).
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM dns_template WHERE reseller_id=?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM dns_template WHERE reseller_id=?`, id); err != nil {
 		log.Printf("bayi %d dns_template temizligi: %v", id, err)
 	}
-	if _, err := tx.ExecContext(r.Context(),
-		`UPDATE audit_log SET reseller_id=0 WHERE reseller_id=?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE audit_log SET reseller_id=0 WHERE reseller_id=?`, id); err != nil {
 		log.Printf("bayi %d denetim kapsami anonimlestirilemedi: %v", id, err)
 	}
-	if err := tx.Commit(); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi: "+err.Error())
-		return
-	}
-	bayiAnahtarlariniIptal(r, h.DB, id, uid, kul, bayiAd, "bayi_silindi")
-	destekiptal.Bayi(r.Context(), h.DB, id, true, uid, kul)
-	// Kapsam KOK: bayi artik yok; ID ileride yeniden kullanilirsa yeni bayi
-	// bu kaydi kendi gecmisi sanmasin (kok zaten tum kayitlari gorur).
-	httpx.Denetim(h.DB, r, uid, kul, "bayi.sil", bayiAd, fmt.Sprintf("silinen bayi id=%d", id), 0, true)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return tx.Commit()
 }
 
 // paketIlkeleri: paketin asim/fazla-satis ilkelerini doner (bayiye KOPYALANIR —

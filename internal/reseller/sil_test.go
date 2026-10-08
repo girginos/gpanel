@@ -16,6 +16,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-sql-driver/mysql"
+
+	"girginospanel/internal/toplu"
 )
 
 func silGeciciDB(t *testing.T) *sql.DB {
@@ -53,6 +55,10 @@ func silGeciciDB(t *testing.T) *sql.DB {
 		`CREATE TABLE service_plans (id BIGINT PRIMARY KEY, reseller_id BIGINT NOT NULL DEFAULT 0, domain_id BIGINT NULL)`,
 		`CREATE TABLE dns_template (id BIGINT AUTO_INCREMENT PRIMARY KEY, reseller_id BIGINT NOT NULL DEFAULT 0)`,
 		`CREATE TABLE audit_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, reseller_id BIGINT NOT NULL DEFAULT 0)`,
+		`CREATE TABLE cp_toplu_isler (id BIGINT AUTO_INCREMENT PRIMARY KEY, tip VARCHAR(24) NOT NULL, durum VARCHAR(16) NOT NULL DEFAULT 'calisiyor',
+			toplam INT NOT NULL DEFAULT 0, tamamlanan INT NOT NULL DEFAULT 0, basari INT NOT NULL DEFAULT 0, hata INT NOT NULL DEFAULT 0,
+			aktif_domain VARCHAR(255) NOT NULL DEFAULT '', parametre TEXT, detay MEDIUMTEXT, baslatan VARCHAR(64) NOT NULL DEFAULT '',
+			baslangic TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, bitis TIMESTAMP NULL)`,
 		`INSERT INTO users (id, username, role) VALUES (1,'root','admin'),(7,'bayi7','reseller'),(8,'bayi8','reseller')`,
 		`INSERT INTO users (id, username, role, reseller_id) VALUES (70,'mus70','user',7),(71,'mus71','user',7),(80,'mus80','user',8)`,
 		`INSERT INTO domains (id, alan_adi, reseller_id, is_demo, customer_id) VALUES
@@ -73,6 +79,15 @@ func silIstek(db *sql.DB, id int) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/resellers/%d", id), nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
+	if w.Code == http.StatusAccepted { // arka plan işi: bitene kadar bekle
+		for i := 0; i < 200; i++ {
+			var d string
+			if err := db.QueryRow(`SELECT durum FROM cp_toplu_isler ORDER BY id DESC LIMIT 1`).Scan(&d); err == nil && d != "calisiyor" {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 	return w
 }
 
@@ -88,8 +103,17 @@ func silSay(t *testing.T, db *sql.DB, q string) int {
 func TestBayiSil_HostingVeMusterilerleBirlikteGider(t *testing.T) {
 	db := silGeciciDB(t)
 	w := silIstek(db, 7)
-	if w.Code != http.StatusOK {
-		t.Fatalf("hostingli bayi silinemedi → %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("hostingli bayi silme işi başlamadı → %d %s", w.Code, w.Body.String())
+	}
+	var durum string
+	var toplam, tamam, basari int
+	if err := db.QueryRow(`SELECT durum, toplam, tamamlanan, basari FROM cp_toplu_isler ORDER BY id DESC LIMIT 1`).Scan(&durum, &toplam, &tamam, &basari); err != nil {
+		t.Fatal(err)
+	}
+	// 2 hosting + son adım (bayi kaydı) = 3; hepsi tamamlanmış olmalı.
+	if durum != "tamam" || toplam != 3 || tamam != 3 || basari != 3 {
+		t.Errorf("iş sonucu: durum=%s toplam=%d tamamlanan=%d basari=%d (beklenen tamam 3/3/3)", durum, toplam, tamam, basari)
 	}
 	if n := silSay(t, db, `SELECT COUNT(*) FROM domains WHERE reseller_id=7`); n != 0 {
 		t.Errorf("bayinin hostingleri kaldı: %d", n)
@@ -116,5 +140,51 @@ func TestBayiSil_BayiOlmayanReddedilir(t *testing.T) {
 	}
 	if n := silSay(t, db, `SELECT COUNT(*) FROM domains`); n != 4 {
 		t.Errorf("hosting silindi: %d", n)
+	}
+}
+
+// Çalışan başka bir toplu iş varken bayi silme BAŞLAMAZ (409) ve hiçbir şey silinmez.
+func TestBayiSil_MesgulkenReddedilir(t *testing.T) {
+	db := silGeciciDB(t)
+	id, err := toplu.IsAc(db, "ssl_kur", 1, "{}", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer toplu.IsBitir(db, id, "tamam", nil)
+	if w := silIstek(db, 7); w.Code != http.StatusConflict {
+		t.Errorf("meşgulken bayi silme → %d (beklenen 409)", w.Code)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM domains WHERE reseller_id=7`); n != 2 {
+		t.Errorf("meşgulken hosting silindi: kalan %d", n)
+	}
+}
+
+// Bir hosting silinemezse (burada tetikleyici engeller): DİĞERLERİ silinir, bayi ve
+// müşteri kayıtları KALIR, iş 'kismi' biter — sorun giderilince silme tekrarlanabilir.
+func TestBayiSil_HostingSilinemezseBayiKalir(t *testing.T) {
+	db := silGeciciDB(t)
+	if _, err := db.Exec(`CREATE TRIGGER engel BEFORE DELETE ON domains FOR EACH ROW
+		BEGIN IF OLD.id = 2 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'engel'; END IF; END`); err != nil {
+		t.Fatal(err)
+	}
+	if w := silIstek(db, 7); w.Code != http.StatusAccepted {
+		t.Fatalf("iş başlamadı → %d", w.Code)
+	}
+	var durum string
+	var hata int
+	if err := db.QueryRow(`SELECT durum, hata FROM cp_toplu_isler ORDER BY id DESC LIMIT 1`).Scan(&durum, &hata); err != nil {
+		t.Fatal(err)
+	}
+	if durum != "kismi" || hata != 1 {
+		t.Errorf("iş durumu=%s hata=%d (beklenen kismi/1)", durum, hata)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM domains WHERE id=1`); n != 0 {
+		t.Errorf("silinebilen hosting silinmedi")
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM domains WHERE id=2`); n != 1 {
+		t.Errorf("engelli hosting silinmiş görünüyor")
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id IN (7,70,71)`); n != 3 {
+		t.Errorf("hata varken bayi/müşteri kaydı silindi: kalan %d (beklenen 3)", n)
 	}
 }
