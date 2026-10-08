@@ -124,9 +124,14 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"plan.varsayilan_olustur": {TR: "Varsayılan bayi planı oluşturuldu", EN: "Default reseller plan created"},
 
 	// Yedek
-	"yedek.geriyukle":              {TR: "Yedek geri yüklendi", EN: "Backup restored"},
-	"yedek.sil.lftp-yok":           {TR: "Yedek silindi, uzak kopya kaldı", EN: "Backup deleted, remote copy kept", gereksizNot: []string{"uzak kopya kaldı"}},
-	"yedek.sil.uzak-yoksayildi":    {TR: "Yedek silindi, uzak kopya bırakıldı", EN: "Backup deleted, remote copy kept"},
+	"yedek.geriyukle":           {TR: "Yedek geri yüklendi", EN: "Backup restored"},
+	"yedek.sil.lftp-yok":        {TR: "Yedek silindi, uzak kopya kaldı", EN: "Backup deleted, remote copy kept", gereksizNot: []string{"uzak kopya kaldı"}},
+	"yedek.sil.uzak-yoksayildi": {TR: "Yedek silindi, uzak kopya bırakıldı", EN: "Backup deleted, remote copy kept"},
+	// Silinmiş hesap yedekleri (hosting/bayi silinince yedekler saklanır; yönetici yönetir)
+	"silinen-yedek.bagla":          {TR: "Silinmiş hesap yedekleri hostinge bağlandı", EN: "Deleted-account backups attached to hosting"},
+	"silinen-yedek.indir":          {TR: "Silinmiş hesap yedeği indirildi", EN: "Deleted-account backup downloaded"},
+	"silinen-yedek.temizle":        {TR: "Silinmiş hesap yedekleri kalıcı silindi", EN: "Deleted-account backups deleted for good"},
+	"silinen-yedek.ayar":           {TR: "Silinmiş yedek saklama süresi değişti", EN: "Deleted-backup retention changed"},
 	"yedek.hedef.ekle":             {TR: "Yedek hedefi eklendi", EN: "Backup target added"},
 	"yedek.hedef.sil":              {TR: "Yedek hedefi silindi", EN: "Backup target deleted"},
 	"yedek.hedef.yetkilendi":       {TR: "Google Drive yetkilendirildi", EN: "Google Drive authorized"},
