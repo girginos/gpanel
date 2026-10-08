@@ -200,7 +200,7 @@ type putGovde struct {
 // Put — yalnız admin. Middleware.AdminOnly ile korunur.
 func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 	var g putGovde
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&g); err != nil {
 		hataYaz(w, http.StatusBadRequest, "geçersiz istek gövdesi")

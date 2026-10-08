@@ -139,7 +139,7 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// Kayit.Aktif bool oldugundan "gonderilmedi" ile "false" ayirt edilemiyor; ayrica
 	// *bool ile yakaliyoruz. Eskiden alan yokken Go sifiri (false) kaydi sessizce pasif
 	// yapip WriteZone WHERE aktif=1 ile zone disinda birakiyordu (E2E bulgusu).
-	ham, _ := io.ReadAll(r.Body)
+	ham, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err := json.Unmarshal(ham, &k); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
@@ -201,7 +201,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var k Kayit
-	if err := json.NewDecoder(r.Body).Decode(&k); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&k); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -284,7 +284,7 @@ func (h *Handlers) TopluSil(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		IDs []int64 `json:"ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -332,7 +332,7 @@ func (h *Handlers) TopluDurum(w http.ResponseWriter, r *http.Request) {
 		IDs   []int64 `json:"ids"`
 		Aktif bool    `json:"aktif"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}

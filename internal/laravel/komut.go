@@ -46,7 +46,7 @@ func (h *Handlers) Artisan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Komut string `json:"komut"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -110,7 +110,7 @@ func (h *Handlers) Composer(w http.ResponseWriter, r *http.Request) {
 		Komut string `json:"komut"`
 		Paket string `json:"paket"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -218,7 +218,7 @@ func (h *Handlers) Npm(w http.ResponseWriter, r *http.Request) {
 		NodeSurum     string `json:"node_surum"`
 		IgnoreScripts bool   `json:"ignore_scripts"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}

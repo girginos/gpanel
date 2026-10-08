@@ -97,7 +97,7 @@ func (h *Handlers) PutSOA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var s SOA
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&s); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}

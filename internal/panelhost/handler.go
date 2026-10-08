@@ -62,7 +62,7 @@ func gecerliHostname(s string) bool {
 
 func gecerliGovdeCoz(w http.ResponseWriter, r *http.Request) (string, bool) {
 	var g hostnameGovde
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&g); err != nil {
 		hataYaz(w, 400, "geçersiz gövde: "+err.Error())

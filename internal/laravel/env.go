@@ -48,7 +48,7 @@ func (h *Handlers) EnvYaz(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Icerik string `json:"icerik"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -83,7 +83,7 @@ func (h *Handlers) Bakim(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Aktif bool `json:"aktif"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
