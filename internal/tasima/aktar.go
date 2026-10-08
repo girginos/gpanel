@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"girginospanel/internal/backups"
 	"girginospanel/internal/efektiflimit"
 	stdlog "log"
 	"path/filepath"
@@ -236,6 +237,8 @@ func (h *Handlers) hesapAktarIc(ctx context.Context, k *Kaynak, hs Hesap, ay Aya
 			return nil, fmt.Errorf("domain kaydi: %w", err)
 		}
 		sonuc.DomainID, _ = res.LastInsertId()
+		// A2: bu kimlik daha önce silinmiş bir hostinge aitse onun kalıntı yedek satırlarını yetim işaretle.
+		backups.YetimKalintilariniAyir(ctx, h.DB, sonuc.DomainID)
 		kotaBirak() // satır yazıldı: sonraki kota okumaları bu siteyi sayar
 
 		limCtx, limIptal := context.WithTimeout(context.Background(), 5*time.Minute)

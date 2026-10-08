@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"girginospanel/internal/backups"
 	destekiptal "girginospanel/internal/destek/iptal"
 	"girginospanel/internal/destek/protokol"
 	"girginospanel/internal/dns"
@@ -216,6 +217,10 @@ type createReq struct {
 	CustomerID *int64 `json:"customer_id,omitempty"`
 	PlanID     *int64 `json:"plan_id,omitempty"`
 	SqlOlustur bool   `json:"sql_olustur,omitempty"` // varsayılan false: DB otomatik açılmaz
+	// YedekleriDevral: AÇIK bayrak (varsayılan false). true ise hosting başarıyla oluştuktan sonra aynı alan adı +
+	// aynı sahip + aynı sistem kullanıcısıyla silinmiş bir hesabın yetim yedekleri bu hostinge bağlanır
+	// (backups.YetimleriDevral). Bu uca yalnız yönetici/bayi/API anahtarı erişir; müşteri akışı yedek devralmaz.
+	YedekleriDevral bool `json:"yedekleri_devral,omitempty"`
 }
 
 type createResp struct {
@@ -224,6 +229,9 @@ type createResp struct {
 		FTP string `json:"ftp"`
 		DB  string `json:"db"`
 	} `json:"olusturulan_parolalar"`
+	// DevralinanYedek: devralınan yetim yedek sayısı. YALNIZ istekte `yedekleri_devral:true` varsa yanıtta bulunur
+	// (devralma hata verirse 0); bayrak yoksa alan hiç yazılmaz.
+	DevralinanYedek *int64 `json:"devralinan_yedek,omitempty"`
 }
 
 // resellerKotaKontrol: reseller'in toplam kotalarini (max_domain / max_disk_mb)
@@ -319,6 +327,8 @@ var (
 	// Sağlama SONRASI dış etkili adımlar (testler sahteyle değiştirir: gerçek
 	// systemd/BIND/pure-ftpd'ye ulaşılmadan bağlamın iptal edilmediği kanıtlanır).
 	olusturKaynakUygula  = kaynaklimit.UygulaHepsi
+	olusturYedekDevral   = backups.YetimleriDevral
+	olusturKalintiAyir   = backups.YetimKalintilariniAyir
 	olusturFTP           = hesaplar.FTPCreate
 	olusturSertifikaSart = provisioner.SertifikaSartMi
 	olusturDNSTohumla    = dns.SeedDefaults
@@ -491,6 +501,9 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ := res.LastInsertId()
+	// A2: bu kimliği daha önce taşımış silinmiş bir hostingin kalıntı yedek satırı varsa (silme izi yazılamamış ve
+	// kimlik yeniden kullanılmış) yetim işaretlenir; yeni müşteri eski müşterinin yedeklerini görmez.
+	olusturKalintiAyir(ctx, h.DB, id)
 
 	if req.CustomerID != nil || req.PlanID != nil {
 		if _, err := h.DB.ExecContext(ctx,
@@ -569,14 +582,36 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		log.Printf("DNS WriteZone %q hata: %v", req.AlanAdi, err)
 	}
 
+	// 6) Silinmiş hesabın yetim yedeklerini devral — YALNIZ açık bayrakla (Y1). Hosting artık tamamen kuruldu:
+	// devralma başarısız olursa hosting oluşturma BAŞARISIZ SAYILMAZ (loglanır, devralinan_yedek=0, denetime düşer).
+	var devralinan int64
+	var devralHata error
+	if req.YedekleriDevral {
+		devralinan, devralHata = olusturYedekDevral(ctx, h.DB, id)
+		if devralHata != nil {
+			devralinan = 0
+			log.Printf("domains.Create: yetim yedekler devralınamadı (domain=%d %s): %v", id, req.AlanAdi, devralHata)
+		}
+	}
+
 	row := h.DB.QueryRowContext(ctx, selectAll+" WHERE d.id=?", id)
 	d, _ := scan(row)
 
 	uid, kul := middleware.Aktor(r)
 	httpx.Denetim(h.DB, r, uid, kul, "hosting.olustur", req.AlanAdi, fmt.Sprintf("plan=%d", planNoLog(req.PlanID)), rid, true)
+	if req.YedekleriDevral && (devralinan > 0 || devralHata != nil) {
+		not := fmt.Sprintf("%d yedek devralındı", devralinan)
+		if devralHata != nil {
+			not = "yedekler devralınamadı (hosting oluşturuldu)"
+		}
+		httpx.Denetim(h.DB, r, uid, kul, "hosting.yedek-devral", req.AlanAdi, not, rid, devralHata == nil)
+	}
 	resp := createResp{Domain: d}
 	resp.OluşturulanParolalar.FTP = ftpPass
 	resp.OluşturulanParolalar.DB = dbPass
+	if req.YedekleriDevral {
+		resp.DevralinanYedek = &devralinan
+	}
 	httpx.WriteJSON(w, http.StatusCreated, resp)
 }
 
@@ -658,8 +693,11 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// 🔴 SİLME YEDEKLERDEN BAĞIMSIZDIR (kullanıcı kararı, 2026-10-08): yedek dizinine ve uzak
 	// kopyalara dokunulmaz, yedek/uzak depo durumu silmeyi engellemez. Yedekler olduğu yerde kalır;
-	// HostingYik yalnız best-effort bir iz bırakır (backups.SilinenIsaretle), süre dolunca
-	// (varsayılan: hostingin yedek slotu kadar gün) günlük tur temizler.
+	// HostingYik domains satırı gitmeden önce silme izini hazırlar (backups.SilinenIzHazirla: alan adı, sk, bayi,
+	// slot, uzak hedefin şifreli anlık görüntüsü), satır silinince TEK best-effort UPDATE ile yedek satırlarını
+	// yetim işaretler (iz.Yaz: domain_id=0, benzersiz iz_id); yazılamazsa açılış/04:00 sahipsiz işaretleme
+	// turu (SilinenSahipsizIsaretle) yakalar. Süre dolunca (varsayılan: hostingin yedek slotu kadar gün)
+	// günlük süpürme temizler; yönetici elle silebilir ya da yeni bir hostinge bağlayabilir.
 
 	// 🔴 YIKIM BASLADIKTAN SONRA ISTEK BAGLAMI KULLANILMAZ.
 	//

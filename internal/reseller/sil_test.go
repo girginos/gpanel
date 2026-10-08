@@ -55,6 +55,10 @@ func silGeciciDB(t *testing.T) *sql.DB {
 		`CREATE TABLE service_plans (id BIGINT PRIMARY KEY, reseller_id BIGINT NOT NULL DEFAULT 0, domain_id BIGINT NULL)`,
 		`CREATE TABLE dns_template (id BIGINT AUTO_INCREMENT PRIMARY KEY, reseller_id BIGINT NOT NULL DEFAULT 0)`,
 		`CREATE TABLE audit_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, reseller_id BIGINT NOT NULL DEFAULT 0)`,
+		// 0217 sonrası backups (yalnız bu testlerin okuduğu kolonlar): yetim = domain_id=0 AND silinme IS NOT NULL
+		`CREATE TABLE backups (id BIGINT AUTO_INCREMENT PRIMARY KEY, domain_id BIGINT NOT NULL, dosya VARCHAR(255) NOT NULL DEFAULT '',
+			alan_adi VARCHAR(253) NOT NULL DEFAULT '', sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '', reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+			silinme DATETIME NULL DEFAULT NULL, KEY ix_backup_domain (domain_id))`,
 		`CREATE TABLE cp_toplu_isler (id BIGINT AUTO_INCREMENT PRIMARY KEY, tip VARCHAR(24) NOT NULL, durum VARCHAR(16) NOT NULL DEFAULT 'calisiyor',
 			toplam INT NOT NULL DEFAULT 0, tamamlanan INT NOT NULL DEFAULT 0, basari INT NOT NULL DEFAULT 0, hata INT NOT NULL DEFAULT 0,
 			aktif_domain VARCHAR(255) NOT NULL DEFAULT '', parametre TEXT, detay MEDIUMTEXT, baslatan VARCHAR(64) NOT NULL DEFAULT '',
@@ -186,5 +190,59 @@ func TestBayiSil_HostingSilinemezseBayiKalir(t *testing.T) {
 	}
 	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id IN (7,70,71)`); n != 3 {
 		t.Errorf("hata varken bayi/müşteri kaydı silindi: kalan %d (beklenen 3)", n)
+	}
+}
+
+// O4: bayi silinince onun silinmiş hesaplarının YETİM yedekleri sahipsiz (reseller_id=0) olur — bayi kimliği ileride yeniden
+// kullanılırsa yeni bayi eski bayinin yetimlerini (alan adı + sahip eşleşmesiyle) yakalayamasın. Başka bayiye, köke, canlı
+// yedeklere ve silinme izi olmayan satırlara DOKUNULMAZ.
+func TestBayiSil_YetimYedeklerinSahipligiNotrlenir(t *testing.T) {
+	db := silGeciciDB(t)
+	for _, q := range []string{
+		// bayi 7'nin eski (silinmiş) hesaplarının yetimleri
+		`INSERT INTO backups (domain_id, dosya, alan_adi, sistem_kullanici, reseller_id, silinme) VALUES
+			(0,'c_eski-20261001-000000.tar.gz','eski.test','c_eski',7,NOW()),(0,'c_eski-20261002-000000.tar.gz','eski.test','c_eski',7,NOW()),
+			(0,'c_baska-20261001-000000.tar.gz','baska.test','c_baska',8,NOW()),(0,'c_kok-20261001-000000.tar.gz','kok.test','c_kok',0,NOW())`,
+		// silinme izi olmayan (yetim DEĞİL) ve canlı satırlar: sahibi 7 yazılı olsa bile dokunulmaz
+		`INSERT INTO backups (domain_id, dosya, reseller_id, silinme) VALUES (0,'yarim-20261001-000000.tar.gz',7,NULL),(3,'c_b8-20261001-000000.tar.gz',8,NULL)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%v\n%s", err, q)
+		}
+	}
+	if w := silIstek(db, 7); w.Code != http.StatusAccepted {
+		t.Fatalf("bayi silme işi başlamadı → %d %s", w.Code, w.Body.String())
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id=7`); n != 0 {
+		t.Fatalf("bayi silinmeliydi: %d", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE reseller_id=7 AND silinme IS NOT NULL`); n != 0 {
+		t.Errorf("🔴 silinen bayinin yetimleri sahibini taşımaya devam ediyor (kimlik yeniden kullanılırsa yeni bayi yakalar): %d", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND silinme IS NOT NULL AND sistem_kullanici='c_eski' AND reseller_id=0 AND alan_adi='eski.test'`); n != 2 {
+		t.Errorf("bayi 7'nin yetimleri sahipsiz (0) olarak KALMALI (silinmez, alan adı korunur): %d", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE reseller_id=8 AND silinme IS NOT NULL`); n != 1 {
+		t.Errorf("başka bayinin yetimine dokunulmamalı: %d", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE reseller_id=7 AND silinme IS NULL`); n != 1 {
+		t.Errorf("silinme izi olmayan satıra dokunulmamalı: %d", n)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=3 AND reseller_id=8`); n != 1 {
+		t.Errorf("canlı domainin satırına dokunulmamalı: %d", n)
+	}
+}
+
+// Yetim kolonları olmayan şemada (0217 uygulanmamış) bayi silme ENGELLENMEZ (yalnız günlüğe düşer).
+func TestBayiSil_BackupsKolonlariYoksaEngellenmez(t *testing.T) {
+	db := silGeciciDB(t)
+	if _, err := db.Exec(`DROP TABLE backups`); err != nil {
+		t.Fatal(err)
+	}
+	if w := silIstek(db, 7); w.Code != http.StatusAccepted {
+		t.Fatalf("iş başlamadı → %d", w.Code)
+	}
+	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id=7`); n != 0 {
+		t.Errorf("backups tablosu yokken de bayi silinmeli: %d", n)
 	}
 }

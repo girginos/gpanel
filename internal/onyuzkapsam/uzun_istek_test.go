@@ -81,6 +81,7 @@ var uzunCagrilar = map[string][]string{
 	"pages/DomainComposerPage.tsx":       {"`${base}/composer`"},
 	"pages/RedisPage.tsx":                {"/redis`"},
 	"pages/DomainBackupsPage.tsx":        {"/geriyukle`", "/backups/${silinecek.id}`"},
+	"components/YedekSilinenler.tsx":     {"'?uzagi_yoksay=1'", "/bagla`"},
 	"pages/DomainGitPage.tsx":            {"/git`", "/git/klonla`", "/git/pull`", "/github/use`"},
 	"components/UygulamaKatalogu.tsx":    {"/uygulamalar`", "/uygulamalar/${kayitID}`"},
 	"pages/DomainCronPage.tsx":           {"/calistir`"},

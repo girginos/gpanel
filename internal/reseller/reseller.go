@@ -531,6 +531,13 @@ func (h *Handlers) bayiKaydiniSil(ctx context.Context, id int64) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE audit_log SET reseller_id=0 WHERE reseller_id=?`, id); err != nil {
 		log.Printf("bayi %d denetim kapsami anonimlestirilemedi: %v", id, err)
 	}
+	// Silinmiş hesapların yetim yedekleri (O4): bayi kimliği ileride yeniden kullanılırsa yeni bayi eski bayinin
+	// yetimlerini (sahip eşleşmesiyle) yakalamasın → sahip kökte (0) NÖTRLENİR. Yetim kümesi küçüktür ve
+	// `domain_id=0` koşulu ix_backup_domain ile taranır. Hata bayi silmeyi engellemez ama yüksek sesle loglanır.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE backups SET reseller_id=0 WHERE domain_id=0 AND silinme IS NOT NULL AND reseller_id=?`, id); err != nil {
+		log.Printf("🔴 bayi %d silinmiş hesap yedeklerinin sahipliği nötrlenemedi (kimlik yeniden kullanılırsa yeni bayi eski yetimleri yakalayabilir): %v", id, err)
+	}
 	return tx.Commit()
 }
 

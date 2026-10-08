@@ -1469,8 +1469,10 @@ func Deprovision(alanAdi, sk string) error {
 		// Deprovision yalniz domain silmeden degil, site TASIMA ROLLBACK'inden
 		// de cagriliyor; buradaki `RemoveAll`, yarim kalan bir tasimanin
 		// mevcut yedekleri yok etmesine yol aciyordu. Domain silinince yedekler
-		// zaten SILINMEZ ve silme akisi onlara dokunmaz (domains.HostingYik yalniz
-		// best-effort iz birakir: backups.SilinenIsaretle); suresi dolunca temizlenir.
+		// zaten SILINMEZ ve silme akisi onlara dokunmaz: domains.HostingYik, domains
+		// satiri gitmeden once silme izini hazirlar (backups.SilinenIzHazirla) ve satir
+		// silinince tek best-effort UPDATE ile yedek satirlarini yetim isaretler (iz.Yaz);
+		// yazilamazsa sahipsiz isaretleme turu yakalar; suresi dolunca gunluk supurme temizler.
 	}
 	// 🔴 Havuz supurmesi userdel'den SONRA: kullanici artik yok, dolayisiyla
 	// writePoolValidated koruması devreye girer ve hicbir yol havuzu geri yazamaz.

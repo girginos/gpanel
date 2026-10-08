@@ -55,6 +55,14 @@ temizle() {
   fi
   mysql panel -e "DELETE FROM reseller_plans WHERE ad='$PAKET_AD';"       >/dev/null 2>&1
   mysql panel -e "DELETE FROM customers WHERE eposta='e2e@kontrol.test';" >/dev/null 2>&1
+  # Hosting silme yedeklerden BAGIMSIZDIR (0217): backups.domain_id FK'si yok, domain silinince yedek satirlari
+  # CASCADE ile gitmez, yetim (domain_id=0, silinme dolu) olarak KALIR. e2e hesabinin yetim satirlarini ve
+  # (varsa) uzak hedef anlik goruntusunu burada sil — yoksa yonetici "Silinmis hesap yedekleri" listesinde birikir.
+  local iz
+  for iz in $(mysql -N -B panel -e "SELECT DISTINCT iz_id FROM backups WHERE sistem_kullanici='$SK' AND domain_id=0 AND silinme IS NOT NULL AND iz_id<>'';" 2>/dev/null); do
+    mysql panel -e "DELETE FROM backup_yetim_hedefler WHERE iz_id='$iz';" >/dev/null 2>&1
+  done
+  mysql panel -e "DELETE FROM backups WHERE sistem_kullanici='$SK' AND domain_id=0 AND silinme IS NOT NULL;" >/dev/null 2>&1
   rm -rf "/var/backups/girginospanel/$SK" 2>/dev/null
 }
 
