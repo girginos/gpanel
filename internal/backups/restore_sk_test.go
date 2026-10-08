@@ -892,3 +892,22 @@ func TestGeriYukleCekirdek_SKKapisi(t *testing.T) {
 		}
 	})
 }
+
+// Toplu iş yolu da home yazılamazsa BAŞARI demez ve tam modda DB'ye geçmez (HTTP yoluyla aynı kural).
+func TestGeriYukleCekirdek_HomeYazilamazsaHata(t *testing.T) {
+	for _, mod := range []string{"tam", "dosyalar"} {
+		t.Run(mod, func(t *testing.T) {
+			sd, db, _ := skt_cekirdek(t, skt_standart(t, skt_host))
+			engel := filepath.Join(t.TempDir(), "engel") // düz DOSYA: altına dizin açılamaz
+			skt_yaz(t, engel, "x")
+			homeKok = filepath.Join(engel, "home")
+			msg, err := geriYukleCekirdek(db, 1, 5, mod, false)
+			if err == nil || msg != "" || !strings.Contains(err.Error(), "dosyalar geri yüklenemedi") {
+				t.Fatalf("hata beklenirdi, başarı mesajı değil: %q %v", msg, err)
+			}
+			if mod == "tam" && (sd.Sorgulandi("db_accounts") || sd.Yurutuldu("db_accounts")) {
+				t.Error("tam: dosyalar yazılamadıysa DB aşamasına geçilmemeli")
+			}
+		})
+	}
+}

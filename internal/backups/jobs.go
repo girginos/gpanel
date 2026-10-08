@@ -189,7 +189,11 @@ func geriYukleCekirdek(db *sql.DB, domainID, backupID int64, mod string, temiz b
 	}
 	switch mod {
 	case "tam":
-		homeGeriYukle(tmpDir, sk, temiz)
+		// 🔴 Dosyalar yazılamadıysa DB'ye GEÇİLMEZ ve başarı mesajı verilmez (Restore ile aynı kural).
+		temizNot, e := homeGeriYukleToplu(tmpDir, sk, temiz)
+		if e != nil {
+			return "", fmt.Errorf("dosyalar geri yüklenemedi: %w — veritabanına dokunulmadı", e)
+		}
 		y, a, h, m := DBSonucOzeti(tumDBGeriYukle(db, domainID, tmpDir, sk, ""))
 		if h > 0 {
 			return "", fmt.Errorf("dosyalar geri yüklendi ancak %d veritabanı HATA verdi — %s", h, m)
@@ -197,10 +201,13 @@ func geriYukleCekirdek(db *sql.DB, domainID, backupID int64, mod string, temiz b
 		if y == 0 && a > 0 {
 			return "", fmt.Errorf("dosyalar geri yüklendi ancak HİÇBİR veritabanı geri yüklenmedi — %s", m)
 		}
-		return fmt.Sprintf("tam geri yüklendi (%d veritabanı%s)", y, dbEk(a)), nil
+		return fmt.Sprintf("tam geri yüklendi (%d veritabanı%s)%s", y, dbEk(a), temizNot), nil
 	case "dosyalar":
-		homeGeriYukle(tmpDir, sk, temiz)
-		return "dosyalar geri yüklendi", nil
+		temizNot, e := homeGeriYukleToplu(tmpDir, sk, temiz)
+		if e != nil {
+			return "", fmt.Errorf("dosyalar geri yüklenemedi: %w", e)
+		}
+		return "dosyalar geri yüklendi" + temizNot, nil
 	case "veritabani":
 		// 🔴 Sonuc ARTIK ATILMIYOR. Eskiden bu satir "veritabanları geri yüklendi"
 		// donuyordu; whitelist bos oldugu icin tum DB'ler atlanmis olsa bile is
@@ -218,6 +225,20 @@ func geriYukleCekirdek(db *sql.DB, domainID, backupID int64, mod string, temiz b
 		return fmt.Sprintf("%d veritabanı geri yüklendi%s — %s", y, dbEk(a), m), nil
 	}
 	return "", fmt.Errorf("geçersiz mod: %s", mod)
+}
+
+// homeGeriYukleToplu — toplu iş yolunun home geri yüklemesi: homeGeriYukleSonuc'un sonucunu
+// DÜRÜST iletir. Dönen not boş değilse dosyalar yazıldı ama temiz (silme) uygulanamadı;
+// hata varsa dosyalar YAZILMADI (çağıran başarı mesajı vermemeli).
+func homeGeriYukleToplu(tmpDir, sk string, temiz bool) (temizNot string, err error) {
+	e := homeGeriYukleSonuc(tmpDir, sk, temiz)
+	switch {
+	case e == nil:
+		return "", nil
+	case errors.Is(e, errHomeTemizYapilamadi):
+		return " — uyarı: " + e.Error(), nil
+	}
+	return "", e
 }
 
 // ---- Handlers ----
