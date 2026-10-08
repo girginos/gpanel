@@ -5,7 +5,8 @@ import { ORTAK_EN } from '@/lib/cevirOrtak'
 import { cevirT } from '@/lib/cevirT'
 import { api, apiHata } from '@/lib/api'
 import { useAuth } from '@/store/auth'
-import { Badge, Button } from '@/components/ui'
+import { Link } from 'react-router-dom'
+import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
 import { useToast } from '@/components/Toast'
 import { useDialog } from '@/components/Dialog'
@@ -27,9 +28,15 @@ const EN: Record<string, string> = {
   'Silinme': 'Deleted',
   'Son saklama': 'Keep until',
   'Yedek': 'Backups',
+  'Yedek dosyalarını göster': 'Show backup files',
+  'Yedek dosyalarını gizle': 'Hide backup files',
+  'Yerel kopya yok': 'No local copy',
+  'Domaine bağla': 'Link to domain',
+  'Bu alan adının yedek sayfasında görünür ve oradan geri yüklenir.': 'Shows up on this domain’s backup page, where it can be restored.',
+  '{0} yedek bağlandı': '{0} backups linked',
+  'Yedek sayfasına git': 'Open backup page',
+  'Bağlanamadı': 'Could not link',
   'otomatik silinmez': 'never automatic',
-  'Temizlendi': 'Cleaned up',
-  'Uzak kopya': 'Remote copy',
   'İndir': 'Download',
   'Kalıcı sil': 'Delete permanently',
   'Emin misiniz?': 'Are you sure?',
@@ -41,10 +48,11 @@ const EN: Record<string, string> = {
 }
 const cevir = (tr: string): string => (i18n.language === 'en' ? (EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
-type Satir = {
-  id: number; alan_adi: string; sistem_kullanici: string; silinme: string; son_kullanma: string
-  dosya_sayisi: number; boyut_b: number; dosyalar: string[]; uzak_hedef: boolean; yerel_var: boolean
-  durum: string; son_hata?: string
+type Yedek = { id: number; dosya: string; boyut_b: number; olusturma: string; yerel: boolean }
+type Grup = {
+  sk: string; alan_adi: string; reseller_id?: number | null; silinme: string; son_kullanma: string
+  dosya_sayisi: number; boyut_b: number; yerel_var: boolean; baglanabilir_domain_id: number | null
+  yedekler: Yedek[]
 }
 
 function fmtB(b: number): string {
@@ -57,12 +65,15 @@ export default function YedekSilinenler() {
   useTranslation()
   const toast = useToast()
   const { onay } = useDialog()
-  const [satirlar, setSatirlar] = useState<Satir[]>([])
+  const [satirlar, setSatirlar] = useState<Grup[]>([])
   const [gun, setGun] = useState('')
   const [kaydediyor, setKaydediyor] = useState(false)
+  const [acik, setAcik] = useState<Record<string, boolean>>({})
+  const [bagli, setBagli] = useState<Record<string, number>>({})
+  const [mesgul, setMesgul] = useState('')
 
   const yukle = useCallback(() => {
-    api.get<Satir[]>('/admin/silinen-yedekler').then(r => setSatirlar(r.data)).catch(() => setSatirlar([]))
+    api.get<Grup[]>('/admin/silinen-yedekler').then(r => setSatirlar(r.data)).catch(() => setSatirlar([]))
     api.get<{ gun: number | null }>('/admin/silinen-yedekler/ayar').then(r => setGun(r.data.gun == null ? '' : String(r.data.gun))).catch(() => undefined)
   }, [])
   useEffect(() => { yukle() }, [yukle])
@@ -78,10 +89,10 @@ export default function YedekSilinenler() {
     finally { setKaydediyor(false) }
   }
 
-  async function sil(s: Satir, uzagiYoksay = false) {
+  async function sil(s: Grup, uzagiYoksay = false) {
     if (!uzagiYoksay && !(await onay({ baslik: cevir('Emin misiniz?'), mesaj: cevirT(cevir('"{0}" için saklanan yedekler KALICI silinsin mi? Uzak depodaki kopyalar da silinir. Geri alınamaz.'), s.alan_adi), ton: 'tehlike', onayIkonu: I.cop }))) return
     try {
-      await api.delete(`/admin/silinen-yedekler/${s.id}${uzagiYoksay ? '?uzagi_yoksay=1' : ''}`)
+      await api.delete(`/admin/silinen-yedekler/${encodeURIComponent(s.sk)}${uzagiYoksay ? '?uzagi_yoksay=1' : ''}`)
       toast.basari(cevir('Silindi')); yukle()
     } catch (e) {
       const x = e as { response?: { status?: number; data?: { uzagi_yoksay?: boolean } } }
@@ -94,13 +105,25 @@ export default function YedekSilinenler() {
     }
   }
 
-  function indir(s: Satir, dosya: string) {
+  async function bagla(s: Grup) {
+    if (s.baglanabilir_domain_id == null) return
+    setMesgul(s.sk)
+    try {
+      const { data } = await api.post<{ ok: boolean; baglanan: number }>(`/admin/silinen-yedekler/${encodeURIComponent(s.sk)}/bagla`, { domain_id: s.baglanabilir_domain_id })
+      toast.basari(cevirT(cevir('{0} yedek bağlandı'), data.baglanan))
+      setBagli(b => ({ ...b, [s.sk]: s.baglanabilir_domain_id as number }))
+      yukle()
+    } catch (e) { toast.hata(cevir('Bağlanamadı'), apiHata(e)) }
+    finally { setMesgul('') }
+  }
+
+  function indir(y: Yedek) {
     const tok = useAuth.getState().token || ''
-    fetch(`/api/v1/admin/silinen-yedekler/${s.id}/indir?dosya=${encodeURIComponent(dosya)}`, { headers: { Authorization: `Bearer ${tok}` } })
+    fetch(`/api/v1/admin/silinen-yedekler/yedek/${y.id}/indir`, { headers: { Authorization: `Bearer ${tok}` } })
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
       .then(blob => {
         const a = document.createElement('a')
-        a.href = URL.createObjectURL(blob); a.download = dosya; a.click()
+        a.href = URL.createObjectURL(blob); a.download = y.dosya; a.click()
         setTimeout(() => URL.revokeObjectURL(a.href), 1000)
       })
       .catch(e => toast.hata(cevir('İndirme başarısız'), e instanceof Error ? e.message : String(e)))
@@ -123,25 +146,49 @@ export default function YedekSilinenler() {
       </div>
       <div className="divide-y divide-slate-100 dark:divide-dark-600/60">
         {satirlar.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-400">{cevir('Silinmiş hesap yedeği yok.')}</div>}
-        {satirlar.map(s => (
-          <div key={s.id} className="px-4 py-2.5 text-sm flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className="font-medium text-slate-800 dark:text-slate-200">{s.alan_adi}</span>
-            <span className="font-mono text-xs text-slate-400">{cevir('Silinme')}: {s.silinme}</span>
-            <span className="font-mono text-xs text-slate-400">{cevir('Son saklama')}: {s.son_kullanma || cevir('otomatik silinmez')}</span>
-            <span className="font-mono text-xs text-slate-400">{s.dosya_sayisi} {cevir('Yedek').toLowerCase()} · {fmtB(s.boyut_b)}</span>
-            {s.uzak_hedef && <Badge variant="soft" color="info" className="px-1.5 py-0.5 text-[10px]">{cevir('Uzak kopya')}</Badge>}
-            {s.durum === 'temizlendi' && <Badge variant="soft" color="neutral" className="px-1.5 py-0.5 text-[10px]">{cevir('Temizlendi')}</Badge>}
-            {s.son_hata && <span className="text-xs text-red-600 dark:text-red-400 basis-full">{s.son_hata}</span>}
-            {s.durum === 'saklaniyor' && (
-              <span className="ml-auto flex flex-wrap items-center gap-2">
-                {s.yerel_var && s.dosyalar.slice(-3).reverse().map(d => (
-                  <Button key={d} type="button" variant="outlined" boyut="sm" onClick={() => indir(s, d)} title={d}>{cevir('İndir')}</Button>
-                ))}
-                <Button type="button" color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(s)}>{cevir('Kalıcı sil')}</Button>
-              </span>
-            )}
-          </div>
-        ))}
+        {satirlar.map(s => {
+          const ac = !!acik[s.sk]
+          const bagliId = bagli[s.sk]
+          return (
+            <div key={s.sk} className="px-4 py-2.5 text-sm">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <button type="button" onClick={() => setAcik(a => ({ ...a, [s.sk]: !ac }))} aria-expanded={ac}
+                  aria-label={cevir(ac ? 'Yedek dosyalarını gizle' : 'Yedek dosyalarını göster')} title={cevir(ac ? 'Yedek dosyalarını gizle' : 'Yedek dosyalarını göster')}
+                  className="inline-flex items-center gap-1 font-medium text-slate-800 dark:text-slate-200 break-all text-left">
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0 fill-none stroke-current" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ac ? 'm6 9 6 6 6-6' : 'm9 18 6-6-6-6'} /></svg>
+                  {s.alan_adi}
+                </button>
+                <span className="font-mono text-xs text-slate-400">{cevir('Silinme')}: {s.silinme}</span>
+                <span className="font-mono text-xs text-slate-400">{cevir('Son saklama')}: {s.son_kullanma || cevir('otomatik silinmez')}</span>
+                <span className="font-mono text-xs text-slate-400">{s.dosya_sayisi} {cevir('Yedek').toLowerCase()} · {fmtB(s.boyut_b)}</span>
+                <span className="ml-auto flex flex-wrap items-center gap-2">
+                  {bagliId != null && (
+                    <Link to={`/abonelikler/${bagliId}/yedekler`} className="text-xs text-brand-600 dark:text-brand-400 hover:underline">{cevir('Yedek sayfasına git')}</Link>
+                  )}
+                  {s.baglanabilir_domain_id != null && (
+                    <Button type="button" variant="outlined" boyut="sm" yukleniyor={mesgul === s.sk} onClick={() => bagla(s)}
+                      title={cevir('Bu alan adının yedek sayfasında görünür ve oradan geri yüklenir.')} aria-label={`${cevir('Domaine bağla')}: ${s.alan_adi}`}>{cevir('Domaine bağla')}</Button>
+                  )}
+                  <Button type="button" color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(s)}
+                    title={cevir('Kalıcı sil')} aria-label={`${cevir('Kalıcı sil')}: ${s.alan_adi}`}>{cevir('Kalıcı sil')}</Button>
+                </span>
+              </div>
+              {ac && (
+                <ul className="mt-2 space-y-1">
+                  {s.yedekler.map(y => (
+                    <li key={y.id} className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${y.yerel ? '' : 'opacity-50'}`}>
+                      <span className="font-mono text-slate-600 dark:text-slate-300 break-all min-w-0">{y.dosya}</span>
+                      <span className="font-mono text-slate-400">{y.olusturma}</span>
+                      <span className="font-mono text-slate-400">{fmtB(y.boyut_b)}</span>
+                      <Button type="button" variant="outlined" boyut="sm" className="ml-auto" disabled={!y.yerel} onClick={() => indir(y)}
+                        title={y.yerel ? y.dosya : cevir('Yerel kopya yok')} aria-label={`${cevir('İndir')}: ${y.dosya}`}>{cevir('İndir')}</Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
