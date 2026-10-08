@@ -1168,6 +1168,11 @@ func (h *Handlers) CreateDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğe veritabanı eklenemez")
 		return
 	}
+	// 🔴 Sayı kapısı + oluşturma TEK kilit altında: eşzamanlı istekler aynı COUNT'u okuyup
+	// max_db sınırını aşmasın (kilit: hosting başına; bkz. kilit.DBOlustur).
+	dbKilit := kilit.DBOlustur(id)
+	dbKilit.Lock()
+	defer dbKilit.Unlock()
 	if err := kota.CheckDBEklenebilir(r.Context(), h.DB, id); err != nil {
 		httpx.WriteError(w, http.StatusForbidden, err.Error())
 		return
