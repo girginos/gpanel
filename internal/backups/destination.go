@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -406,6 +407,36 @@ func lftpKomutu(ctx context.Context, betik string) (*exec.Cmd, func(), error) {
 	_ = f.Close()
 	// komut: context düşük öncelikliyse (manuel yedek) lftp ionice idle + nice 19 koşar.
 	return komut(ctx, "lftp", "-f", yol), temizle, nil
+}
+
+// LftpArtiklariniTemizle — D5: lftpKomutu betiği DÜZ parolayı os.TempDir()'e yazar (0600, root) ve işlem biter
+// bitmez siler; süreç betik varken çökerse (OOM/SIGKILL/güç) dosya kalırdı. Açılışta, 10 dakikadan eski
+// gosp-lftp-*.cmd dosyalarını siler (yaşayan bir silme/yükleme işinin betiğine dokunmamak için yaş koşulu).
+// Silinen dosya sayısını döner.
+func LftpArtiklariniTemizle() int { return lftpArtiklariniTemizle(os.TempDir(), 10*time.Minute) }
+
+func lftpArtiklariniTemizle(dizin string, yas time.Duration) int {
+	adaylar, err := filepath.Glob(filepath.Join(dizin, "gosp-lftp-*.cmd"))
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, yol := range adaylar {
+		fi, err := os.Lstat(yol) // symlink'i izleme: yalnız gerçek, düz dosya
+		if err != nil || !fi.Mode().IsRegular() || time.Since(fi.ModTime()) < yas {
+			continue
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
+			continue // başkasının dosyası (paylaşımlı /tmp): dokunma
+		}
+		if os.Remove(yol) == nil {
+			n++
+		}
+	}
+	if n > 0 {
+		log.Printf("lftp artık betikleri temizlendi: %d dosya (düz parola içerebilirdi)", n)
+	}
+	return n
 }
 
 // lftpEscape: lftp komut satırı içinde çift tırnak içine konacak değerleri escape eder.

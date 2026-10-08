@@ -197,11 +197,14 @@ func TestS1_SilmeAninda_HedefAnlikGoruntusu_SifreliHamKopya(t *testing.T) {
 		t.Fatalf("yalnız yedeği olan hedefli domain için 1 anlık görüntü beklenirdi: %d", g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`))
 	}
 	var eski int64
-	var tip, host, kul, parola, dizin string
+	var izID, tip, host, kul, parola, dizin string
 	var port int
-	if err := db.QueryRow(`SELECT eski_domain_id, tip, host, port, kullanici, parola, uzak_dizin FROM backup_yetim_hedefler`).
-		Scan(&eski, &tip, &host, &port, &kul, &parola, &dizin); err != nil {
+	if err := db.QueryRow(`SELECT iz_id, eski_domain_id, tip, host, port, kullanici, parola, uzak_dizin FROM backup_yetim_hedefler`).
+		Scan(&izID, &eski, &tip, &host, &port, &kul, &parola, &dizin); err != nil {
 		t.Fatal(err)
+	}
+	if len(izID) != 32 || strings.Trim(izID, "0123456789abcdef") != "" {
+		t.Errorf("iz_id 32 haneli hex (16 bayt crypto/rand) olmalı: %q", izID)
 	}
 	if eski != 7001 || tip != "sftp" || host != "ftp.musteri.invalid" || port != 2222 || kul != "ftpkul" || dizin != "/yedekler/musteri" {
 		t.Errorf("anlık görüntü alanları: %d %s %s %d %s %s", eski, tip, host, port, kul, dizin)
@@ -212,18 +215,24 @@ func TestS1_SilmeAninda_HedefAnlikGoruntusu_SifreliHamKopya(t *testing.T) {
 	if gizli.SifreliMi(hamParola) && strings.Contains(parola, kParola) {
 		t.Error("anlık görüntüde DÜZ parola var")
 	}
-	d, err := yetimHedefOku(context.Background(), db, 7001)
+	d, err := yetimHedefOku(context.Background(), db, izID)
 	if err != nil || d == nil || d.Parola != kParola || d.Host != "ftp.musteri.invalid" || d.Port != 2222 || d.Kullanici != "ftpkul" || d.UzakDizin != "/yedekler/musteri" || d.Tip != "sftp" || !d.Aktif {
 		t.Fatalf("yetimHedefOku (CozBagli ile çözülmeli): %+v %v", d, err)
 	}
-	if d, err := yetimHedefOku(context.Background(), db, 7002); d != nil || err != nil {
-		t.Errorf("hedefsiz domain için nil,nil beklenir: %+v %v", d, err)
+	if d, err := yetimHedefOku(context.Background(), db, "olmayan-iz"); d != nil || err != nil {
+		t.Errorf("anlık görüntüsü olmayan iz için nil,nil beklenir: %+v %v", d, err)
 	}
-	if d, err := yetimHedefOku(context.Background(), db, 0); d != nil || err != nil {
-		t.Errorf("eski id 0 için nil,nil beklenir: %+v %v", d, err)
+	if d, err := yetimHedefOku(context.Background(), db, ""); d != nil || err != nil {
+		t.Errorf("boş iz_id için nil,nil beklenir: %+v %v", d, err)
 	}
-	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=7001 AND silinme IS NOT NULL`) != 2 {
-		t.Error("2 yetim satır (domain_id=0, eski_domain_id=7001) beklenirdi")
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=7001 AND silinme IS NOT NULL AND iz_id=?`, izID) != 2 {
+		t.Error("2 yetim satır (domain_id=0, eski_domain_id=7001) anlık görüntüyle AYNI iz_id'yi taşımalı")
+	}
+	// hedefsiz domainin yetimi de bir iz_id taşır (anlık görüntüsüz): başka silmeyle karışmaz
+	var iz2 string
+	_ = db.QueryRow(`SELECT iz_id FROM backups WHERE eski_domain_id=7002`).Scan(&iz2)
+	if len(iz2) != 32 || iz2 == izID {
+		t.Errorf("her silmenin KENDİ iz_id'si olmalı: %q / %q", iz2, izID)
 	}
 }
 
@@ -359,38 +368,29 @@ func TestS1_ParolaHicbirYanitaSizmaz(t *testing.T) {
 	}
 }
 
-func TestS1_Baglama_AnlikGoruntu_GeriYuklenir(t *testing.T) {
+// Karar (koordinatör, 2026-10-08): uzak hedef anlık görüntüsü domaine HİÇBİR YOLLA geri yüklenmez — ne devralmada ne
+// elle (onaylı/onaysız) bağlamada. Anlık görüntü yalnız yetimlerin uzak silmesi içindir; yetimler bağlanınca silinir.
+func TestS1_Baglama_AnlikGoruntu_GeriYuklenmez_ParolaKalmaz(t *testing.T) {
 	ctx := context.Background()
-	hedefOku := func(t *testing.T, db *sql.DB, id int64) (host, parola string, aktif, say int) {
+	hedefSay := func(t *testing.T, db *sql.DB, id int64) int {
 		t.Helper()
-		say = g113_say(t, db, `SELECT COUNT(*) FROM backup_destinations WHERE domain_id=?`, id)
-		if say > 0 {
-			if err := db.QueryRow(`SELECT host, parola, aktif FROM backup_destinations WHERE domain_id=?`, id).Scan(&host, &parola, &aktif); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return
+		return g113_say(t, db, `SELECT COUNT(*) FROM backup_destinations WHERE domain_id=?`, id)
 	}
 
-	t.Run("otomatik bağlama: domainin hedefi yoksa geri yüklenir (aktif=0), anlık görüntü silinir", func(t *testing.T) {
+	t.Run("devralma (bayrak): aynı alan+sahip olsa bile hedef GERİ YÜKLENMEZ, anlık görüntü (parola) silinir", func(t *testing.T) {
 		db := kDB(t)
 		silinenOrtam(t)
-		hamParola := kHesap(t, db, 7100, "ayni.test", "c_ayni", 5, "ftp.musteri.invalid", "c_ayni-20261001-000000.tar.gz")
+		kHesap(t, db, 7100, "ayni.test", "c_ayni", 5, "ftp.musteri.invalid", "c_ayni-20261001-000000.tar.gz")
 		kSil(t, db, 7100, "ayni.test", "c_ayni")
 		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (7101,'ayni.test','c_ayni',5)`)
-		if n := yetimleriOtoBagla(ctx, db, 7101); n != 1 {
+		if n := devral(ctx, db, 7101); n != 1 {
 			t.Fatalf("bağlanan: %d", n)
 		}
-		host, parola, aktif, say := hedefOku(t, db, 7101)
-		if say != 1 || host != "ftp.musteri.invalid" || parola != hamParola || aktif != 0 {
-			t.Errorf("hedef geri yüklenmedi: say=%d host=%q aktif=%d parolaAynen=%v", say, host, aktif, parola == hamParola)
-		}
-		d, err := readDestination(ctx, db, 7101)
-		if err != nil || d == nil || d.Parola != kParola || d.UzakDizin != "/yedekler/musteri" || d.Port != 2222 || d.Kullanici != "ftpkul" {
-			t.Errorf("geri yüklenen hedef readDestination ile okunamadı: %+v %v", d, err)
+		if hedefSay(t, db, 7101) != 0 {
+			t.Error("eski müşterinin FTP hedefi (host/kullanıcı) yeni domaine geri yüklendi")
 		}
 		if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 0 {
-			t.Error("geri yüklendikten sonra anlık görüntü silinmeli")
+			t.Error("yetimler bağlanınca anlık görüntü (parola) silinmeli")
 		}
 	})
 
@@ -400,32 +400,32 @@ func TestS1_Baglama_AnlikGoruntu_GeriYuklenir(t *testing.T) {
 		kHesap(t, db, 7110, "ayni.test", "c_ayni", 5, "ftp.eski.invalid", "c_ayni-20261001-000000.tar.gz")
 		kSil(t, db, 7110, "ayni.test", "c_ayni")
 		kHesap(t, db, 7111, "ayni.test", "c_ayni", 5, "ftp.yeni-kendi.invalid")
-		if n := yetimleriOtoBagla(ctx, db, 7111); n != 1 {
+		if n := devral(ctx, db, 7111); n != 1 {
 			t.Fatalf("bağlanan: %d", n)
 		}
-		host, _, aktif, say := hedefOku(t, db, 7111)
-		if say != 1 || host != "ftp.yeni-kendi.invalid" || aktif != 1 {
-			t.Errorf("domainin kendi hedefi bozuldu: say=%d host=%q aktif=%d", say, host, aktif)
+		var host string
+		var aktif int
+		if err := db.QueryRow(`SELECT host, aktif FROM backup_destinations WHERE domain_id=7111`).Scan(&host, &aktif); err != nil || host != "ftp.yeni-kendi.invalid" || aktif != 1 {
+			t.Errorf("domainin kendi hedefi bozuldu: %q aktif=%d %v", host, aktif, err)
 		}
 		if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 0 {
 			t.Error("anlık görüntü silinmeli")
 		}
 	})
 
-	t.Run("elle bağlama (aynı alan+sahip, onaysız): geri yüklenir", func(t *testing.T) {
+	t.Run("elle bağlama (aynı alan+sahip, onaysız): geri yüklenmez, anlık görüntü silinir", func(t *testing.T) {
 		db := kDB(t)
 		silinenOrtam(t)
 		r := kRouter(db)
-		hamParola := kHesap(t, db, 7120, "ayni.test", "c_ayni", 5, "ftp.musteri.invalid", "c_ayni-20261001-000000.tar.gz")
+		kHesap(t, db, 7120, "ayni.test", "c_ayni", 5, "ftp.musteri.invalid", "c_ayni-20261001-000000.tar.gz")
 		kSil(t, db, 7120, "ayni.test", "c_ayni")
 		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (7121,'AYNI.test ','c_ayni',5)`) // büyük harf/boşluk: aynı alan adı sayılır
 		kod, g := advIstek(r, "POST", "/s/c_ayni/bagla", `{"domain_id":7121}`)
 		if kod != 200 || !strings.Contains(g, `"baglanan":1`) {
 			t.Fatalf("%d %s", kod, g)
 		}
-		host, parola, aktif, say := hedefOku(t, db, 7121)
-		if say != 1 || host != "ftp.musteri.invalid" || parola != hamParola || aktif != 0 {
-			t.Errorf("hedef geri yüklenmedi: say=%d host=%q aktif=%d", say, host, aktif)
+		if hedefSay(t, db, 7121) != 0 {
+			t.Error("elle bağlamada da hedef geri yüklenmemeli")
 		}
 		if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 0 {
 			t.Error("anlık görüntü silinmeli")
@@ -442,7 +442,7 @@ func TestS1_Baglama_AnlikGoruntu_GeriYuklenir(t *testing.T) {
 		if kod, g := advIstek(r, "POST", "/s/c_girgin/bagla", `{"domain_id":7131,"zorla":true}`); kod != 200 {
 			t.Fatalf("%d %s", kod, g)
 		}
-		if _, _, _, say := hedefOku(t, db, 7131); say != 0 {
+		if hedefSay(t, db, 7131) != 0 {
 			t.Error("başka müşterinin FTP kimlik bilgisi yeni sahibe VERİLDİ")
 		}
 		if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 0 {
@@ -450,37 +450,71 @@ func TestS1_Baglama_AnlikGoruntu_GeriYuklenir(t *testing.T) {
 		}
 	})
 
-	t.Run("iki eski kimlik, tek hedef (UNIQUE uk_domain): biri geri yüklenir, hata yok", func(t *testing.T) {
+	t.Run("iki eski kimlik: hiç hedef geri yüklenmez, iki anlık görüntü de silinir", func(t *testing.T) {
 		db := kDB(t)
 		silinenOrtam(t)
 		kHesap(t, db, 7140, "ayni.test", "c_ayni", 5, "ftp.a.invalid", "c_ayni-20261001-000000.tar.gz")
 		kSil(t, db, 7140, "ayni.test", "c_ayni")
 		kHesap(t, db, 7141, "ayni.test", "c_ayni", 5, "ftp.b.invalid", "c_ayni-20261002-000000.tar.gz")
 		kSil(t, db, 7141, "ayni.test", "c_ayni")
+		if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 2 {
+			t.Fatal("kurulum: iki silmenin iki ayrı anlık görüntüsü")
+		}
 		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (7142,'ayni.test','c_ayni',5)`)
-		if n := yetimleriOtoBagla(ctx, db, 7142); n != 2 {
+		if n := devral(ctx, db, 7142); n != 2 {
 			t.Fatalf("bağlanan: %d", n)
 		}
-		if _, _, _, say := hedefOku(t, db, 7142); say != 1 {
-			t.Errorf("tam 1 hedef geri yüklenmeli: %d", say)
+		if hedefSay(t, db, 7142) != 0 {
+			t.Error("hedef geri yüklenmemeli")
 		}
 		if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 0 {
 			t.Error("her iki anlık görüntü de silinmeli")
 		}
 	})
 
-	t.Run("hedef tablosu okunamıyorsa bağlama yine başarılı, anlık görüntü KAYBOLMAZ", func(t *testing.T) {
+	t.Run("kısmi bağlama: yetimi kalan iz'in anlık görüntüsü KALIR, bitenin silinir", func(t *testing.T) {
 		db := kDB(t)
 		silinenOrtam(t)
-		kHesap(t, db, 7150, "ayni.test", "c_ayni", 5, "ftp.musteri.invalid", "c_ayni-20261001-000000.tar.gz")
-		kSil(t, db, 7150, "ayni.test", "c_ayni")
-		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (7151,'ayni.test','c_ayni',5)`)
-		g113_exec(t, db, `DROP TABLE backup_destinations`)
-		if n := yetimleriOtoBagla(ctx, db, 7151); n != 1 {
-			t.Fatalf("hedef tablosu bozukken de bağlama çalışmalı: %d", n)
+		r := kRouter(db)
+		kHesap(t, db, 7150, "a.test", "c_kismi", 5, "ftp.a.invalid", "c_kismi-20261001-000000.tar.gz")
+		kSil(t, db, 7150, "a.test", "c_kismi")
+		kHesap(t, db, 7151, "b.test", "c_kismi", 6, "ftp.b.invalid", "c_kismi-20261002-000000.tar.gz")
+		kSil(t, db, 7151, "b.test", "c_kismi")
+		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (7152,'a.test','c_kismi',5)`)
+		// onaysız bağlama yalnız a.test/bayi 5'i bağlar (b.test için 409 beklenir ama admin ucu farklı sahipleri görünce zorla ister)
+		if kod, _ := advIstek(r, "POST", "/s/c_kismi/bagla", `{"domain_id":7152}`); kod != 409 {
+			t.Fatalf("karışık sahipli grupta onaysız bağlama 409 olmalı: %d", kod)
 		}
-		if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler`) != 1 {
-			t.Error("geri yüklenemediyse anlık görüntü silinmemeli")
+		kosul, args := baglaKosulu("c_kismi", false, yetimSahibi("a.test", 5))
+		if n, err := yetimleriBagla(ctx, db, 7152, kosul, args...); err != nil || n != 1 {
+			t.Fatalf("yalnız a.test bağlanmalı: n=%d err=%v", n, err)
+		}
+		var kalan []string
+		rows, _ := db.Query(`SELECT host FROM backup_yetim_hedefler ORDER BY host`)
+		for rows.Next() {
+			var h string
+			_ = rows.Scan(&h)
+			kalan = append(kalan, h)
+		}
+		rows.Close()
+		if fmt.Sprint(kalan) != "[ftp.b.invalid]" {
+			t.Errorf("yalnız yetimi kalan (b.test) iz'in anlık görüntüsü kalmalı: %v", kalan)
+		}
+	})
+
+	t.Run("anlık görüntü tablosu bozukken bağlama yine başarılı", func(t *testing.T) {
+		db := kDB(t)
+		silinenOrtam(t)
+		kHesap(t, db, 7160, "ayni.test", "c_ayni", 5, "ftp.musteri.invalid", "c_ayni-20261001-000000.tar.gz")
+		kSil(t, db, 7160, "ayni.test", "c_ayni")
+		g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (7161,'ayni.test','c_ayni',5)`)
+		g113_exec(t, db, `DROP TABLE backup_yetim_hedefler`)
+		logs := logYakala(t)
+		if n := devral(ctx, db, 7161); n != 1 {
+			t.Fatalf("anlık görüntü tablosu bozukken de bağlama çalışmalı: %d", n)
+		}
+		if strings.Contains(logs.String(), kParola) {
+			t.Error("log parola içeriyor")
 		}
 	})
 }
@@ -526,26 +560,29 @@ func TestS1_YedekAltyapisiBozukkenIzYazilirVeSilmeEngellenmez(t *testing.T) {
 func TestS1_ArtikAnlikGoruntuTemizligi(t *testing.T) {
 	db := kDB(t)
 	ctx := context.Background()
-	ekle := func(eski int64, yas string) {
-		g113_exec(t, db, `INSERT INTO backup_yetim_hedefler (eski_domain_id, host, kullanici, parola, olusturma) VALUES (?, 'h.invalid', 'k', 'p', `+yas+`)`, eski)
+	ekle := func(iz string, eski int64, yas string) {
+		g113_exec(t, db, `INSERT INTO backup_yetim_hedefler (iz_id, eski_domain_id, host, kullanici, parola, olusturma) VALUES (?, ?, 'h.invalid', 'k', 'p', `+yas+`)`, iz, eski)
 	}
-	ekle(7300, "NOW() - INTERVAL 2 HOUR") // yetimi yok → silinir
-	ekle(7301, "NOW()")                   // yeni (UPDATE öncesi yazılmış olabilir) → kalır
-	ekle(7302, "NOW() - INTERVAL 2 HOUR") // yetim satırı var → kalır
-	ekle(7303, "NOW() - INTERVAL 2 HOUR") // iz yazılamamış (domain_id>0, domain yok) satırı var → kalır
-	g113_exec(t, db, `INSERT INTO backups (domain_id, eski_domain_id, dosya, silinme) VALUES (0,7302,'c_t-20261001-000000.tar.gz',NOW())`)
+	ekle("iz-yetimi-yok", 7300, "NOW() - INTERVAL 2 HOUR") // yetimi yok → silinir
+	ekle("iz-yeni", 7301, "NOW()")                         // yeni (UPDATE öncesi yazılmış olabilir) → kalır
+	ekle("iz-yetimli", 7302, "NOW() - INTERVAL 2 HOUR")    // yetim satırı bu iz_id'yi taşıyor → kalır
+	ekle("iz-sahipsiz", 7303, "NOW() - INTERVAL 2 HOUR")   // iz yazılamamış (domain_id>0, domain yok) satırı var → kalır
+	ekle("iz-canli-id", 7304, "NOW() - INTERVAL 2 HOUR")   // eski kimliği şimdi CANLI bir domain kullanıyor (E7c) → silinir
+	g113_exec(t, db, `INSERT INTO backups (domain_id, eski_domain_id, iz_id, dosya, silinme) VALUES (0,7302,'iz-yetimli','c_t-20261001-000000.tar.gz',NOW())`)
 	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya) VALUES (7303,'elle-yuklendi.tar.gz')`) // sk türetilemez → dönüştürülmez, ama anlık görüntüsü hâlâ gerekli
-	SilinenSupur(ctx, db)                                                                           // 04:00 süpürmesi artık anlık görüntü temizliğini de yapar
-	var kalan []int64
-	rows, _ := db.Query(`SELECT eski_domain_id FROM backup_yetim_hedefler ORDER BY 1`)
+	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici) VALUES (7304,'yeni-sahip.test','c_ys')`)
+	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya) VALUES (7304,'c_ys-20261001-000000.tar.gz')`) // yeni sahibin CANLI satırı eski anlık görüntüyü ayakta tutmamalı
+	SilinenSupur(ctx, db)                                                                                  // 04:00 süpürmesi anlık görüntü temizliğini de yapar
+	var kalan []string
+	rows, _ := db.Query(`SELECT iz_id FROM backup_yetim_hedefler ORDER BY 1`)
 	for rows.Next() {
-		var e int64
+		var e string
 		_ = rows.Scan(&e)
 		kalan = append(kalan, e)
 	}
 	rows.Close()
-	if fmt.Sprint(kalan) != "[7301 7302 7303]" {
-		t.Errorf("kalan anlık görüntüler [7301 7302 7303] olmalı: %v", kalan)
+	if fmt.Sprint(kalan) != "[iz-sahipsiz iz-yeni iz-yetimli]" {
+		t.Errorf("kalan anlık görüntüler [iz-sahipsiz iz-yeni iz-yetimli] olmalı: %v", kalan)
 	}
 }
 
@@ -585,9 +622,12 @@ func TestS2_SahipsizIsaretle_TuretilemeyeneDokunmazIdempotent(t *testing.T) {
 	}
 	for _, id := range []int64{a1, a2} {
 		if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=0 AND eski_domain_id=7401 AND alan_adi='c_s2' AND sistem_kullanici='c_s2' AND reseller_id=0
-			AND silinme IS NOT NULL AND DATEDIFF(son_kullanma, silinme)=7`, id) != 1 {
-			t.Errorf("satır %d: yetim işaretlenmedi (alan_adi=sk, 7 gün)", id)
+			AND silinme IS NOT NULL AND DATEDIFF(son_kullanma, silinme)=7 AND LENGTH(iz_id)=32`, id) != 1 {
+			t.Errorf("satır %d: yetim işaretlenmedi (alan_adi=sk, 7 gün, iz_id)", id)
 		}
+	}
+	if g113_say(t, db, `SELECT COUNT(DISTINCT iz_id) FROM backups WHERE eski_domain_id=7401`) != 1 {
+		t.Error("aynı eski kimliğin sahipsiz satırları TEK iz_id paylaşmalı")
 	}
 	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=0 AND eski_domain_id=7404 AND alan_adi='onceden.test' AND sistem_kullanici='c_p' AND reseller_id=3 AND silinme IS NOT NULL`, pid) != 1 {
 		t.Error("önceden doldurulmuş alan adı/sahip KORUNMALI")
@@ -659,7 +699,7 @@ func TestS2_IzUPDATEHatasi_TekYenidenDeneme(t *testing.T) {
 	}
 }
 
-func TestS2_IkiDenemeBasarisiz_LoglanirVeSahipsizTuruKurtarir(t *testing.T) {
+func TestS2_TumDenemelerBasarisiz_LoglanirVeSahipsizTuruKurtarir(t *testing.T) {
 	db := kDB(t)
 	silinenOrtam(t)
 	logs := logYakala(t)
@@ -667,8 +707,8 @@ func TestS2_IkiDenemeBasarisiz_LoglanirVeSahipsizTuruKurtarir(t *testing.T) {
 	kHesap(t, db, 7430, "q.test", "c_q", 0, "ftp.musteri.invalid", dosya)
 	tetikKur(t, db, 1000) // UPDATE hep reddedilir
 	kSil(t, db, 7430, "q.test", "c_q")
-	if g113_say(t, db, `SELECT COUNT(*) FROM tetik_sayac`) != 2 {
-		t.Errorf("tam 2 deneme (1 + 1 yeniden) beklenirdi: %d", g113_say(t, db, `SELECT COUNT(*) FROM tetik_sayac`))
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM tetik_sayac`); n != izDeneme {
+		t.Errorf("tam %d deneme (izDeneme: 1 + yeniden denemeler) beklenirdi: %d", izDeneme, n)
 	}
 	if !strings.Contains(logs.String(), "🔴 silinen yedek iz YAZILAMADI") {
 		t.Errorf("kalıcı başarısızlık 🔴 ile loglanmalı: %s", logs.String())
@@ -687,7 +727,15 @@ func TestS2_IkiDenemeBasarisiz_LoglanirVeSahipsizTuruKurtarir(t *testing.T) {
 	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=7430 AND silinme IS NOT NULL`) != 1 {
 		t.Error("satır yetim olmalı")
 	}
-	if d, err := yetimHedefOku(context.Background(), db, 7430); err != nil || d == nil || d.Parola != kParola {
+	// anlık görüntü UPDATE'ten önce yazılmıştı ve hiçbir satırın iz_id'si değildi: S2 onu eski_domain_id eşleşmesiyle SAHİPLENİR
+	var izID string
+	if err := db.QueryRow(`SELECT iz_id FROM backup_yetim_hedefler WHERE eski_domain_id=7430`).Scan(&izID); err != nil {
+		t.Fatal(err)
+	}
+	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=7430 AND iz_id=?`, izID) != 1 {
+		t.Error("sahipsiz satır, yazılamayan izin anlık görüntüsünü (iz_id) devralmalı")
+	}
+	if d, err := yetimHedefOku(context.Background(), db, izID); err != nil || d == nil || d.Parola != kParola {
 		t.Errorf("kurtarılan yetim anlık görüntüsüne ulaşabilmeli: %+v %v", d, err)
 	}
 	yetimHedefArtiklariniTemizle(context.Background(), db)
@@ -709,7 +757,7 @@ func TestS3_BaglananYedekler_KurtarmaTipi_PruneDokunmaz_ElleSilinebilir(t *testi
 		silinenYetim(t, db, 7500, "kur.test", "c_kur", d, 5, "NULL")
 	}
 	g113_exec(t, db, `INSERT INTO domains (id, alan_adi, sistem_kullanici, reseller_id) VALUES (7510,'kur.test','c_kur',5)`)
-	if n := yetimleriOtoBagla(ctx, db, 7510); n != 3 {
+	if n := devral(ctx, db, 7510); n != 3 {
 		t.Fatalf("bağlanan: %d", n)
 	}
 	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=7510 AND tip='kurtarma' AND eski_domain_id=0 AND silinme IS NULL AND son_kullanma IS NULL`) != 3 {
@@ -963,14 +1011,18 @@ func TestBagla_Zorla_BaglarVeDenetimeYazar(t *testing.T) {
 		t.Error("zorla ile bağlanmadı")
 	}
 	var detay, hedef string
-	if err := db.QueryRow(`SELECT detail, target FROM audit_log WHERE action='silinen-yedek.bagla'`).Scan(&detay, &hedef); err != nil {
+	var kapsam int64
+	if err := db.QueryRow(`SELECT detail, target, reseller_id FROM audit_log WHERE action='silinen-yedek.bagla'`).Scan(&detay, &hedef, &kapsam); err != nil {
 		t.Fatalf("denetim kaydı yok: %v", err)
 	}
-	if !strings.Contains(detay, "alan adı/sahip farkı onaylandı (yedek=girgin.com/bayi=5, hedef=girgin.net/bayi=9)") {
+	if !strings.Contains(detay, "alan adı/sahip farkı onaylandı") || !strings.Contains(detay, "girgin.com (bayi=5, 1 dosya)") || !strings.Contains(detay, "hedef=girgin.net (bayi=9)") {
 		t.Errorf("denetim notu eksik: %s", detay)
 	}
 	if hedef != "girgin.net" {
 		t.Errorf("denetim hedefi: %q", hedef)
+	}
+	if kapsam != 9 {
+		t.Errorf("denetim kapsamı hedef hostingin sahibi bayi (users.id=9) olmalı, domain kimliği (7721) DEĞİL: %d", kapsam)
 	}
 }
 
@@ -996,20 +1048,25 @@ func TestBagla_KarmaSahipler_HerhangiBiriFarkliysaOnayGerekir(t *testing.T) {
 
 // ---------------------------------------------------------------- ek koruma testleri
 
-// Aynı eski kimlik ikinci kez silinirse (kimlik yeniden kullanıldı) ve önceki sahibin yetimleri hâlâ
-// duruyorsa, önceki anlık görüntü EZİLMEZ (yetimlerin uzak kopyaları onunla silinecek).
-func TestS1_AnlikGoruntu_AyniKimlikIkinciSilmedeEskiyiEzmez(t *testing.T) {
+// Aynı eski kimlik ikinci kez silinirse (kimlik yeniden kullanıldı) HER silme kendi iz_id'siyle KENDİ anlık görüntüsünü
+// alır: eskisi ezilmez, yenisi eskisinin yetimlerine karışmaz (O4). Her sahibin yetimi kendi hedefiyle silinir.
+func TestS1_AnlikGoruntu_AyniKimlikIkinciSilmede_IkiAyriIzIkiAyriGoruntu(t *testing.T) {
 	db := kDB(t)
 	silinenOrtam(t)
 	kHesap(t, db, 7800, "x.test", "c_x", 0, "ftp.ilk.invalid", "c_x-20261001-000000.tar.gz")
 	kSil(t, db, 7800, "x.test", "c_x")
 	kHesap(t, db, 7800, "y.test", "c_y", 0, "ftp.ikinci.invalid", "c_y-20261001-000000.tar.gz")
 	kSil(t, db, 7800, "y.test", "c_y")
-	if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler WHERE eski_domain_id=7800`) != 1 {
-		t.Fatal("tek anlık görüntü satırı beklenirdi")
+	if g113_say(t, db, `SELECT COUNT(*) FROM backup_yetim_hedefler WHERE eski_domain_id=7800`) != 2 {
+		t.Fatal("iki ayrı silmenin iki ayrı anlık görüntü satırı beklenirdi (eski_domain_id benzersiz DEĞİL)")
 	}
-	if h := ham(t, db, `SELECT host FROM backup_yetim_hedefler WHERE eski_domain_id=7800`); h != "ftp.ilk.invalid" {
-		t.Errorf("önceki anlık görüntü EZİLDİ: %q", h)
+	if g113_say(t, db, `SELECT COUNT(DISTINCT iz_id) FROM backup_yetim_hedefler`) != 2 {
+		t.Error("iki anlık görüntü iki ayrı iz_id taşımalı")
+	}
+	for host, sk := range map[string]string{"ftp.ilk.invalid": "c_x", "ftp.ikinci.invalid": "c_y"} {
+		if g113_say(t, db, `SELECT COUNT(*) FROM backups b JOIN backup_yetim_hedefler h ON h.iz_id=b.iz_id WHERE b.domain_id=0 AND b.sistem_kullanici=? AND h.host=?`, sk, host) != 1 {
+			t.Errorf("%s yetimi %s anlık görüntüsüne bağlı olmalı (karışmamalı)", sk, host)
+		}
 	}
 	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE domain_id=0 AND eski_domain_id=7800`) != 2 {
 		t.Error("iki sahibin yetimleri de yetim olmalı")
@@ -1056,7 +1113,7 @@ func TestYetimYedegiSil_ArtikYetimDegilseSilmez(t *testing.T) {
 	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya, tip) VALUES (7810,?, 'kurtarma')`, dosya)
 	id := satirID(t, db, 7810)
 	for _, yoksay := range []bool{false, true} {
-		if err := yetimYedegiSil(context.Background(), db, id, 0, "c_b", dosya, yoksay); err == nil {
+		if err := yetimYedegiSil(context.Background(), db, id, "", "c_b", dosya, yoksay); err == nil {
 			t.Errorf("yoksay=%v: canlı (bağlı) yedek yetim silmesiyle silinmemeli", yoksay)
 		}
 	}
@@ -1117,16 +1174,16 @@ func TestS2_SahipsizSatiriIsaretle_CanliYadaIsaretliSatiriYapmaz(t *testing.T) {
 	g113_exec(t, db, `INSERT INTO backups (domain_id, dosya) VALUES (7900,'c_cn-20261001-000000.tar.gz'),(7901,'c_cn-20261002-000000.tar.gz')`)
 	canli := satirID(t, db, 7900)
 	sahipsiz := satirID(t, db, 7901)
-	if ok, err := sahipsizSatiriIsaretle(ctx, db, canli, "c_cn", 7); ok || err != nil {
+	if ok, err := sahipsizSatiriIsaretle(ctx, db, canli, "c_cn", "iz-1", 7); ok || err != nil {
 		t.Errorf("🔴 canlı domainin satırı yetim yapıldı: %v %v", ok, err)
 	}
 	if g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE id=? AND domain_id=7900 AND silinme IS NULL`, canli) != 1 {
 		t.Error("canlı satır değişti")
 	}
-	if ok, err := sahipsizSatiriIsaretle(ctx, db, sahipsiz, "c_cn", 7); !ok || err != nil {
+	if ok, err := sahipsizSatiriIsaretle(ctx, db, sahipsiz, "c_cn", "iz-1", 7); !ok || err != nil {
 		t.Fatalf("sahipsiz satır işaretlenmeli: %v %v", ok, err)
 	}
-	if ok, _ := sahipsizSatiriIsaretle(ctx, db, sahipsiz, "c_cn", 7); ok {
+	if ok, _ := sahipsizSatiriIsaretle(ctx, db, sahipsiz, "c_cn", "iz-1", 7); ok {
 		t.Error("ikinci işaretleme (artık yetim, domain_id=0) bir şey yapmamalı")
 	}
 }

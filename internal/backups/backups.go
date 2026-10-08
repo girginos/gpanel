@@ -32,7 +32,8 @@ type Yedek struct {
 	ID       int64  `json:"id"`
 	DomainID int64  `json:"domain_id"`
 	Tip      string `json:"tip"`
-	// Kaynak — "sistem" (kök: zamanlayıcı / toplu iş) | "manuel" (Şimdi Yedekle).
+	// Kaynak — "sistem" (kök: zamanlayıcı / toplu iş) | "manuel" (Şimdi Yedekle) |
+	// "kurtarma" (silinmiş hesaptan bu domaine bağlanan yedek; tip='kurtarma', bkz. silinen.go S3).
 	Kaynak    string `json:"kaynak"`
 	Dosya     string `json:"dosya"`
 	BoyutB    int64  `json:"boyut_b"`
@@ -60,9 +61,11 @@ func (h *Handlers) lookupDomain(r *http.Request) (id int64, alanAdi, sk string, 
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	// Silinmiş aynı hesabın (aynı alan adı + aynı sahip + aynı sk) yetim yedekleri bu domaine bağlanır;
-	// böylece Restore/İndir/Sil akışları (hepsi JOIN domains) değişmeden çalışır (bkz. silinen.go).
-	yetimleriOtoBagla(r.Context(), h.DB, id)
+	// 🔴 Y1: bu uç YAN ETKİSİZDİR. Eskiden silinmiş aynı alan adı + sahip + sk'nın yetim yedekleri burada
+	// otomatik bağlanıyordu: alan adını müşterinin yazabildiği akışlarda (WHMCS/API) başkasının yedekleri
+	// ve FTP/SFTP hedefi yeni müşteriye geçerdi; salt-okunur API anahtarı da DB'yi değiştirebiliyordu.
+	// Yetim yedek YALNIZ yönetici ucuyla (SilinenBagla) ya da POST /domains `yedekleri_devral:true`
+	// bayrağıyla (YetimleriDevral) bağlanır (bkz. silinen.go).
 	rows, err := h.DB.QueryContext(r.Context(),
 		`SELECT b.id, b.domain_id, b.tip, b.dosya, b.boyut_b, b.notlar, DATE_FORMAT(b.created_at,'%Y-%m-%d %H:%i'), b.job_id,
 		        EXISTS(SELECT 1 FROM backup_uzak_kopyalar k WHERE k.backup_id=b.id AND k.kaynak='hedef' AND k.durum='tamam')
@@ -122,6 +125,11 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 			y.Mevcut = "yok"
 		}
 		out = append(out, y)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("backups: liste taranamadı: %v", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "yedekler listelenemedi")
+		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -183,15 +191,27 @@ func (h *Handlers) Ozet(w http.ResponseWriter, r *http.Request) {
 		toplamB += s.ToplamB
 		toplamSayi += s.Sayi
 	}
-	_ = rows.Err()
+	if err := rows.Err(); err != nil {
+		log.Printf("backups: özet taranamadı: %v", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "listelenemedi")
+		return
+	}
 	var hedefSayisi int
 	_ = h.DB.QueryRow(`SELECT COUNT(*) FROM backup_destinations WHERE aktif=1`).Scan(&hedefSayisi)
+	// O8: silinmiş hesapların yetim yedekleri (domains listesinde yok) depo kullanımına dahildir; KPI'lar bunları
+	// ayrıca gösterir (domainler[] ve toplam_* yalnız canlı hesapları sayar).
+	silinenSayi, silinenBoyut, serr := silinenOzet(r.Context(), h.DB)
+	if serr != nil {
+		log.Printf("backups: özet: silinmiş hesap yedekleri sayılamadı: %v", serr)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"domainler":      out,
-		"toplam_boyut_b": toplamB,
-		"toplam_yedek":   toplamSayi,
-		"hedef_sayisi":   hedefSayisi,
-		"zamanlama":      "Her gün 03:00 (otomatik)",
+		"domainler":       out,
+		"toplam_boyut_b":  toplamB,
+		"toplam_yedek":    toplamSayi,
+		"hedef_sayisi":    hedefSayisi,
+		"zamanlama":       "Her gün 03:00 (otomatik)",
+		"silinen_sayi":    silinenSayi,
+		"silinen_boyut_b": silinenBoyut,
 	})
 }
 

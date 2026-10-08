@@ -51,6 +51,8 @@ func healSirleriSifrele(db *sql.DB) {
 	}
 
 	tekSutun("backup_destinations", "domain_id", "parola", "yedek")
+	// Silinen hosting'in uzak hedef anlık görüntüsü (backups/silinen.go S1): aynı sır, aynı bağlam (D4).
+	tekSutun("backup_yetim_hedefler", "id", "parola", "yedek")
 	tekSutun("backup_genel_ayar", "id", "uzak_parola", "yedek")
 	tekSutun("users", "id", "totp_secret", "totp")
 	tekSutun("dkim_keys", "id", "private_key", "dkim")

@@ -335,7 +335,7 @@ func TestAdvYetimYedegiSil_GuvensizGirdiler(t *testing.T) {
 		{"../c_g", "c_g-20261001-000000.tar.gz"}, {"C_G", "x.tar.gz"}, {"", "x.tar.gz"},
 	} {
 		for _, yoksay := range []bool{false, true} {
-			if yetimYedegiSil(ctx, db, id, 9630, c.sk, c.dosya, yoksay) == nil {
+			if yetimYedegiSil(ctx, db, id, "", c.sk, c.dosya, yoksay) == nil {
 				t.Errorf("%+v yoksay=%v: reddedilmeliydi", c, yoksay)
 			}
 		}
@@ -388,7 +388,8 @@ func TestAdvSupur_YalnizSuresiDolanYetimSilinir(t *testing.T) {
 	}
 }
 
-func TestAdvSupur_Limit200_CtxIptali_UzakHata(t *testing.T) {
+// O7: süpürme "günde 200" değil, süre bütçesi (bağlam) bitene ya da kayıt kalmayana dek 200'lük partiler halinde döner.
+func TestAdvSupur_SureButcesi_PartiPartiCtxIptali_UzakHata(t *testing.T) {
 	db := silinenDB(t)
 	silinenOrtam(t)
 	for i := 0; i < 205; i++ {
@@ -401,14 +402,38 @@ func TestAdvSupur_Limit200_CtxIptali_UzakHata(t *testing.T) {
 	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9801`); n != 205 {
 		t.Fatalf("iptal edilmiş ctx ile hiçbir şey silinmemeli: %d", n)
 	}
-	SilinenSupur(context.Background(), db)
-	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9801`); n != 5 {
-		t.Errorf("tur başına en çok 200 silinmeli, 5 kalmalı: %d", n)
+	// Bağlam, ikinci partinin ilk satırında biter: ilk parti (200) silinmiş, kalan 5 dokunulmamış olmalı.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	sayac := 0
+	eski := yetimUzakSil
+	t.Cleanup(func() { yetimUzakSil = eski })
+	yetimUzakSil = func(context.Context, *sql.DB, *Destination, string) error {
+		sayac++
+		if sayac == silinenSupurLimit+1 {
+			cancel2()
+		}
+		return nil
 	}
+	SilinenSupur(ctx2, db)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9801`); n != 5 {
+		t.Errorf("200'lük ilk parti silinmeli, bağlam bitince 5 kalmalı: %d", n)
+	}
+	yetimUzakSil = func(context.Context, *sql.DB, *Destination, string) error { return nil }
 	SilinenSupur(context.Background(), db)
 	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9801`); n != 0 {
-		t.Errorf("ertesi tur kalanı silmeli: %d", n)
+		t.Errorf("sonraki tur kalanı silmeli: %d", n)
 	}
+	// Toplu birikim: tek turda (bağlam bitmedikçe) 200'den çok kayıt silinir — eskiden günde 200 sınırı vardı.
+	for i := 0; i < 450; i++ {
+		g113_exec(t, db, `INSERT INTO backups (domain_id, eski_domain_id, dosya, sistem_kullanici, silinme, son_kullanma) VALUES (0,9803,?, 'c_lim2', NOW(), DATE_SUB(NOW(), INTERVAL 1 DAY))`,
+			fmt.Sprintf("c_lim2-20261001-%06d.tar.gz", i))
+	}
+	SilinenSupur(context.Background(), db)
+	if n := g113_say(t, db, `SELECT COUNT(*) FROM backups WHERE eski_domain_id=9803`); n != 0 {
+		t.Errorf("tek tur (süre bütçesi içinde) 450 kaydı da silmeli: %d kaldı", n)
+	}
+	yetimUzakSil = eski
 
 	// Uzak hedef ulaşılamaz → satır + dosya kalır (ertesi gün tekrar denenir).
 	kok := silinenOrtam(t)

@@ -172,9 +172,16 @@ func diskBildirimiVer(db *sql.DB, sebep string) {
 	if n > 0 {
 		return
 	}
-	bildirim.Yaz(db, "kritik", "yedek", baslik,
-		"Otomatik yedekleme disk korumasi nedeniyle atlandi ("+sebep+"). Eski yedekleri temizleyin, "+
-			"saklama suresini dusurun veya uzak hedef tanimlayip yerel kopyayi kapatin.", 0, "", 0)
+	metin := "Otomatik yedekleme disk korumasi nedeniyle atlandi (" + sebep + "). Eski yedekleri temizleyin, " +
+		"saklama suresini dusurun veya uzak hedef tanimlayip yerel kopyayi kapatin."
+	// O8: silinmiş hesapların yetim yedekleri de BackupRoot'ta yer kaplar ve depo tavanına sayılır; çoğu zaman
+	// gizli kalan asıl birikim odur. Varsa temizleneceği yeri söyle.
+	if adet, boyut, err := silinenOzet(context.Background(), db); err == nil && adet > 0 {
+		metin += fmt.Sprintf(" Silinmiş hesaplara ait %d yedek (%s) de bu depoda yer kaplıyor: "+
+			"Yedek Yöneticisi > Silinmiş hesap yedekleri bölümünden saklama süresini kısaltabilir ya da elle temizleyebilirsiniz.",
+			adet, boyutMetni(boyut))
+	}
+	bildirim.Yaz(db, "kritik", "yedek", baslik, metin, 0, "", 0)
 	log.Printf("backup disk kapisi: %s", sebep)
 }
 

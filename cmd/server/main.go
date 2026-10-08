@@ -377,6 +377,8 @@ func main() {
 	backupsH := &backups.Handlers{DB: d}
 	topluH := &toplu.Handlers{DB: d}
 	toplu.AskidakileriKapat(d) // yeniden baslamadan once 'calisiyor' kalmis isler artik olu
+	// Çöken süreçten kalan lftp betikleri (düz parola içerir, /tmp/gosp-lftp-*.cmd) — 10 dk'dan eskileri silinir.
+	backups.LftpArtiklariniTemizle()
 	backups.StartScheduler(d)
 	backups.StartUzakKopya(d) // şifreli uzak kopya işçisi; ayar KAPALI geldiği için yedek davranışı değişmez
 	// Webhook adresleri panelin GENEL portunu kullanır (kapı modunda müşteri kapısı).
@@ -1538,6 +1540,17 @@ func semaDogrula(d *sql.DB) {
 		// bağlanınca bildirilir ve ajan canlılığı (nabız) yazılamaz. (destek_ayar artık okunmaz.)
 		{"destek_baglantilari", "hub_bildirildi_at"},
 		{"destek_ajan_nabiz", "kopru_durum"},
+		// 0217: silinmiş hesapların yetim yedekleri — alan adı/sk/bayi silme anında yazılır, iz_id silmeyi benzersiz
+		// kılar (id yeniden kullanımında karışmaz). Yoksa silme izi yazılamaz (satırlar sahipsiz kalır), yetim yedek
+		// listesi/süpürme/bağlama 500 verir ve uzak hedef anlık görüntüsü bulunamaz.
+		{"backups", "alan_adi"},
+		{"backups", "sistem_kullanici"},
+		{"backups", "reseller_id"},
+		{"backups", "silinme"},
+		{"backups", "son_kullanma"},
+		{"backups", "eski_domain_id"},
+		{"backups", "iz_id"},
+		{"backup_yetim_hedefler", "iz_id"},
 	}
 	var eksik []string
 	for _, b := range beklenen {
@@ -1558,9 +1571,90 @@ func semaDogrula(d *sql.DB) {
 		log.Printf("🔴 Ilgili paneldeki alanlar GORUNMEYECEK. Goc dosyalari " +
 			"/opt/girginospanel/src/migrations altinda; hedef tabloyu ve " +
 			"yukaridaki GOC HATASI satirlarini kontrol edin.")
+	}
+	// Kolon varligi YETMEZ: 0217'nin yapisal sonuclari (tur, indeks, FK) da dogrulanir. Eksik/yanlis olan
+	// 🔴 yazilir — sessiz gecmez (paneli durdurmaz, ilgili ozellik bozuk calisir).
+	bozuk := semaYapiDogrula(d)
+	if len(bozuk) > 0 {
+		log.Printf("🔴 SEMA YAPISI BOZUK — %s", strings.Join(bozuk, " | "))
+		log.Printf("🔴 0217 (silinmis hesap yedekleri) tam uygulanmamis: goc defteri o dosyayi 'uygulandi' saymis olabilir " +
+			"(GOC DEGISMIS satirina ve GOC HATASI satirlarina bakin). Duzeltme: " +
+			"DELETE FROM schema_migrations WHERE dosya='0217_silinen_yedek.sql'; sonra paneli yeniden baslatin (goc idempotenttir).")
+	}
+	if len(eksik) > 0 || len(bozuk) > 0 {
 		return
 	}
 	log.Printf("sema dogrulama: kritik kolonlarin tamami mevcut (%d kontrol)", len(beklenen))
+}
+
+// semaYapiDogrula — kolon varligindan fazlasini isteyen YAPISAL kontroller (information_schema). Dondurulen her girdi
+// bir sorunu insan diliyle anlatir; bos = temiz. Sorgu hatasi (tablo/kolon henuz yok) sorun SAYILMAZ (kolon
+// kontrolu zaten bildirir) — tersine, yapisi OKUNAMAYAN bir sey "dogrulandi" diye gecmez, ayrica loglanir.
+//
+// 0217 icin: silinme/son_kullanma DATETIME olmali (TIMESTAMP 2038'de biter: 3650 gunluk ayar 2028'den sonra iz yazimini
+// bozar), backups.domain_id -> domains FK'si OLMAMALI (varsa domain silinince yedek satirlari CASCADE ile gider),
+// iz_id indeksleri ve backup_yetim_hedefler.iz_id UNIQUE'i var olmali (yoksa iki silme ayni anlik goruntuyu paylasir).
+func semaYapiDogrula(d *sql.DB) []string {
+	var sorun []string
+	tur := func(tablo, kolon string) (string, bool) {
+		var t string
+		err := d.QueryRow(`SELECT DATA_TYPE FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, tablo, kolon).Scan(&t)
+		if err == sql.ErrNoRows {
+			return "", false // kolon yok: kolon kontrolu bildirir
+		}
+		if err != nil {
+			log.Printf("sema yapi sorgusu basarisiz (%s.%s): %v", tablo, kolon, err)
+			return "", false
+		}
+		return strings.ToLower(t), true
+	}
+	for _, k := range []string{"silinme", "son_kullanma"} {
+		if t, var_ := tur("backups", k); var_ && t != "datetime" {
+			sorun = append(sorun, "backups."+k+" turu "+t+" (datetime olmali: TIMESTAMP 2038 siniri)")
+		}
+	}
+	if t, var_ := tur("backup_yetim_hedefler", "olusturma"); var_ && t != "datetime" {
+		sorun = append(sorun, "backup_yetim_hedefler.olusturma turu "+t+" (datetime olmali)")
+	}
+	indeks := func(tablo, ad string, benzersiz bool) (var1 bool, ok bool) {
+		var nonUnique int
+		err := d.QueryRow(`SELECT MIN(NON_UNIQUE) FROM information_schema.STATISTICS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`, tablo, ad).Scan(&nonUnique)
+		if err != nil { // NULL (indeks yok) Scan hatasi verir
+			return false, true
+		}
+		return true, !benzersiz || nonUnique == 0
+	}
+	if v, _ := indeks("backups", "ix_backups_iz", false); !v {
+		if _, kolonVar := tur("backups", "iz_id"); kolonVar {
+			sorun = append(sorun, "backups.ix_backups_iz indeksi yok")
+		}
+	}
+	if v, _ := indeks("backups", "ix_backups_silinen", false); !v {
+		if _, kolonVar := tur("backups", "silinme"); kolonVar {
+			sorun = append(sorun, "backups.ix_backups_silinen indeksi yok")
+		}
+	}
+	if _, kolonVar := tur("backup_yetim_hedefler", "iz_id"); kolonVar {
+		if v, benzersiz := indeks("backup_yetim_hedefler", "uk_yetim_hedef_iz", true); !v || !benzersiz {
+			sorun = append(sorun, "backup_yetim_hedefler.uk_yetim_hedef_iz UNIQUE indeksi yok (iki silme ayni anlik goruntuyu paylasabilir)")
+		}
+	}
+	if _, tabloVar := tur("backup_yetim_hedefler", "eski_domain_id"); tabloVar {
+		if v, _ := indeks("backup_yetim_hedefler", "uk_yetim_hedef_domain", false); v {
+			sorun = append(sorun, "backup_yetim_hedefler.uk_yetim_hedef_domain (eski_domain_id UNIQUE) hala var: domain kimligi yeniden kullanilinca ikinci silmenin anlik goruntusu yazilamaz")
+		}
+	}
+	var fk int
+	err := d.QueryRow(`SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'backups' AND CONSTRAINT_NAME = 'fk_backup_domain' AND CONSTRAINT_TYPE = 'FOREIGN KEY'`).Scan(&fk)
+	if err != nil {
+		log.Printf("sema yapi sorgusu basarisiz (fk_backup_domain): %v", err)
+	} else if fk > 0 {
+		sorun = append(sorun, "backups.fk_backup_domain FK'si hala var: domain silinince yedek satirlari CASCADE ile gider (yedeklerden bagimsiz silme calismaz)")
+	}
+	return sorun
 }
 
 func detectIPv4() string {

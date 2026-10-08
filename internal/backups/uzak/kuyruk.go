@@ -197,7 +197,44 @@ func IsListe(ctx context.Context, db *sql.DB, sayfa, adet int, durum string) (li
 		s.AnahtarParmak = KisaParmak(s.AnahtarParmak)
 		liste = append(liste, s)
 	}
-	return liste, toplam, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	silinmisAdlariTamamla(ctx, db, liste)
+	return liste, toplam, nil
+}
+
+// silinmisAdlariTamamla — D8: silinmiş hostingin işinde domains satırı yok → alan adı boş kalırdı. Yetim yedek satırı alan adını
+// silme anında taşır (backups.alan_adi, 0217): onunla doldurulur. Ayrı, HATA-TOLERANSLI sorgu: bu kolon olmayan bir şemada
+// (0217 uygulanmamış) iş listesi yine açılır, yalnız alan adı boş kalır.
+func silinmisAdlariTamamla(ctx context.Context, db *sql.DB, liste []Is) {
+	var idler []any
+	sira := map[int64][]int{}
+	for i, s := range liste {
+		if s.Domain == "" && s.YedekID > 0 {
+			idler = append(idler, s.YedekID)
+			sira[s.YedekID] = append(sira[s.YedekID], i)
+		}
+	}
+	if len(idler) == 0 {
+		return
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id, alan_adi FROM backups WHERE alan_adi<>'' AND id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(idler)), ",")+`)`, idler...)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var ad string
+		if rows.Scan(&id, &ad) != nil {
+			continue
+		}
+		for _, i := range sira[id] {
+			liste[i].Domain = ad
+		}
+	}
 }
 
 // Ozet — durum başına iş sayısı (arayüz rozetleri).

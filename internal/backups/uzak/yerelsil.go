@@ -563,8 +563,9 @@ func insanB(b int64) string {
 	}
 }
 
-// YerelYokOzeti — yalnız Drive'da duran yedeklerin sayısı ve boyutu (durum kartı).
+// YerelYokOzeti — yalnız Drive'da duran yedeklerin sayısı ve boyutu (durum kartı). Silinmiş hesapların yetim
+// satırları (domain_id=0) sayılmaz: onlar yönetici "Silinmiş hesap yedekleri" bölümünde yönetilir (D8).
 func YerelYokOzeti(ctx context.Context, db *sql.DB) (adet int, boyut int64, err error) {
-	err = db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(boyut_b),0) FROM backups WHERE yerel_yok IS NOT NULL`).Scan(&adet, &boyut)
+	err = db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(boyut_b),0) FROM backups WHERE yerel_yok IS NOT NULL AND domain_id>0`).Scan(&adet, &boyut)
 	return adet, boyut, err
 }

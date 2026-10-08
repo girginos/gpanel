@@ -93,13 +93,14 @@ func (h *Handlers) PutDestination(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	// Parola boş gönderildi mi? Mevcut kaydı koru.
-	var mevcutParola string
-	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT COALESCE(parola,'') FROM backup_destinations WHERE domain_id=?`, id).Scan(&mevcutParola)
-	mevcutParola = gizli.CozBagli(mevcutParola, "yedek") // cift-sifrelemeyi onle
+	// Parola boş gönderildi mi? Mevcut kaydı koru — AMA yalnız AYNI hedef için (Y1).
+	mevcut := mevcutHedefOku(r.Context(), h.DB, id)
 	if req.Parola == "" {
-		req.Parola = mevcutParola
+		if mevcut.var_ && mevcut.parola != "" && mevcut.farkliHedef(req.Tip, req.Host, req.Port, req.Kullanici) {
+			httpx.WriteError(w, http.StatusBadRequest, hedefDegistiMesaji)
+			return
+		}
+		req.Parola = mevcut.parola
 	}
 	if req.Parola == "" {
 		httpx.WriteError(w, http.StatusBadRequest, "parola zorunlu (yeni kayıt)")
@@ -127,6 +128,42 @@ func (h *Handlers) PutDestination(w http.ResponseWriter, r *http.Request) {
 		d.Parola = "" // gizle
 	}
 	httpx.WriteJSON(w, http.StatusOK, d)
+}
+
+// hedefDegistiMesaji — kayıtlı hedefin host/port/kullanıcı/tip'i değişip parola yeniden girilmediğinde.
+const hedefDegistiMesaji = "hedef değişti: parola yeniden girilmeli"
+
+// mevcutHedef — domainin kayıtlı uzak hedefi (parola ÇÖZÜLMÜŞ, yalnız bellekte).
+type mevcutHedef struct {
+	var_                 bool
+	tip, host, kullanici string
+	port                 int
+	parola               string
+}
+
+// mevcutHedefOku — domainin kayıtlı hedefini okur; kayıt yoksa var_=false.
+func mevcutHedefOku(ctx context.Context, db *sql.DB, domainID int64) mevcutHedef {
+	var m mevcutHedef
+	if err := db.QueryRowContext(ctx,
+		`SELECT tip, host, port, kullanici, COALESCE(parola,'') FROM backup_destinations WHERE domain_id=?`, domainID).
+		Scan(&m.tip, &m.host, &m.port, &m.kullanici, &m.parola); err != nil {
+		return mevcutHedef{}
+	}
+	m.var_ = true
+	m.parola = gizli.CozBagli(m.parola, "yedek") // cift-sifrelemeyi onle
+	return m
+}
+
+// farkliHedef — istek başka bir hedef mi? Host büyük/küçük harf duyarsız; port 0 = tipin varsayılanı.
+func (m mevcutHedef) farkliHedef(tip, host string, port int, kullanici string) bool {
+	if port == 0 {
+		if tip == "sftp" {
+			port = 22
+		} else {
+			port = 21
+		}
+	}
+	return tip != m.tip || !strings.EqualFold(host, m.host) || port != m.port || kullanici != m.kullanici
 }
 
 // DELETE /domains/{id}/backup-destination
@@ -180,13 +217,15 @@ func (h *Handlers) TestDestination(w http.ResponseWriter, r *http.Request) {
 	var d *Destination
 	var ad destPutReq
 	if json.NewDecoder(r.Body).Decode(&ad) == nil && ad.Host != "" {
-		// Ad-hoc test (UI'dan kaydetmeden test): parola boşsa DB'den çek
-		mevcutParola := ""
-		_ = h.DB.QueryRowContext(r.Context(),
-			`SELECT COALESCE(parola,'') FROM backup_destinations WHERE domain_id=?`, id).Scan(&mevcutParola)
-		mevcutParola = gizli.CozBagli(mevcutParola, "yedek")
+		// Ad-hoc test (UI'dan kaydetmeden test): parola boşsa DB'den çek — AYNI hedef için (Y1: farklı
+		// hosta kayıtlı parola gönderilmez; test ucu müşteriye de açıktır).
+		mevcut := mevcutHedefOku(r.Context(), h.DB, id)
 		if ad.Parola == "" {
-			ad.Parola = mevcutParola
+			if mevcut.var_ && mevcut.parola != "" && mevcut.farkliHedef(ad.Tip, ad.Host, ad.Port, ad.Kullanici) {
+				httpx.WriteError(w, http.StatusBadRequest, hedefDegistiMesaji)
+				return
+			}
+			ad.Parola = mevcut.parola
 		}
 		port := ad.Port
 		if port == 0 {

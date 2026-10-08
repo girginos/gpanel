@@ -34,7 +34,8 @@ func StartScheduler(db *sql.DB) {
 	AsiliIsleriKapat(db)
 
 	// S2: silme izi yazılamamış (süreç çöktü/UPDATE başarısız) sahipsiz yedek satırlarını işaretle.
-	// Ayrı goroutine, idempotent; 04:00 süpürmesi de aynısını yapar (bkz. silinen.go).
+	// Ayrı goroutine, idempotent; 04:00 süpürmesi de aynısını yapar (bkz. silinen.go). 10 dk SÜRE BÜTÇESİ: satırlar id
+	// imleciyle parti parti işlenir, bütçe bitene ya da aday kalmayana dek sürer (D6 eşiği toplu işaretlemeyi korur).
 	go func() {
 		time.Sleep(45 * time.Second)
 		sctx, iptal := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -80,7 +81,8 @@ func tickOnce(db *sql.DB) {
 	// SESSIZCE birakmak, kurtarma aninda "yedek var ama bozuk" felaketi demektir.
 	if currentHour == 4 {
 		verifyYedekBozulma(db)
-		// Silinen hesapların saklama süresi dolan yedekleri (bkz. silinen.go).
+		// Silinen hesapların saklama süresi dolan yedekleri (bkz. silinen.go): 200'lük partiler halinde, 20 dk SÜRE
+		// BÜTÇESİ bitene ya da süresi dolan kayıt kalmayana dek (toplu bayi silmesi birikimi yığmasın).
 		// Ayrı goroutine + kendi süresi: ölü bir uzak hedef bu turun yedeklerini tüketmesin.
 		go func() {
 			sctx, iptal := context.WithTimeout(context.Background(), 20*time.Minute)
