@@ -206,10 +206,12 @@ func TestGuard_SaglikliServis_RollbackYok(t *testing.T) {
 // Askı geçiş işareti tenantFPMAski ile konur ve İŞ BİTİNCE kalkar (iki yönde de).
 func TestTenantFPMAski_GecisIsaretiKonurVeKalkar(t *testing.T) {
 	for _, askida := range []bool{true, false} {
-		gorulen := false
+		gorulen, ucustaGorulen := false, false
 		eskiK, eskiS, eskiP := askiKomut, askiSoketBekle, askiPaylasilana
 		askiKomut = func(string, ...string) ([]byte, error) {
 			gorulen = gorulen || askiGecisteMi(gk_sk)
+			_, ucusta := fpmInflight.Load(gk_sk)
+			ucustaGorulen = ucustaGorulen || ucusta
 			return nil, nil
 		}
 		askiSoketBekle = func(string) bool { return true }
@@ -220,6 +222,9 @@ func TestTenantFPMAski_GecisIsaretiKonurVeKalkar(t *testing.T) {
 		askiKomut, askiSoketBekle, askiPaylasilana = eskiK, eskiS, eskiP
 		if !gorulen {
 			t.Errorf("askida=%v: systemctl çağrısı sırasında askı geçiş işareti YOKTU", askida)
+		}
+		if !ucustaGorulen {
+			t.Errorf("askida=%v: systemctl çağrısı sırasında fpmInflight (K2 watchdog muafiyeti) YOKTU", askida)
 		}
 		if askiGecisteMi(gk_sk) {
 			t.Errorf("askida=%v: iş bitince askı geçiş işareti KALMAMALI", askida)
