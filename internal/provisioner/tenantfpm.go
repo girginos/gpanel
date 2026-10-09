@@ -1124,7 +1124,11 @@ func guardPostStart(db *sql.DB, domainID int64, sk, surum string, window time.Du
 	// ikinci kayit ayri guard baslatmaz) — rollback DB'deki GUNCEL surumle yapilmali; yoksa site eski (yanlis)
 	// PHP surumuyle sunulur.
 	surum = guardGuncelSurum(db, domainID, surum)
-	rerr := guardRollback(db, domainID, sk, surum, "K1 post-start crash-loop:", sebep)
+	rollback := guardRollback
+	if rollback == nil {
+		rollback = RollbackToSharedFPM
+	}
+	rerr := rollback(db, domainID, sk, surum, "K1 post-start crash-loop:", sebep)
 	// reset-failed olmazsa unit `systemctl --failed` listesinde asili kalir.
 	_, _ = exec.Command("systemctl", "reset-failed", unit).CombinedOutput()
 	if rerr != nil {
@@ -1143,8 +1147,12 @@ func askiGecisteMi(sk string) bool {
 	return gecisteki
 }
 
-// Dikisler (testler sahteler — systemctl/DB'ye dokunmadan sinanir; uretimde SABIT). guardRollback init'te
-// baglanir (RollbackToSharedFPM -> ... -> guardPostStart yolunda baslatma dongusu olusmasin).
+// Dikisler (testler sahteler — systemctl/DB'ye dokunmadan sinanir; uretimde SABIT). guardRollback uretimde nil:
+// guardPostStart nil ise RollbackToSharedFPM'i dogrudan cagirir.
+// 🔴 init() ile atama YAPMA: init kodu linker koku olur ve RollbackToSharedFPM'in tum bagimliliklarini (nginx vhost
+// uretimi, text/template, database/sql...) provisioner'i yalniz kucuk yardimcilar icin iceri alan ikililere (destek-ajan,
+// eklenti-baslatici) de baglar (+2 MB/ikili — aday7 paketinde gozlendi). Fonksiyon-degeri degisken ilklendirmesi
+// (askiPaylasilana gibi) statik veridir; yalniz degisken erisilebilirse korunur.
 var (
 	guardPollAraligi = fpmPostStartPoll
 	guardOluBekleme  = fpmDeadConfirmWait
@@ -1153,8 +1161,6 @@ var (
 	guardRollback    func(db *sql.DB, domainID int64, sk, surum string, sebep ...string) error
 	guardGuncelSurum = domainGuncelPHPSurum
 )
-
-func init() { guardRollback = RollbackToSharedFPM }
 
 // guardAskidaMi: izleyicinin iptal kosulu — hesap askida VEYA durum okunamiyor (belirsizlikte rollback YOK).
 func guardAskidaMi(sk string) bool { return HesapAskiKapisi(sk) != nil }
