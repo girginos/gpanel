@@ -1566,7 +1566,7 @@ func semaDogrula(d *sql.DB) {
 			eksik = append(eksik, b.tablo+"."+b.kolon)
 		}
 	}
-	semaRaporla(eksik, semaYapiDogrula(d), len(beklenen))
+	semaRaporla(eksik, append(semaYapiDogrula(d), semaGenislikDogrula(d)...), len(beklenen))
 }
 
 // semaRaporla — semaDogrula'nin sonucunu gunluge yazar: eksik kolonlar ve yapisal sorunlar 🔴 satirlariyla (sessiz gecmez);
@@ -1582,14 +1582,70 @@ func semaRaporla(eksik, bozuk []string, kontrol int) {
 	// 🔴 yazilir — sessiz gecmez (paneli durdurmaz, ilgili ozellik bozuk calisir).
 	if len(bozuk) > 0 {
 		log.Printf("🔴 SEMA YAPISI BOZUK — %s", strings.Join(bozuk, " | "))
-		log.Printf("🔴 0217 (silinmis hesap yedekleri) tam uygulanmamis: goc defteri o dosyayi 'uygulandi' saymis olabilir " +
-			"(GOC DEGISMIS satirina ve GOC HATASI satirlarina bakin). Duzeltme: " +
-			"DELETE FROM schema_migrations WHERE dosya='0217_silinen_yedek.sql'; sonra paneli yeniden baslatin (goc idempotenttir).")
+		var g0217, g0218 bool
+		for _, x := range bozuk {
+			if strings.HasPrefix(x, sema0218Etiket) {
+				g0218 = true
+			} else {
+				g0217 = true
+			}
+		}
+		if g0217 {
+			log.Printf("🔴 0217 (silinmis hesap yedekleri) tam uygulanmamis: goc defteri o dosyayi 'uygulandi' saymis olabilir " +
+				"(GOC DEGISMIS satirina ve GOC HATASI satirlarina bakin). Duzeltme: " +
+				"DELETE FROM schema_migrations WHERE dosya='0217_silinen_yedek.sql'; sonra paneli yeniden baslatin (goc idempotenttir).")
+		}
+		if g0218 {
+			log.Printf("🔴 0218 (sifreli sir kolonu genisligi) uygulanmamis: 2FA etkinlestirme ve git deposu baglama 500 verir " +
+				"(sifreli deger kolona sigmaz). Duzeltme: " +
+				"DELETE FROM schema_migrations WHERE dosya='0218_sifreli_sir_sutunlari.sql'; sonra paneli yeniden baslatin (goc idempotenttir).")
+		}
 	}
 	if len(eksik) > 0 || len(bozuk) > 0 {
 		return
 	}
 	log.Printf("sema dogrulama: kritik kolonlarin tamami mevcut (%d kontrol)", kontrol)
+}
+
+// sema0218Etiket: semaGenislikDogrula sorunlarinin onegi (semaRaporla 0217 ve 0218 ipuclarini ayirir).
+const sema0218Etiket = "[0218] "
+
+// sifreliSirGenislik — gizli.SaklaBagli ile yazilan ve 0218'den ONCE dar (varchar(64)) kalmis kolonlar; enUzunDuz = o kolona
+// yazilabilecek EN UZUN duz sir uzunlugu. Sifreli cikti duz degerden uzundur ("gos1:" + base64(nonce 12 + veri + etiket 16),
+// dolgusuz): kolon bunu almazsa STRICT_TRANS_TABLES'ta yazim "Data too long" ile duser (2FA acilmaz, git baglanmaz).
+// Yeni bir sifreli sir kolonu eklenirse BURAYA da eklenmeli (sifreli_sir_kaynak_test.go sifreleme yapan dosyalari sabitler).
+var sifreliSirGenislik = []struct {
+	tablo, kolon string
+	enUzunDuz    int
+}{
+	{"users", "totp_secret", 32},        // auth.TOTPGenerateSecret: 160 bit = 32 base32 karakter
+	{"git_repos", "webhook_secret", 64}, // git.randomHex(20) = 40 karakter; 64 pay
+}
+
+// sifreliUzunluk: n karakterlik duz degerin gizli.SaklaBagli ciktisinin uzunlugu.
+func sifreliUzunluk(n int) int { return len("gos1:") + ((12+n+16)*4+2)/3 }
+
+// semaGenislikDogrula — sifreli sir kolonlari, sifreli ciktiyi alacak kadar genis mi? Kolon/tablo yoksa sorun SAYILMAZ
+// (kolon kontrolu bildirir); sorgu hatasi sorun uydurmaz ama loglanir.
+func semaGenislikDogrula(d *sql.DB) []string {
+	var sorun []string
+	for _, k := range sifreliSirGenislik {
+		var gen sql.NullInt64
+		err := d.QueryRow(`SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, k.tablo, k.kolon).Scan(&gen)
+		if err == sql.ErrNoRows || (err == nil && !gen.Valid) {
+			continue
+		}
+		if err != nil {
+			log.Printf("sema genislik sorgusu basarisiz (%s.%s): %v", k.tablo, k.kolon, err)
+			continue
+		}
+		if gerek := sifreliUzunluk(k.enUzunDuz); int(gen.Int64) < gerek {
+			sorun = append(sorun, fmt.Sprintf("%s%s.%s genisligi %d < %d (%d karakterlik sir sifrelenince kolona SIGMAZ)",
+				sema0218Etiket, k.tablo, k.kolon, gen.Int64, gerek, k.enUzunDuz))
+		}
+	}
+	return sorun
 }
 
 // semaYapiDogrula — kolon varligindan fazlasini isteyen YAPISAL kontroller (information_schema). Dondurulen her girdi
