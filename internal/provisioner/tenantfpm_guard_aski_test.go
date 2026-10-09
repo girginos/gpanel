@@ -10,7 +10,9 @@ package provisioner
 // Bu testler systemctl'e / gerçek askı durumuna dokunmaz: dikişler (guard*) sahtedir, unit dosyası geçici dizindedir.
 
 import (
+	"bytes"
 	"database/sql"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +37,7 @@ type gk_sahte struct {
 	unit      func(anahtarlar []string) map[string]string
 	askida    func(cagri int) bool
 	askidaN   int
+	propsN    int
 	rollbacks []gk_rb
 	surumDB   string
 }
@@ -54,6 +57,7 @@ func gk_kur(t *testing.T) *gk_sahte {
 	guardPollAraligi, guardOluBekleme = 2*time.Millisecond, 2*time.Millisecond
 	guardUnitProps = func(_ string, anahtarlar ...string) map[string]string {
 		d.mu.Lock()
+		d.propsN++
 		f := d.unit
 		d.mu.Unlock()
 		if f == nil {
@@ -84,6 +88,21 @@ func gk_kur(t *testing.T) *gk_sahte {
 	return d
 }
 
+// gk_log: log çıktısını yakalar (hangi savunma katmanının karar verdiğini ayırt etmek için).
+func gk_log(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var b bytes.Buffer
+	log.SetOutput(&b)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	return &b
+}
+
+func (d *gk_sahte) props() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.propsN
+}
+
 func (d *gk_sahte) rb() []gk_rb {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -94,8 +113,9 @@ func gk_hep(m map[string]string) func([]string) map[string]string {
 	return func([]string) map[string]string { return m }
 }
 
-// ASKIYA ALINCA izleme bırakılır: servis askıdan SONRA ölü görünse de rollback YOK (yarışın asıl hâli).
-func TestGuard_AskiGorununceIzlemeBirakilir_RollbackYok(t *testing.T) {
+// Katman 1 (izleyici): askı BAŞLANGIÇTA varsa izleme İLK yoklamada bırakılır — servis ölü olsa bile onay
+// döngüsüne/kilide hiç girilmez (yalnız taban okuma yapılır).
+func TestGuard_AskiBaslangictaVarsa_IzlemeHemenBirakilir(t *testing.T) {
 	d := gk_kur(t)
 	d.unit = gk_hep(gk_olu)
 	d.askida = func(int) bool { return true }
@@ -105,18 +125,44 @@ func TestGuard_AskiGorununceIzlemeBirakilir_RollbackYok(t *testing.T) {
 	if got := d.rb(); len(got) != 0 {
 		t.Fatalf("askıdaki hesap paylaşılan FPM'e İNDİRİLMEMELİ: %+v", got)
 	}
+	if n := d.props(); n != 1 {
+		t.Fatalf("askıdaki hesapta izleme ilk yoklamada bırakılmalı (yalnız taban okuma = 1 systemctl show), %d okuma yapıldı", n)
+	}
 }
 
-// Askı, "ölü" onay döngüsünün ORTASINDA başlarsa (izleme askıdan önce "ölü"yü görmüş) onay iptal olur.
-func TestGuard_AskiOnayDongusuOrtasindaBaslarsa_RollbackYok(t *testing.T) {
+// Katman 2 (onay döngüsü): askı, "ölü" onay döngüsünün ORTASINDA başlarsa onay İPTAL olur — karar kilit altındaki
+// son doğrulamaya (katman 3) KALMADAN verilir.
+func TestGuard_AskiOnayDongusuOrtasindaBaslarsa_OnayIptalOlur(t *testing.T) {
 	d := gk_kur(t)
 	d.unit = gk_hep(gk_olu)
 	d.askida = func(n int) bool { return n >= 2 } // 1. çağrı (poll) askıda DEĞİL, sonrakiler askıda
+	buf := gk_log(t)
 	if err := guardPostStart(nil, 7, gk_sk, "8.2", gk_pencere); err != nil {
 		t.Fatalf("guard hata dönmemeli: %v", err)
 	}
 	if got := d.rb(); len(got) != 0 {
 		t.Fatalf("onay döngüsü sırasında askıya alınan hesap İNDİRİLMEMELİ: %+v", got)
+	}
+	if strings.Contains(buf.String(), "ASKI ile aciklandi") {
+		t.Fatalf("onay döngüsü iptal etmeliydi; karar kilit altındaki son doğrulamaya kaldı:\n%s", buf.String())
+	}
+}
+
+// Katman 3 (kilit altı son doğrulama): askı, izleyici + onay döngüsü BİTTİKTEN sonra (kilit beklenirken) başlarsa
+// bile rollback YOK. Çağrı sırası: poll(1) + 3 onay örneği(2-4) → kilit altı(5).
+func TestGuard_AskiMonitorSonrasiKilitBeklerkenBaslarsa_RollbackYok(t *testing.T) {
+	d := gk_kur(t)
+	d.unit = gk_hep(gk_olu)
+	d.askida = func(n int) bool { return n >= 5 }
+	buf := gk_log(t)
+	if err := guardPostStart(nil, 7, gk_sk, "8.2", gk_pencere); err != nil {
+		t.Fatalf("guard hata dönmemeli: %v", err)
+	}
+	if got := d.rb(); len(got) != 0 {
+		t.Fatalf("kilit beklenirken askıya alınan hesap İNDİRİLMEMELİ: %+v", got)
+	}
+	if !strings.Contains(buf.String(), "ASKI ile aciklandi") {
+		t.Fatalf("kararı kilit altındaki son doğrulama vermeliydi:\n%s", buf.String())
 	}
 }
 
