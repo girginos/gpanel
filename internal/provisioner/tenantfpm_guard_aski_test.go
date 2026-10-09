@@ -324,3 +324,20 @@ func TestDomainGuncelPHPSurum(t *testing.T) {
 		t.Fatalf("DB kapalıyken yedek beklenirdi, %q geldi", got)
 	}
 }
+
+// Üretimde guardRollback nil'dir: guard GERÇEK RollbackToSharedFPM'i çağırmalı (init() ile bağlama yasak —
+// bkz. init_kok_test.go). Geçersiz sk ("c_" öneki yok) gerçek fonksiyonu YAN ETKİSİZ reddettirir.
+func TestGuard_RollbackDikisiNilIseGercekFonksiyonCagrilir(t *testing.T) {
+	d := gk_kur(t)
+	guardRollback = nil
+	const sk = "nosk"
+	if err := os.WriteFile(tenantUnitPath(sk), []byte("[Service]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.unit = gk_hep(gk_olu)
+	d.askida = func(int) bool { return false }
+	err := guardPostStart(nil, 7, sk, "8.2", gk_pencere)
+	if err == nil || !strings.Contains(err.Error(), "rollback BASARISIZ") || !strings.Contains(err.Error(), "geçersiz sistem kullanıcısı") {
+		t.Fatalf("nil dikişte GERÇEK RollbackToSharedFPM çağrılmalıydı (geçersiz sk reddi bekleniyordu), gelen: %v", err)
+	}
+}
