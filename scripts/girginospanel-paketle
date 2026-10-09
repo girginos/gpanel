@@ -223,12 +223,18 @@ mkdir -p "$A/ops"
 # 🔴 Buradaki liste ile /usr/local/bin ayrışırsa pakette SESSİZCE bayat araç
 # kalır. O yüzden: kurulu olan HER girginospanel-* aracı tazelenir, liste
 # elle bakımlı değildir.
+# >>> paket-ops-kopya
 TAZE=0
 for f in /usr/local/bin/girginospanel-* /usr/local/sbin/girginospanel-*; do
   [ -f "$f" ] || continue
   b=$(basename "$f")
   # paketleme aracının kendisi pakete girmez (kurulum makinesine ait)
   [ "$b" = "girginospanel-paketle" ] && continue
+  # 🔴 İKİLİLER assets/ops'a KOPYALANMAZ (2026-10-09 VPS provası). Build makinesinin /usr/local/bin'indeki
+  # elle kurulu girginospanel-destek-ajan / -avajan 10-04'te buradan assets/ops'a kopyalandı ve her pakete
+  # girdi; installer/updater ops/* döngüsüyle bunu assets/ kökündeki TAZE ikilinin ÜZERİNE yazıyordu
+  # (müşteri KVKK maskesiz destek ajanı + bayat AV ajanıyla kalıyordu). İkililer assets/ kökünde, build-assets.sh'tan gelir.
+  if [ "$(head -c4 "$f" | od -An -c | tr -d ' ')" = '177ELF' ]; then continue; fi
   # 🔴 Installer/updater kurarken `.sh` uzantısını SOYAR. Dolayısıyla
   # /usr/local/bin'deki ad soyulmuş addır. Onu olduğu gibi assets'e geri
   # yazmak, `.sh` aslının yanına İKİZ üretir ve kurulumda hangisinin
@@ -247,6 +253,7 @@ for f in /usr/local/bin/girginospanel-* /usr/local/sbin/girginospanel-*; do
     TAZE=$((TAZE+1))
   fi
 done
+# <<< paket-ops-kopya
 # 🔴 Installer ops dosyalarini kurarken `.sh` uzantisini SOYUYOR. Yani
 # `girginospanel-optimize` ve `girginospanel-optimize.sh` AYNI hedefe
 # kuruluyor ve glob sirasi geregi `.sh` (hic tazelenmeyen, bayat olan)
@@ -258,6 +265,17 @@ for f in "$A"/ops/*.sh; do
   [ -f "$ciplak" ] && IKIZ="$IKIZ $(basename "$ciplak")"
 done
 [ -z "$IKIZ" ] || dur "ops'ta .sh ikizi var, kurulumda bayat olan taze olanı EZER:$IKIZ"
+# >>> paket-ops-ikili-kapisi
+# 🔴 assets/ops yalnız kabuk betikleri içerir. İçinde ELF (ikili) varsa installer/updater `ops/*` döngüsüyle onu
+# /usr/local/bin'e SON yazar ve assets/ kökündeki TAZE ikiliyi bayatıyla ezer (2026-10-09 VPS provası: ops/ altında
+# 10-04'ten kalma destek-ajan + avajan kopyaları vardı). Bu kapı onların pakete girmesini durdurur.
+IKILI=""
+for f in "$A"/ops/*; do
+  [ -f "$f" ] || continue
+  if [ "$(head -c4 "$f" | od -An -c | tr -d ' ')" = '177ELF' ]; then IKILI="$IKILI $(basename "$f")"; fi
+done
+[ -z "$IKILI" ] || dur "ops'ta İKİLİ (ELF) var — kurulumda assets/ kökündeki TAZE ikiliyi bayatıyla ezer:$IKILI (assets/ops'tan silin)"
+# <<< paket-ops-ikili-kapisi
 ok "$(ls "$A/ops" | wc -l) dosya ($TAZE tazelendi, .sh ikizi yok)"
 
 # ─────────────────────────────────────────────────────────── 5) kapılar

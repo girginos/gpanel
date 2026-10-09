@@ -532,7 +532,7 @@ fi
 # 🔴 Dizin adi kaynaga gore DEGISIR: GitHub tarball'i "gpanel-main/",
 # kendi paketimiz "gpanel-installer/" olarak acilir. Sabit isim yerine
 # assets/girginospanel-server'i ARAYARAK bul; iki duzen de calisir.
-NEWBIN=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-server -path '*/assets/*' 2>/dev/null | head -1)
+NEWBIN=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-server -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
 [ -n "$NEWBIN" ] || die "pakette assets/girginospanel-server yok (yapı beklenenden farklı)"
 A=$(dirname "$NEWBIN")
 SRC=$(dirname "$A")
@@ -692,14 +692,14 @@ ok "binary güncellendi"
 # Panelle AYNI pakette gelir ve atomik kurulur (calisan surec eski inode'u
 # tutar). Guncellenmezse: yeni panel duz ikiliyi silip ExecStart'i baslaticiya
 # cevirir, baslatici eski/eksik olur ve eklenti bir daha acilmaz.
-NEWBAS=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-eklenti-baslatici -path '*/assets/*' 2>/dev/null | head -1)
+NEWBAS=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-eklenti-baslatici -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
 if [ -n "$NEWBAS" ]; then
   install -m 0755 "$NEWBAS" /opt/girginospanel/bin/girginospanel-eklenti-baslatici \
     && ok "eklenti baslaticisi guncellendi" || warn "eklenti baslaticisi guncellenemedi"
 fi
 
 # Antivirus ajani — server ile ayni turden binary. Pakette varsa atomik kur.
-NEWAV=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-avajan -path '*/assets/*' 2>/dev/null | head -1)
+NEWAV=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-avajan -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
 if [ -n "$NEWAV" ]; then
   install -m 0755 "$NEWAV" /usr/local/bin/girginospanel-avajan || warn "avajan guncellenemedi"
   ok "antivirus ajani guncellendi"
@@ -707,7 +707,7 @@ fi
 
 # Telegram destek ajani — panelden AYRI hizmet. Burada yalniz ikili atomik yazilir (calisan surec
 # eski inode'u tutar); hizmet panel yeni ikiliyle SAGLIKLI acildiktan sonra (adim 11a) baslatilir.
-NEWDA=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-destek-ajan -path '*/assets/*' 2>/dev/null | head -1)
+NEWDA=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-destek-ajan -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
 if [ -n "$NEWDA" ]; then
   install -m 0755 "$NEWDA" /usr/local/bin/girginospanel-destek-ajan || warn "destek ajani guncellenemedi"
   DESTEK_AJAN_YENI=1
@@ -802,6 +802,7 @@ if [ -d "$A/ops" ]; then
   # 🔴 Hatalari YUTMA. Eskiden `install ... 2>/dev/null || true` idi:
   # disk dolu / salt-okunur / izin hatasinda arac kurulmuyor ama
   # guncelleme yine "✓ ops-tool'lar guncellendi" diyordu.
+  # >>> ops-kur-dongusu
   OPS_HATA=""
   for t in "$A"/ops/*; do
     [ -f "$t" ] || continue
@@ -814,9 +815,18 @@ if [ -d "$A/ops" ]; then
       # Yapilandirma dosyalari /usr/local/bin'e 0755 ile KURULMAZ
       *.conf|*.service|*.timer) continue ;;
     esac
+    # 🔴 IKILILER ops/ dongusunden KURULMAZ (2026-10-09 VPS provasi): ops/ altinda kalan bir ELF (elle
+    # kurulu eski girginospanel-destek-ajan / -avajan kopyasi) bu dongude assets/ kokundeki TAZE ikilinin
+    # USTUNE yaziliyordu -> guncellenen sunucu KVKK maskesiz destek ajani + bayat AV ajaniyla kaliyordu.
+    # Ikililer yalniz assets/ kokunden kurulur (yukaridaki find adimlari).
+    if [ "$(head -c4 "$t" | od -An -c | tr -d ' ')" = '177ELF' ]; then
+      warn "ops/$bn bir IKILI — atlandi (ikililer assets/ kokunden kurulur; ops/ kopyasi bayat olur)"
+      continue
+    fi
     install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" || OPS_HATA="$OPS_HATA ${bn%.sh}"
   done
   [ -z "$OPS_HATA" ] || die "ops araclari kurulamadi:$OPS_HATA"
+  # <<< ops-kur-dongusu
 
   mkdir -p "$SCRIPTS" || die "$SCRIPTS olusturulamadi"
   cp "$A"/ops/* "$SCRIPTS/" || die "ops dosyalari $SCRIPTS'e kopyalanamadi"

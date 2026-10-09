@@ -453,6 +453,7 @@ fi
 # it failed silently because the dir was absent, the panel logged
 # "SSH ISOLATION NOT APPLIED" on every startup and the tenant got a full shell WITHOUT chroot.
 mkdir -p /opt/girginospanel/src/scripts
+# >>> ops-kur-dongusu
 _ops_n=0
 for t in "$A"/ops/*; do
   [ -f "$t" ] || continue
@@ -461,6 +462,13 @@ for t in "$A"/ops/*; do
   # /usr/local/bin with 0755 as root they could be run by accident
   # (girginospanel-repair.bak.<time> was found in the package and was being installed).
   case "$bn" in *.bak|*.bak.*|*.orig|*.rej|*~) continue ;; esac
+  # 🔴 BINARIES are never installed from ops/ (2026-10-09 VPS trial): an ELF left in ops/ (a hand-installed
+  # copy of girginospanel-destek-ajan / -avajan) was installed here AFTER the fresh binary from the assets root
+  # and overwrote it -> every fresh install shipped a STALE support agent (no KVKK masking) and AV agent.
+  if [ "$(head -c4 "$t" | od -An -c | tr -d ' ')" = '177ELF' ]; then
+    warn "ops/$bn is a BINARY — skipped (binaries install from the assets/ root; an ops/ copy goes stale)"
+    continue
+  fi
   case "$bn" in
     *.conf|*.service|*.timer)
       # Configuration: only to the source dir, NOT executable
@@ -475,6 +483,7 @@ for t in "$A"/ops/*; do
   esac
   _ops_n=$((_ops_n+1))
 done
+# <<< ops-kur-dongusu
 # Verify: are the two files required for SSH isolation actually in place?
 for zorunlu in 50-gosp-jail.conf girginospanel-jail; do
   # 🔴 die, NOT warn: without these files a tenant opening SSH cannot be
