@@ -982,13 +982,21 @@ func unitUint(m map[string]string, key string) uint64 {
 //
 // base NRestarts CAGRI ANINDA taze okunur → restart (sifirlar) ve start/reload
 // (sifirlamaz) yollarinin ikisinde de delta dogru calisir.
-func monitorPostStart(unit string, window time.Duration) (string, bool) {
-	base := unitUint(unitProps(unit, "NRestarts"), "NRestarts")
+func monitorPostStart(unit string, window time.Duration, iptal func() bool) (string, bool) {
+	base := unitUint(guardUnitProps(unit, "NRestarts"), "NRestarts")
 	deadline := time.Now().Add(window)
 	parseFail := 0
 	for time.Now().Before(deadline) {
-		time.Sleep(fpmPostStartPoll)
-		p := unitProps(unit, "NRestarts", "ActiveState", "SubState", "Result", "ExecMainCode", "ExecMainStatus", "LoadState")
+		time.Sleep(guardPollAraligi)
+		// 🔴 ASKI KAPISI (K2 watchdog'un tenantFPMBakimi kurali ile AYNI): hesap askiya alindiysa servis
+		// BILEREK durdurulmustur (PHPHavuzAski) — "olu" gozlemi crash-loop DEGILDIR. Izleme askidan ONCE
+		// basladiysa (PHP ayari kaydi, 15s icinde askiya al/askidan al) askiyi gorunce BIRAKILIR; aksi halde
+		// askidan alma sirasinda "temiz cikis" sanilip tenant paylasilan FPM'e indirilirdi (izolasyon kaybi +
+		// bayat PHP surumu; VPS provasi 2026-10-09). Durum okunamiyorsa da (belirsizlik) rollback YOK.
+		if iptal != nil && iptal() {
+			return "", false
+		}
+		p := guardUnitProps(unit, "NRestarts", "ActiveState", "SubState", "Result", "ExecMainCode", "ExecMainStatus", "LoadState")
 		if p == nil || p["LoadState"] == fpmWatchdogUnitNotFound {
 			// Teardown yarisi: operator domain'i silmis olabilir (unit dosyasi yok).
 			// "unit yok = bozuk" diye rollback edersek SILINMIS domain icin paylasilan
@@ -1018,7 +1026,7 @@ func monitorPostStart(unit string, window time.Duration) (string, bool) {
 		// SubState=dead. Ustteki uc tetikleyicinin (nrestarts_delta / substate /
 		// active_failed) HICBIRI eslesmez -> tenant KALICI 502 kalir ve hicbir
 		// mekanizma yakalamaz. Unit dosyasi DISKTE VAR + servis OLU = OLUM.
-		if unitDeadConfirmed(unit) {
+		if unitDeadConfirmed(unit, iptal) {
 			return "clean_exit " + det, true
 		}
 	}
@@ -1029,17 +1037,24 @@ func monitorPostStart(unit string, window time.Duration) (string, bool) {
 // Kontrollu restart penceresi (~1s) ve teardown/rollback yarisi yanlis pozitif
 // uretmesin diye arka arkaya fpmDeadConfirmTries kez ayni sonucu ister; herhangi bir
 // ornekte unit dosyasi kaybolmus ya da servis canlanmissa OLU DEGIL doner.
-func unitDeadConfirmed(unit string) bool {
+func unitDeadConfirmed(unit string, iptal ...func() bool) bool {
 	path := filepath.Join(tenantUnitDir, unit)
 	for i := 0; i < fpmDeadConfirmTries; i++ {
 		if i > 0 {
-			time.Sleep(fpmDeadConfirmWait)
+			time.Sleep(guardOluBekleme)
 		}
 		// Unit dosyasi yoksa tenant zaten paylasilan duzende (rollback/teardown) → olum degil.
 		if _, err := os.Stat(path); err != nil {
 			return false
 		}
-		p := unitProps(unit, "ActiveState", "SubState", "LoadState")
+		// Her ornekte askiya bak: onay dongusu (~3s) askiya alma/alinma ile ic ice gecerse "olu" kararinin
+		// dayanagi (servis BILEREK durdurulmustu) kalkmis demektir → olu SAYMA.
+		for _, f := range iptal {
+			if f != nil && f() {
+				return false
+			}
+		}
+		p := guardUnitProps(unit, "ActiveState", "SubState", "LoadState")
 		if p == nil || p["LoadState"] == fpmWatchdogUnitNotFound {
 			return false
 		}
@@ -1072,20 +1087,44 @@ func fpmGuardBitir(sk string) { fpmGuardAktif.Delete(sk) }
 // ve tenant paylasilan FPM'e GERI ALINDI (site 200'e doner, izolasyon kaybedilir).
 func guardPostStart(db *sql.DB, domainID int64, sk, surum string, window time.Duration) error {
 	unit := tenantUnitName(sk)
-	sebep, kirik := monitorPostStart(unit, window)
+	askidaMi := func() bool { return guardHesapAskida(sk) }
+	sebep, kirik := monitorPostStart(unit, window, askidaMi)
 	if !kirik {
 		return nil
 	}
-	log.Printf("🔴 post-start crash-loop: %s [%s] → paylasilan FPM'e geri aliniyor", sk, sebep)
+	temizCikis := strings.HasPrefix(sebep, "clean_exit")
 
 	mu := fpmSkLock(sk)
 	mu.Lock()
 	defer mu.Unlock()
 	// Kilidi beklerken baskasi (watchdog / paralel Enable) zaten rollback etmis olabilir.
 	if _, statErr := os.Stat(tenantUnitPath(sk)); os.IsNotExist(statErr) {
+		log.Printf("🔴 post-start crash-loop: %s [%s] — zaten paylasilan FPM'e alinmis", sk, sebep)
 		return fmt.Errorf("per-tenant FPM crash-loop (%s) — zaten paylasilan FPM'e alinmis", sebep)
 	}
-	rerr := RollbackToSharedFPM(db, domainID, sk, surum, "K1 post-start crash-loop:", sebep)
+	if temizCikis {
+		// 🔴 TEMIZ CIKIS gozlemi GECICI olabilir: izleme (15s) sirasinda hesap askiya alinip geri acilmis ya da
+		// servis bilerek yeniden baslatilmis olabilir. Rollback KARARININ hemen oncesinde, kilit altinda yeniden
+		// dogrula — aksi halde canli bir tenant paylasilan FPM'e (izolasyon kaybi) indirilirdi.
+		switch {
+		case guardHesapAskida(sk):
+			log.Printf("guardPostStart: %s temiz cikis gozlemi ASKI ile aciklandi (hesap askida/okunamiyor) — rollback yok", sk)
+			return nil
+		case askiGecisteMi(sk):
+			log.Printf("guardPostStart: %s temiz cikis gozlemi askiya alma/alinma gecisine denk geldi — rollback yok", sk)
+			return nil
+		}
+		if p := guardUnitProps(unit, "ActiveState"); p != nil && !fpmDeadActiveStates[p["ActiveState"]] {
+			log.Printf("guardPostStart: %s temiz cikis gozlemi GECICIYDI (servis yeniden canlandi: %s) — rollback yok", sk, p["ActiveState"])
+			return nil
+		}
+	}
+	log.Printf("🔴 post-start crash-loop: %s [%s] → paylasilan FPM'e geri aliniyor", sk, sebep)
+	// Izleme ilk baslatmadan beri surdu: bu arada surum degismis olabilir (zaten calisan guard varken yapilan
+	// ikinci kayit ayri guard baslatmaz) — rollback DB'deki GUNCEL surumle yapilmali; yoksa site eski (yanlis)
+	// PHP surumuyle sunulur.
+	surum = guardGuncelSurum(db, domainID, surum)
+	rerr := guardRollback(db, domainID, sk, surum, "K1 post-start crash-loop:", sebep)
 	// reset-failed olmazsa unit `systemctl --failed` listesinde asili kalir.
 	_, _ = exec.Command("systemctl", "reset-failed", unit).CombinedOutput()
 	if rerr != nil {
@@ -1093,6 +1132,43 @@ func guardPostStart(db *sql.DB, domainID int64, sk, surum string, window time.Du
 	}
 	log.Printf("✅ %s paylasilan FPM'e geri alindi (crash-loop rollback tamam)", sk)
 	return fmt.Errorf("per-tenant FPM crash-loop (%s) — paylasilan FPM'e geri alindi", sebep)
+}
+
+// fpmAskiGecis: askiya alma / alinma sirasinda sk isaretli (tenantFPMAski) — K1 izleyicisi servisin bu aralikta
+// gecici olarak OLU gorunmesini crash-loop sanmasin.
+var fpmAskiGecis sync.Map // sk -> struct{}
+
+func askiGecisteMi(sk string) bool {
+	_, gecisteki := fpmAskiGecis.Load(sk)
+	return gecisteki
+}
+
+// Dikisler (testler sahteler — systemctl/DB'ye dokunmadan sinanir; uretimde SABIT). guardRollback init'te
+// baglanir (RollbackToSharedFPM -> ... -> guardPostStart yolunda baslatma dongusu olusmasin).
+var (
+	guardPollAraligi = fpmPostStartPoll
+	guardOluBekleme  = fpmDeadConfirmWait
+	guardUnitProps   = unitProps
+	guardHesapAskida = guardAskidaMi
+	guardRollback    func(db *sql.DB, domainID int64, sk, surum string, sebep ...string) error
+	guardGuncelSurum = domainGuncelPHPSurum
+)
+
+func init() { guardRollback = RollbackToSharedFPM }
+
+// guardAskidaMi: izleyicinin iptal kosulu — hesap askida VEYA durum okunamiyor (belirsizlikte rollback YOK).
+func guardAskidaMi(sk string) bool { return HesapAskiKapisi(sk) != nil }
+
+// domainGuncelPHPSurum: domains.php_surum'un SIMDIKI degeri (okunamazsa/bossa yedek).
+func domainGuncelPHPSurum(db *sql.DB, domainID int64, yedek string) string {
+	if db == nil || domainID <= 0 {
+		return yedek
+	}
+	var s string
+	if err := db.QueryRow(`SELECT php_surum FROM domains WHERE id = ?`, domainID).Scan(&s); err != nil || strings.TrimSpace(s) == "" {
+		return yedek
+	}
+	return strings.TrimSpace(s)
 }
 
 // ---- K2: arka plan watchdog (sinirli pencerenin kaciramayacagi seyrek crash'ler) ----

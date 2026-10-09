@@ -258,11 +258,20 @@ func tenantFPMAski(db *sql.DB, domainID int64, sk, surum string, askida bool) er
 		// "ölü servis" sanmasın.
 		fpmInflight.Store(sk, struct{}{})
 		defer fpmInflight.Delete(sk)
+		fpmAskiGecis.Store(sk, struct{}{})
+		defer fpmAskiGecis.Delete(sk)
 		if out, err := askiKomut("systemctl", "disable", "--now", unit); err != nil {
 			return fmt.Errorf("php-fpm servisi durdurulamadı: %s: %w", strings.TrimSpace(string(out)), err)
 		}
 		return nil
 	}
+	// Askidan alma: servis baslayip soket gorunene kadar sk "ucusta" + "aski gecisinde": K1 izleyicisi ve K2
+	// watchdog bu aralikta servisin gecici olarak OLU gorunmesini crash-loop sanip tenant'i paylasilan FPM'e
+	// indirmesin (bayat surum + izolasyon kaybi). Askiya alma yonu (yukarida) fpmInflight'i zaten tasir.
+	fpmInflight.Store(sk, struct{}{})
+	defer fpmInflight.Delete(sk)
+	fpmAskiGecis.Store(sk, struct{}{})
+	defer fpmAskiGecis.Delete(sk)
 	if out, err := askiKomut("systemctl", "enable", "--now", unit); err != nil {
 		log.Printf("askıdan alma: %s başlatılamadı (%s) → paylaşılan FPM'e geri alınıyor", sk, strings.TrimSpace(string(out)))
 		if rerr := askiPaylasilana(db, domainID, sk, surum, "askidan alma: systemctl enable --now basarisiz"); rerr != nil {
