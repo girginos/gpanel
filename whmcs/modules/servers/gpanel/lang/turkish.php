@@ -28,4 +28,13 @@ return [
     'bayi_parola_not' => 'Bayi parolası panelden değiştirilir.',
     'hata_baslik' => 'Hesap bilgisi alınamadı',
     'btn_kullanim_yenile' => 'Kullanımı yenile',
+    'askida_uyari' => 'Bu hesap askıya alınmış. Panel erişimi kapalı; ayrıntı için destek ekibiyle iletişime geçin.',
+    'ssl_var' => 'SSL etkin',
+    'ssl_yok' => 'SSL yok',
+    'yeni_sekme' => 'Yeni sekmede açılır',
+    'bayi_paneli' => 'Bayi paneline git',
+    'kullanim_baslik' => 'Kaynak kullanımı',
+    'hesap_bilgileri' => 'Hesap bilgileri',
+    'giris_ipucu' => 'Panele ve FTP\'ye kullanıcı adı olarak FTP kullanıcısını, parola olarak hizmet parolanızı kullanın.',
+    'parola_kapsam' => 'Bu parola panel girişi ve FTP için geçerlidir.',
 ];

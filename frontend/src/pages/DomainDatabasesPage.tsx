@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api, apiHata, UZUN_ISTEK } from '@/lib/api'
 import { hataYakala } from '@/lib/hata'
-import { Button } from '@/components/ui'
+import { Button, Toggle } from '@/components/ui'
 import Breadcrumb from '@/components/Breadcrumb'
 import Modal from '@/components/Modal'
 import { T } from '@/lib/tablo'
@@ -75,6 +75,13 @@ const DB_EN: Record<string, string> = {
   "Bunu Ayarla": "Set This",
   "Parola Sıfırla — {0}": "Reset Password — {0}",
   "Bunu güvenli bir yere kaydedin. Sonra göremezsiniz:": "Save this somewhere safe. You won't be able to see it later:",
+  "Yalnız panel kaydını güncelle (MySQL parolası değişmez)": "Update the panel record only (MySQL password is not changed)",
+  "Parola panel dışından değiştirildiyse (ör. uygulama kurulumu sırasında) uygulamanın yapılandırma dosyasındaki MEVCUT parolayı girin (XenForo: src/config.php, WordPress: wp-config.php). Panel parolayı MySQL'de doğrular ve yalnız kendi kaydını günceller — site etkilenmez.": "If the password was changed outside the panel (e.g. during an application install), enter the CURRENT password from the application's configuration file (XenForo: src/config.php, WordPress: wp-config.php). The panel verifies it against MySQL and updates only its own record — the site is not affected.",
+  "Panel Kaydını Güncelle — {0}": "Update Panel Record — {0}",
+  "Mevcut parola": "Current password",
+  "Mevcut parolayı girin": "Enter the current password",
+  "Doğrula ve Kaydet": "Verify and Save",
+  "Panel kaydı güncellendi": "Panel record updated",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DB_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -368,7 +375,7 @@ function SonucSatir({ e, v }: { e: string; v: string }) {
 }
 
 // PwResetModal — DB parolasını sıfırlar (rastgele/özel). Detay sayfası da kullanır.
-export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => void; onTamam: () => void }) {
+export function PwResetModal({ db, onKapat, onTamam, yalnizKayitIle = false }: { db: DB; onKapat: () => void; onTamam: () => void; yalnizKayitIle?: boolean }) {
   const toast = useToast()
   const [ozelPw, setOzelPw] = useState('')
   const [isleniyor, setIsleniyor] = useState(false)
@@ -379,10 +386,16 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
   // ve bu durumda kullanici olusturmanin HICBIR yolu yoktu (site baglanamiyordu).
   const kullaniciYok = !db.db_kullanici
   const [yeniKullanici, setYeniKullanici] = useState('')
+  // 🔴 Yalnız panel kaydı: parola panel dışından değiştiğinde (kayıt bayat → phpMyAdmin
+  // "Access denied", 2026-10-12 .180) MariaDB'ye DOKUNMADAN kaydı MEVCUT parolaya eşitler.
+  // "Parola Sıfırla" (ALTER USER) çalışan sitenin yapılandırmasındaki parolayı geçersiz kılardı.
+  const [yalnizKayit, setYalnizKayit] = useState(yalnizKayitIle && !kullaniciYok)
+  const asgari = yalnizKayit ? 1 : 6
 
   async function sifirla() {
-    if (ozelPw.length < 6) {
-      setHata(cevir("Parola en az 6 karakter olmalı")); toast.hata(cevir("Parola en az 6 karakter olmalı"))
+    if (ozelPw.length < asgari) {
+      const m = cevir(yalnizKayit ? "Mevcut parolayı girin" : "Parola en az 6 karakter olmalı")
+      setHata(m); toast.hata(m)
       return
     }
     if (kullaniciYok && !yeniKullanici.trim()) {
@@ -391,10 +404,11 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
     }
     setIsleniyor(true); setHata(null)
     try {
-      const body: Record<string, string> = { parola: ozelPw }
+      const body: Record<string, string | boolean> = { parola: ozelPw }
       if (kullaniciYok) body.kullanici = yeniKullanici.trim()
+      if (yalnizKayit) body.yalniz_kayit = true
       await api.put(`/databases/${db.id}/password`, body)
-      toast.basari(cevir(kullaniciYok ? "Kullanıcı oluşturuldu" : "Parola güncellendi"))
+      toast.basari(cevir(kullaniciYok ? "Kullanıcı oluşturuldu" : yalnizKayit ? "Panel kaydı güncellendi" : "Parola güncellendi"))
       onTamam()
     } catch (e) {
       const m = apiHata(e, cevir("Sıfırlama başarısız")); setHata(m); toast.hata(cevir("İşlem başarısız"), m)
@@ -404,11 +418,11 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
   }
 
   return (
-    <Modal acik={true} baslik={cevirT(cevir(kullaniciYok ? "Kullanıcı Oluştur — {0}" : "Parola Sıfırla — {0}"), db.db_adi)} onKapat={onKapat} genislik="md"
+    <Modal acik={true} baslik={cevirT(cevir(kullaniciYok ? "Kullanıcı Oluştur — {0}" : yalnizKayit ? "Panel Kaydını Güncelle — {0}" : "Parola Sıfırla — {0}"), db.db_adi)} onKapat={onKapat} genislik="md"
       kapatilamaz={isleniyor}
       alt={<>
         <Button onClick={onKapat} disabled={isleniyor} variant="outlined" ikon={I.kapat}>{cevir("İptal")}</Button>
-        <Button onClick={() => sifirla()} yukleniyor={isleniyor} disabled={ozelPw.length < 6} color="primary" ikon={kullaniciYok ? I.arti : I.disket}>{isleniyor ? cevir("Sıfırlanıyor…") : (kullaniciYok ? cevir("Oluştur") : cevir("Parolayı Güncelle"))}</Button>
+        <Button onClick={() => sifirla()} yukleniyor={isleniyor} disabled={ozelPw.length < asgari} color="primary" ikon={kullaniciYok ? I.arti : I.disket}>{isleniyor ? cevir("Sıfırlanıyor…") : (kullaniciYok ? cevir("Oluştur") : yalnizKayit ? cevir("Doğrula ve Kaydet") : cevir("Parolayı Güncelle"))}</Button>
       </>}>
         <div className="space-y-4">
           {kullaniciYok ? (
@@ -431,9 +445,22 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
               </div>
             </>
           ) : (
-            <div className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">
-              <strong className="font-mono">{db.db_kullanici}</strong>{cevir(" kullanıcısının parolası MariaDB ve panel'de eşzamanlı güncellenir.")}
-            </div>
+            <>
+              <label className="flex items-center gap-2.5 text-sm text-slate-700 dark:text-slate-300">
+                <Toggle acik={yalnizKayit} onDegis={setYalnizKayit} renk="brand" disabled={isleniyor}
+                  aria-label={cevir("Yalnız panel kaydını güncelle (MySQL parolası değişmez)")} />
+                <span>{cevir("Yalnız panel kaydını güncelle (MySQL parolası değişmez)")}</span>
+              </label>
+              {yalnizKayit ? (
+                <UyariKutusu ton="bilgi">
+                  {cevir("Parola panel dışından değiştirildiyse (ör. uygulama kurulumu sırasında) uygulamanın yapılandırma dosyasındaki MEVCUT parolayı girin (XenForo: src/config.php, WordPress: wp-config.php). Panel parolayı MySQL'de doğrular ve yalnız kendi kaydını günceller — site etkilenmez.")}
+                </UyariKutusu>
+              ) : (
+                <div className="text-sm text-slate-600 dark:text-slate-400 dark:text-slate-500">
+                  <strong className="font-mono">{db.db_kullanici}</strong>{cevir(" kullanıcısının parolası MariaDB ve panel'de eşzamanlı güncellenir.")}
+                </div>
+              )}
+            </>
           )}
           <div>
             <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 dark:text-slate-500 mb-1">{cevir("Parola")}</label>
@@ -441,7 +468,7 @@ export function PwResetModal({ db, onKapat, onTamam }: { db: DB; onKapat: () => 
               type="text"
               value={ozelPw}
               onChange={e => setOzelPw(e.target.value)}
-              placeholder={cevir("En az 6 karakter")}
+              placeholder={cevir(yalnizKayit ? "Mevcut parola" : "En az 6 karakter")}
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md text-sm font-mono focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none"
             />
           </div>

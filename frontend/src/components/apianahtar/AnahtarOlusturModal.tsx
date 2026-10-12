@@ -13,6 +13,8 @@ import { cevir, cevirT } from './ceviri'
 type Erisim = '' | 'oku' | 'yaz'
 
 const GUNLER = [30, 90, 180, 365, 730]
+// Seçicide "Süresiz" değeri (sunucuya suresiz:true gider).
+const SURESIZ = -1
 
 export default function AnahtarOlusturModal({ acik, katalog, onKapat, onOlusturuldu }: {
   acik: boolean
@@ -48,12 +50,14 @@ export default function AnahtarOlusturModal({ acik, katalog, onKapat, onOlusturu
     if (!ad.trim()) return setHata(cevir('Anahtar adı zorunlu.'))
     if (izinler.length === 0) return setHata(cevir('En az bir izin seçin.'))
     if (ipZorunlu && ipler.length === 0) return setHata(cevir('Kök anahtarında en az bir izinli IP zorunludur.'))
+    const suresiz = gun === SURESIZ
+    if (suresiz && ipler.length === 0) return setHata(cevir('Süresiz anahtarda en az bir izinli IP zorunludur.'))
     if (!parola) return setHata(cevir('Parolanızı girin.'))
     if (kodGerekli && !kod.trim()) return setHata(cevir('İki aşamalı doğrulama kodunu girin.'))
     setGonderiliyor(true)
     try {
       const y = await anahtarOlustur({
-        ad: ad.trim(), izinler, izinli_ipler: ipler, son_kullanma_gun: gun,
+        ad: ad.trim(), izinler, izinli_ipler: ipler, son_kullanma_gun: suresiz ? 0 : gun, suresiz,
         hiz_dk: parseInt(hiz, 10) || 0, parola, kod: kod.trim() || undefined,
       })
       setParola(''); setKod('')
@@ -147,7 +151,8 @@ export default function AnahtarOlusturModal({ acik, katalog, onKapat, onOlusturu
           />
           <p className="mt-1 text-xs text-slate-500 dark:text-dark-300">
             {cevir('Her satıra bir IP ya da CIDR (ör. 203.0.113.10 ya da 203.0.113.0/24).')}{' '}
-            {ipZorunlu ? cevir('Kök anahtarında zorunludur.') : cevir('Boş bırakılırsa her IP\'den kullanılabilir (önerilmez).')}
+            {ipZorunlu ? cevir('Kök anahtarında zorunludur.') : cevir('Boş bırakılırsa her IP\'den kullanılabilir (önerilmez).')}{' '}
+            {cevir('Panelle aynı sunucudaki uygulama (ör. WHMCS) için sunucunun kendi IP\'sini yazmanız yeterlidir.')}
           </p>
         </div>
 
@@ -156,7 +161,10 @@ export default function AnahtarOlusturModal({ acik, katalog, onKapat, onOlusturu
             label={cevir('Geçerlilik süresi')}
             value={gun}
             onChange={(e) => setGun(parseInt(e.target.value, 10))}
-            data={gunler.map((g) => ({ value: g, label: cevirT('{0} gün', g) }))}
+            data={[
+              ...gunler.map((g) => ({ value: g, label: cevirT('{0} gün', g) })),
+              ...(katalog?.suresiz_destek ? [{ value: SURESIZ, label: cevir('Süresiz') }] : []),
+            ]}
           />
           <Input
             label={cevir('Hız sınırı (istek/dk)')}
@@ -167,6 +175,11 @@ export default function AnahtarOlusturModal({ acik, katalog, onKapat, onOlusturu
             onChange={(e) => setHiz(e.target.value)}
           />
         </div>
+        {gun === SURESIZ && (
+          <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-slate-700 dark:text-dark-100" data-testid="api-anahtar-suresiz-uyari">
+            {cevir('Süresiz anahtar hiç dolmaz; yalnız siz iptal edince geçersiz olur. Bu yüzden izinli IP listesi zorunludur. Kullanılmayan anahtarı iptal etmeyi ve anahtarı ara sıra yenilemeyi unutmayın.')}
+          </p>
+        )}
 
         <div className="rounded-lg border border-slate-200 p-3 dark:border-dark-600">
           <div className="mb-2 text-sm font-medium text-slate-700 dark:text-dark-100">{cevir('Kimliğinizi doğrulayın')}</div>

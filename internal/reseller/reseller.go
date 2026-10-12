@@ -22,7 +22,6 @@ import (
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kilit"
 	"girginospanel/internal/middleware"
-	"girginospanel/internal/plans"
 	"girginospanel/internal/toplu"
 
 	"github.com/go-chi/chi/v5"
@@ -178,14 +177,12 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	uid, kul := middleware.Aktor(r)
 	httpx.Denetim(h.DB, r, uid, kul, "bayi.olustur", req.Kullanici,
 		fmt.Sprintf("paket=%d domain=%d disk=%dMB", req.PaketID, req.MaxDomain, req.MaxDiskMB), id, true)
-	// Her bayinin kendi varsayılan hosting planı olur (plans.BayiVarsayilanSagla).
-	// Başarısızlık bayiyi geri almaz: açılış uzlaştırması (BayiVarsayilanUzlastir)
-	// ve plansız taşıma yolu aynı işlevi yeniden dener.
-	varsayilanPlan, _, perr := plans.BayiVarsayilanSagla(r.Context(), h.DB, id, uid, kul)
-	if perr != nil {
-		log.Printf("bayi %d varsayılan planı oluşturulamadı: %v", id, perr)
-	}
-	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "kullanici": req.Kullanici, "varsayilan_plan_id": varsayilanPlan})
+	// 🔴 Bayiye hosting planı AÇILMAZ (kullanıcı bildirimi 2026-10-12: "100 bayi = 100
+	// hosting planı"; eskiden plans.BayiVarsayilanSagla "<bayi> Varsayılan" yazıyordu).
+	// Kota/limitler yukarıda bayi kaydına yazıldı ve hosting açılışında uygulanır
+	// (domains.resellerKotaKontrol); bayi kökün paylaşılan planlarını ya da kendi
+	// açtığı planları kullanır. UI, WHMCS ve API anahtarı hepsi bu uçtan geçer.
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id, "kullanici": req.Kullanici})
 }
 
 type guncelleReq struct {

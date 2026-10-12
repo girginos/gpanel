@@ -28,4 +28,13 @@ return [
     'bayi_parola_not' => 'Reseller passwords are changed in the panel.',
     'hata_baslik' => 'Could not load account information',
     'btn_kullanim_yenile' => 'Refresh usage',
+    'askida_uyari' => 'This account is suspended. Panel access is disabled; please contact support for details.',
+    'ssl_var' => 'SSL active',
+    'ssl_yok' => 'No SSL',
+    'yeni_sekme' => 'Opens in a new tab',
+    'bayi_paneli' => 'Open reseller panel',
+    'kullanim_baslik' => 'Resource usage',
+    'hesap_bilgileri' => 'Account details',
+    'giris_ipucu' => 'Sign in to the panel and FTP with the FTP user as the username and your service password.',
+    'parola_kapsam' => 'This password is used for panel login and FTP.',
 ];

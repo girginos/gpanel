@@ -16,6 +16,7 @@ import { UyariKutusu } from '@/components/UyariKutusu'
 import EmptyState from '@/components/EmptyState'
 import { TASIMA_TABAN, useTasimaKaynaklari, type TasimaKaynak } from '@/lib/tasima'
 import { useRol, yoneticiMi } from '@/lib/rol'
+import { planListesiYolu } from '@/lib/bayiPlan'
 import { ArsivGirdiKart, ArsivOzetKart, type ArsivGirdi } from '@/components/tasima/ArsivKaynak'
 import { kesifBilgiAyikla, type ArsivKesifBilgi } from '@/lib/tasimaYukle'
 
@@ -492,13 +493,30 @@ export default function SiteTasimaPage() {
   // bayinin varsayılan katalog planını çözer); kökte ilk plan seçili gelir.
   useEffect(() => {
     let iptal = false
-    api.get<Plan[]>('/plans').then(r => { if (iptal) return; const l = r.data || []; setPlanlar(l); if (yonetici && l.length) setPlanID(p => p || l[0].id) }).catch(e => { if (!iptal) hataYakala(cevir("Planlar yüklenemedi"))(e) })
     if (yonetici) {
       api.get<Bayi[]>('/resellers').then(r => { if (iptal) return; setBayiler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Bayiler yüklenemedi"))(e) })
       api.get<Musteri[]>('/customers').then(r => { if (iptal) return; setMusteriler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("Müşteriler yüklenemedi"))(e) })
     }
     return () => { iptal = true }
   }, [yonetici])
+  // Plan listesi: kökün /plans'i yalnız kökün planlarıdır; hedef bayi seçilince o bayinin
+  // seçebildiği katalog (kendi + paylaşılan) gelir (planListesiYolu). Seçili plan yeni
+  // listede yoksa ilk plana döner; kökte ilk yüklemede ilk plan seçili gelir, sonradan
+  // bilerek seçilen "Plansız" korunur.
+  const planIlkAtandi = useRef(false)
+  useEffect(() => {
+    let iptal = false
+    api.get<Plan[]>(planListesiYolu(yonetici ? resellerID : 0)).then(r => {
+      if (iptal) return
+      const l = r.data || []
+      setPlanlar(l)
+      if (!yonetici) return
+      const ilk = !planIlkAtandi.current
+      planIlkAtandi.current = true
+      setPlanID(p => (p > 0 ? (l.some(x => x.id === p) ? p : (l[0]?.id ?? 0)) : (ilk ? (l[0]?.id ?? 0) : 0)))
+    }).catch(e => { if (!iptal) hataYakala(cevir("Planlar yüklenemedi"))(e) })
+    return () => { iptal = true }
+  }, [yonetici, resellerID])
 
   // Çalışan işi izle (2sn polling).
   useEffect(() => {

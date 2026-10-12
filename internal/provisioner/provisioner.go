@@ -95,8 +95,21 @@ func Init(d *sql.DB) {
 	ensureHTTPDHomeBooleans()          // Batch5A: httpd_enable_homedirs + httpd_read_user_content (yoksa home'dan site 404)
 	HealSSLCertPathsOnStartup()        // Batch5A: home'daki SSL cert'lerini /etc/pki/girginospanel'e taşı (Enforcing'de nginx okuyabilsin)
 	HealSSLVhost443OnStartup()         // SSL teardown fix: 443 bloğu düşmüş / cert'i silinmiş SSL domain'leri onar (LE>self-signed), 443 daima dinlesin
-	EnsureTenantFPMOnStartup()         // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
-	HealWAFOnStartup()                 // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
+	// Kafesli havuzların sendmail_path'i bu betiği gösterir → havuzlar (EnsureTenantFPMOnStartup drift
+	// onarımı) yazılmadan ÖNCE betik yerinde olmalı. Kurulamazsa mail() "bulunamadı" ile yine hızlı düşer.
+	if err := MailYasakKur(); err != nil {
+		log.Printf("mail yasağı betiği kurulamadı: %v", err)
+	}
+	// Eski sürümün kafeste bıraktığı yetim postdrop'lar kendiliğinden ölmez (10 sn'de bir journal'a
+	// yazmayı sonsuza dek sürdürür). Havuz drift onarımından (reload) önce bir kez temizle.
+	if n := mailTakiliPostdropOldur(); n > 0 {
+		log.Printf("kafeste takılı postdrop sonlandırıldı: %d süreç (eski mail() hatasının artığı)", n)
+	}
+	// Paylaşılan master / alt alan havuzlarının MEVCUT dosyaları (şablonlar yalnız yeni yazımları kapsar;
+	// HealVhostsOnStartup tek seferlik). Arka planda: php-fpm -t + reload saniyeler sürebilir.
+	MailYasakHavuzlariniKapatOnStartup()
+	EnsureTenantFPMOnStartup() // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
+	HealWAFOnStartup()         // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -890,8 +903,9 @@ server {
 // verilir → kullanici PHP kodu ini_set/php_value ile EZEMEZ. open_basedir dosya
 // erisimini tenant home + /tmp ile sinirlar (baska tenant/sistem dosyalarini okuyamaz).
 // disable_functions komut yurutme + surec kontrol + symlink fonksiyonlarini kapatir
-// (mail acik birakilir; wp_mail vb. bozulmaz).
-var phpPoolTmpl = template.Must(template.New("p").Funcs(template.FuncMap{"aclSatiri": aclSatiri}).Parse(`[{{.User}}]
+// Duz mail() KAPALI: sendmail_path hizli-basarisiz betige yonlendirilir (bkz. mail_yasak.go) —
+// musteri SMTP kullanir (WordPress SMTP eklentisi vb.); ele gecirilmis site posta basamaz.
+var phpPoolTmpl = template.Must(template.New("p").Funcs(template.FuncMap{"aclSatiri": aclSatiri, "mailYasakSatiri": MailYasakPoolSatiri}).Parse(`[{{.User}}]
 user = {{.User}}
 group = {{.User}}
 listen = {{.Socket}}
@@ -906,6 +920,7 @@ pm.max_requests = 500
 ; ---- Guvenlik sertlestirmesi (php_admin_* → kullanici ini_set ile EZEMEZ) ----
 php_admin_value[open_basedir] = /home/{{.User}}/:/tmp/
 php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,proc_close,proc_get_status,proc_terminate,proc_nice,pcntl_exec,dl,symlink,link,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,posix_setgid
+{{mailYasakSatiri}}
 php_admin_value[upload_tmp_dir] = /home/{{.User}}/tmp
 php_admin_value[sys_temp_dir] = /home/{{.User}}/tmp
 php_admin_value[session.save_path] = /home/{{.User}}/tmp
@@ -1143,7 +1158,7 @@ func renderAndReload(opts VhostOpts, sk string) error {
 	// (nginx→httpd:10080) Apache vhost'unun SetHandler socket'i override EDİLMİYORDU → per-tenant
 	// FPM unit'i vhost render anında henüz yoksa (enable ile vhost-render race'i) Apache remi
 	// varsayılan socket'ine (/var/opt/remi/phpXX/run/php-fpm/<sk>.sock) yazıp o socket hiç
-	// oluşmadığından 503 veriyordu (islam-tr.org canlı olayı). Artık her backend'de zorlanır →
+	// oluşmadığından 503 veriyordu (bir müşteri sitesindeki canlı olay). Artık her backend'de zorlanır →
 	// sonraki her render (SSL/repair/setphp) self-heal eder.
 	if TenantFPMActive(sk) {
 		opts.PHPSocket = tenantSocket(sk)

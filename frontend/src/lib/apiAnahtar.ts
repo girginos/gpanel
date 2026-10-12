@@ -45,6 +45,8 @@ export interface Katalog {
   ip_zorunlu: boolean
   varsayilan_gun: number
   maks_gun: number
+  // Süresiz geçerlilik destekleniyor mu (eski panel: alan yok → seçenek gösterilmez).
+  suresiz_destek?: boolean
   varsayilan_hiz: number
   min_hiz: number
   maks_hiz: number
@@ -56,6 +58,8 @@ export interface OlusturGovde {
   izinler: string[]
   izinli_ipler: string[]
   son_kullanma_gun: number
+  // true: bitiş YOK (yalnız iptalle geçersizleşir); süresizde IP listesi zorunlu.
+  suresiz?: boolean
   hiz_dk: number
   parola: string
   kod?: string

@@ -7,7 +7,7 @@ test('sso: admin ve musteri — POST /domains/{id}/sso, redirectTo panel adresi'
     foreach (['gpanel_ServiceSingleSignOn', 'gpanel_AdminSingleSignOn'] as $f) {
         $r = $f(params());
         esit(true, $r['success'], $f);
-        esit('https://panel.example.test:8443/#SSOKOD-ONCE-1234567890', $r['redirectTo']);
+        esit('https://panel.example.test:8443/adina#kod=SSOKOD-ONCE-1234567890', $r['redirectTo']);
     }
     esit(2, $p->sayac('POST /domains/{id}/sso'));
     esit('/domains/' . $d['id'] . '/sso', $p->istekler[0]['yol']);
@@ -72,6 +72,53 @@ test('sso: panelin dondurdugu adres dogrulanir (http, baska host, userinfo redde
         dogru(!isset($r['redirectTo']), $mod);
         icermez(json_encode($r), 'SSOKOD');
     }
+});
+
+test('sso: Panel adresi girilmisse yonlendirme HER ZAMAN oraya + #kod (panelin bildirdigi ad yok sayilir)', function () {
+    foreach (['', 'url_baska', 'url_alt'] as $mod) {
+        $d = bagliHosting($p);
+        $p->ssoModu = $mod;
+        foreach (['gpanel_ServiceSingleSignOn', 'gpanel_AdminSingleSignOn'] as $f) {
+            $r = $f(params(['configoption7' => 'https://musteri.example.test:9443/']));
+            esit(true, $r['success'], "$mod $f");
+            esit('https://musteri.example.test:9443/adina#kod=SSOKOD-ONCE-1234567890', $r['redirectTo'], "$mod $f");
+        }
+    }
+});
+
+test('sso: Panel adresi yolu (/alt/) kokene indirgenir; IPv6 koken; panelin yolu korunur', function () {
+    $d = bagliHosting($p);
+    $r = gpanel_ServiceSingleSignOn(params(['configoption7' => 'https://musteri.example.test:9443/alt/yol?x=1']));
+    esit('https://musteri.example.test:9443/adina#kod=SSOKOD-ONCE-1234567890', $r['redirectTo']);
+    $r = gpanel_ServiceSingleSignOn(params(['configoption7' => 'https://[2001:db8::5]:9443/']));
+    esit('https://[2001:db8::5]:9443/adina#kod=SSOKOD-ONCE-1234567890', $r['redirectTo']);
+});
+
+test('sso: Panel adresi girilmis olsa da panelin http/userinfo/kodsuz adresi reddedilir; gecersiz Panel adresi hata', function () {
+    foreach (['url_http', 'url_user', 'url_kodsuz'] as $mod) {
+        $d = bagliHosting($p);
+        $p->ssoModu = $mod;
+        $r = gpanel_ServiceSingleSignOn(params(['configoption7' => 'https://musteri.example.test:9443/']));
+        esit(false, $r['success'], $mod);
+        dogru(!isset($r['redirectTo']), $mod);
+        icermez(json_encode($r), 'SSOKOD');
+        $r = gpanel_AdminSingleSignOn(params(['configoption7' => 'https://musteri.example.test:9443/']));
+        icerir($r['errorMsg'] ?? '', 'geçerli bir giriş adresi', $mod);
+    }
+    $d = bagliHosting($p);
+    $r = gpanel_AdminSingleSignOn(params(['configoption7' => 'http://musteri.example.test:9443/']));
+    esit(false, $r['success']);
+    icerir($r['errorMsg'], 'Panel adresi');
+    icermez(json_encode($r), 'SSOKOD');
+});
+
+test('sso: ana bilgisayar adi "_" donen panel + Panel adresi YOK -> reddedilir, mesaj Panel adresi ayarini onerir', function () {
+    $d = bagliHosting($p);
+    $p->ssoModu = 'url_alt';
+    $r = gpanel_AdminSingleSignOn(params());
+    esit(false, $r['success']);
+    icerir($r['errorMsg'], "'Panel adresi'");
+    icermez(json_encode($r), 'SSOKOD');
 });
 
 test('sso: bagli olmayan hizmet hata; bayi urununde SSO yok, musteri duz baglanti (panel adresi varsa)', function () {

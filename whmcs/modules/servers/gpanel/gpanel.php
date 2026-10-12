@@ -13,6 +13,7 @@ if (!defined('WHMCS')) {
     die('This file cannot be accessed directly');
 }
 
+require_once __DIR__ . '/lib/Ceviri.php';
 require_once __DIR__ . '/lib/ApiHatasi.php';
 require_once __DIR__ . '/lib/Yardimci.php';
 require_once __DIR__ . '/lib/ApiIstemci.php';
@@ -20,6 +21,7 @@ require_once __DIR__ . '/lib/Kayit.php';
 require_once __DIR__ . '/lib/Modul.php';
 
 use GirginOSPanel\WHMCS\ApiIstemci;
+use GirginOSPanel\WHMCS\Ceviri;
 use GirginOSPanel\WHMCS\Modul;
 use GirginOSPanel\WHMCS\Yardimci;
 
@@ -34,8 +36,8 @@ function gpanel_MetaData()
         'RequiresServer' => true,
         'DefaultNonSSLPort' => '8080',
         'DefaultSSLPort' => '8443',
-        'ServiceSingleSignOnLabel' => 'Panele Giriş Yap',
-        'AdminSingleSignOnLabel' => 'Panele Giriş (Yönetici)',
+        'ServiceSingleSignOnLabel' => Ceviri::t('Panele Giriş Yap'),
+        'AdminSingleSignOnLabel' => Ceviri::t('Panele Giriş (Yönetici)'),
     ];
 }
 
@@ -70,58 +72,58 @@ function gpanel_ConfigOptions(array $params = [])
 
     return [
         'urun_tipi' => [
-            'FriendlyName' => 'Ürün tipi',
+            'FriendlyName' => Ceviri::t('Ürün tipi'),
             'Type' => 'dropdown',
-            'Options' => ['hosting' => 'Hosting hesabı', 'bayi' => 'Bayi (reseller) hesabı'],
+            'Options' => ['hosting' => Ceviri::t('Hosting hesabı'), 'bayi' => Ceviri::t('Bayi (reseller) hesabı')],
             'Default' => 'hosting',
-            'Description' => 'Bayi ürünü için API anahtarı KÖK kullanıcıya ait olmalı ve "bayi" iznine sahip olmalı.',
+            'Description' => Ceviri::t('Bayi ürünü için API anahtarı KÖK kullanıcıya ait olmalı ve "bayi" iznine sahip olmalı.'),
         ],
         'plan' => [
-            'FriendlyName' => 'Panel planı (hosting)',
+            'FriendlyName' => Ceviri::t('Panel planı (hosting)'),
             'Type' => 'text',
             'Size' => '25',
             'Loader' => static function (array $params) use ($yukle) {
                 return $yukle($params, 'plan');
             },
             'SimpleMode' => true,
-            'Description' => 'Plan ID ya da tam adı. Boşsa panelin varsayılan planı.',
+            'Description' => Ceviri::t('Plan ID ya da tam adı. Boşsa panelin varsayılan planı.'),
         ],
         'php' => [
-            'FriendlyName' => 'PHP sürümü',
+            'FriendlyName' => Ceviri::t('PHP sürümü'),
             'Type' => 'text',
             'Size' => '8',
-            'Description' => 'Örn. 8.3. Boşsa plandan/panelden miras.',
+            'Description' => Ceviri::t('Örn. 8.3. Boşsa plandan/panelden miras.'),
         ],
         'bayi_paketi' => [
-            'FriendlyName' => 'Bayi paketi (bayi ürünü)',
+            'FriendlyName' => Ceviri::t('Bayi paketi (bayi ürünü)'),
             'Type' => 'text',
             'Size' => '25',
             'Loader' => static function (array $params) use ($yukle) {
                 return $yukle($params, 'paket');
             },
             'SimpleMode' => true,
-            'Description' => 'Bayi paketi ID ya da tam adı (yalnız Ürün tipi = Bayi).',
+            'Description' => Ceviri::t('Bayi paketi ID ya da tam adı (yalnız Ürün tipi = Bayi).'),
         ],
         'sql_olustur' => [
-            'FriendlyName' => 'Varsayılan veritabanı aç',
+            'FriendlyName' => Ceviri::t('Varsayılan veritabanı aç'),
             'Type' => 'yesno',
-            'Description' => 'Hesapla birlikte bir MariaDB veritabanı oluştur.',
+            'Description' => Ceviri::t('Hesapla birlikte bir MariaDB veritabanı oluştur.'),
         ],
         'tls_dogrulama_kapali' => [
-            'FriendlyName' => 'TLS doğrulamasını KAPAT',
+            'FriendlyName' => Ceviri::t('TLS doğrulamasını KAPAT'),
             'Type' => 'yesno',
-            'Description' => 'DİKKAT: kendi imzalı sertifikada araya girme (MITM) saldırısına açar; API anahtarı ele geçirilebilir. Yalnız güvenilir ağda ve geçici olarak kullanın. Sunucu ayarında Access Hash = tls-dogrulama-kapali de aynı işi yapar.',
+            'Description' => Ceviri::t('DİKKAT: kendi imzalı sertifikada araya girme (MITM) saldırısına açar; API anahtarı ele geçirilebilir. Yalnız güvenilir ağda ve geçici olarak kullanın. Sunucu ayarında Access Hash = tls-dogrulama-kapali de aynı işi yapar.'),
         ],
         'panel_adresi' => [
-            'FriendlyName' => 'Panel adresi (isteğe bağlı)',
+            'FriendlyName' => Ceviri::t('Panel adresi (isteğe bağlı)'),
             'Type' => 'text',
             'Size' => '40',
-            'Description' => 'https://panel.ornek.com:PORT/ — müşteri/bayi kapısı. SSO yokken düz bağlantı olarak kullanılır; bayi ürününde zorunludur.',
+            'Description' => Ceviri::t('https://panel.ornek.com:PORT/ — müşteri/bayi kapısı. SSO yokken düz bağlantı olarak kullanılır; bayi ürününde zorunludur.'),
         ],
         'mevcut_bagla' => [
-            'FriendlyName' => 'Mevcut hesabı bağla',
+            'FriendlyName' => Ceviri::t('Mevcut hesabı bağla'),
             'Type' => 'yesno',
-            'Description' => 'Panelde zaten var olan alan adı/bayi bulunursa hizmete BAĞLA. Kapalıyken (önerilen) başka müşterinin hesabını devralma engellenir.',
+            'Description' => Ceviri::t('Panelde zaten var olan alan adı/bayi bulunursa hizmete BAĞLA. Kapalıyken (önerilen) başka müşterinin hesabını devralma engellenir.'),
         ],
     ];
 }
@@ -173,12 +175,11 @@ function gpanel_UsageUpdate(array $params)
 /** Sunucular sayfasındaki "Panele git" düğmesi. */
 function gpanel_AdminLink(array $params)
 {
-    $host = trim((string) ($params['serverhostname'] ?? '')) ?: trim((string) ($params['serverip'] ?? ''));
-    $port = (int) ($params['serverport'] ?? 0);
-    if (!Yardimci::hostGecerli($host) || $port < 1) {
+    $a = Yardimci::sunucuAdresi($params);
+    if (!Yardimci::hostGecerli($a['host']) || $a['port'] < 1) {
         return '';
     }
-    $url = Yardimci::tabanUrl($host, $port) . '/';
+    $url = Yardimci::tabanUrl($a['host'], $a['port']) . '/';
     return '<form action="' . Yardimci::esc($url) . '" method="get" target="_blank" rel="noopener">'
         . '<input type="submit" class="btn btn-default btn-sm" value="GirginOSPanel" /></form>';
 }

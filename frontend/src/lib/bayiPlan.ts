@@ -70,6 +70,17 @@ export function mbOkunur(mb: number): string {
   return `${mb.toLocaleString()} MB`
 }
 
+/**
+ * Plan listesi ucu. Sunucu herkese KENDİ planlarını döner: kök yalnız kökün planlarını,
+ * bayi kendi planlarını + kökün paylaşılan planlarını görür (bayi planları kökün
+ * listesini kalabalıklaştırmaz). Yönetici bir BAYİNİN hostingi/taşıması için çalışırken
+ * o bayinin gördüğü katalog gerekir: ?bayi=<id>. Bayi oturumunda sunucu ?bayi='yi yok
+ * sayar (kendi kapsamı dışına çıkamaz) — bu yüzden her rolde güvenle çağrılır.
+ */
+export function planListesiYolu(bayiID?: number | null): string {
+  return bayiID && bayiID > 0 ? `/plans?bayi=${bayiID}` : '/plans'
+}
+
 type SecilebilirPlan = { id: number; ad: string; varsayilan?: boolean; duzenlenebilir?: boolean }
 
 /**

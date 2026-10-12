@@ -57,66 +57,9 @@ func TestKokAlanlari_TekKaynak(t *testing.T) {
 	}
 }
 
-func TestHavuzPayi_Kural(t *testing.T) {
-	for _, c := range []struct {
-		ad              string
-		sablon          int
-		havuz           int64
-		hak             int
-		fazla           bool
-		yedek, beklenen int
-	}{
-		{"havuz sinirsiz, sablon var", 10240, 0, 5, false, 1024, 10240},
-		{"havuz sinirsiz, sablon sinirsiz -> tohum", 0, 0, 5, false, 1024, 1024},
-		{"sablon paydan buyuk -> pay", 10240, 10000, 5, false, 1024, 1999},
-		{"sablon paydan kucuk -> sablon", 1000, 10000, 5, false, 1024, 1000},
-		{"sablon sinirsiz -> pay", 0, 10000, 5, false, 1024, 1999},
-		{"hak sinirsiz -> havuz-1", 50000, 10000, 0, false, 1024, 9999},
-		{"tek hak -> havuz-1 (sinira ulasmak dolu)", 50000, 10000, 1, false, 1024, 9999},
-		{"fazla satis -> sablon", 10240, 10000, 5, true, 1024, 10240},
-		{"fazla satis, sablon sinirsiz -> pay", 0, 10000, 5, true, 1024, 1999},
-		{"cok kucuk havuz -> en az 1", 100, 3, 5, false, 1024, 1},
-	} {
-		if g := havuzPayi(c.sablon, c.havuz, c.hak, c.fazla, c.yedek); g != c.beklenen {
-			t.Errorf("%s: havuzPayi=%d, beklenen %d", c.ad, g, c.beklenen)
-		}
-		// Hakkın tamamı bu planla açılınca taahhüt havuzun ALTINDA kalır (fazla satış hariç).
-		if !c.fazla && c.havuz > 1 && c.hak > 0 {
-			g := havuzPayi(c.sablon, c.havuz, c.hak, c.fazla, c.yedek)
-			if int64(g)*int64(c.hak) >= c.havuz && g > 1 {
-				t.Errorf("%s: %d hak × %d MB = havuz %d'e ulaşıyor", c.ad, c.hak, g, c.havuz)
-			}
-		}
-	}
-}
-
-func TestBayiVarsayilanDegerler_SablonVeTavan(t *testing.T) {
-	sablon := Plan{Ad: "Standart", DiskKotaMB: 10240, TrafikKotaMB: 51200, CPUYuzde: 150, RAMMB: 2048, PHPSurum: "8.2",
-		MaxDomain: 5, MaxDB: 10, MaxFTP: 10, MaxEmail: 0, SaatlikMailLimiti: 500, MailKutuKotaMB: 0,
-		IOReadMBps: 40, DBMaxQuerySeconds: 30, MaxProcess: 999, NginxEkDirektifler: "# KOK", WafEnabled: true, WafMode: "detect"}
-	p := bayiVarsayilanDegerler(sablon, bayiHavuz{MaxDomain: 5, MaxDiskMB: 10000, MaxTrafikMB: 50000,
-		MailMaxEmail: 10, MailSaatlik: 100, MailKutuMB: 0})
-	if p.DiskKotaMB != 1999 || p.TrafikKotaMB != 9999 {
-		t.Errorf("disk/trafik payı: %d/%d", p.DiskKotaMB, p.TrafikKotaMB)
-	}
-	if p.CPUYuzde != 150 || p.RAMMB != 2048 || p.PHPSurum != "8.2" || p.MaxDB != 10 || p.MaxFTP != 10 || p.MaxDomain != 5 {
-		t.Errorf("özet alanlar şablondan alınmadı: %+v", p)
-	}
-	if p.MaxEmail != 10 || p.SaatlikMailLimiti != 100 || p.MailKutuKotaMB != 0 {
-		t.Errorf("posta tavanı: %d/%d/%d", p.MaxEmail, p.SaatlikMailLimiti, p.MailKutuKotaMB)
-	}
-	// Kök iç ayarları şablondan ALINMAZ (GL-06).
-	v := panelVarsayilanPlan()
-	if p.IOReadMBps != 0 || p.DBMaxQuerySeconds != 0 || p.MaxProcess != v.MaxProcess || p.NginxEkDirektifler != "" || p.WafEnabled || p.WafMode != "on" {
-		t.Errorf("kök iç ayarı şablondan sızdı: %+v", p)
-	}
-	// Şablon boş (tohum yok) → panel varsayılanları, disk/trafik tohum.
-	b := bayiVarsayilanDegerler(Plan{}, bayiHavuz{})
-	if b.DiskKotaMB <= 0 || b.TrafikKotaMB <= 0 || b.CPUYuzde <= 0 || b.RAMMB <= 0 || b.PHPSurum == "" {
-		t.Errorf("boş şablon: %+v", b)
-	}
-}
-
+// Eski otomatik planın ad imzası (temizlik yalnız bunu tanır): "<bayi> Varsayılan",
+// çakışmada " #<rid>" / " #<rid>-<n>". Bayinin yeniden adlandırdığı plan, başka
+// bayinin adı ya da benzer ad imza DEĞİLDİR.
 func TestVarsayilanPlanAdi(t *testing.T) {
 	if g := varsayilanPlanAdi("bayia", 7, 0); g != "bayia Varsayılan" {
 		t.Errorf("ad: %q", g)
@@ -132,6 +75,26 @@ func TestVarsayilanPlanAdi(t *testing.T) {
 		g := varsayilanPlanAdi(uzun, 123456, d)
 		if utf8.RuneCountInString(g) > 64 || !strings.Contains(g, "Varsayılan") {
 			t.Errorf("uzun ad (%d): %q", d, g)
+		}
+	}
+	for _, c := range []struct {
+		ad, kul string
+		rid     int64
+		imza    bool
+	}{
+		{"bayia Varsayılan", "bayia", 7, true},
+		{"bayia Varsayılan #7", "bayia", 7, true},
+		{"bayia Varsayılan #7-2", "bayia", 7, true},
+		{"bayia Varsayılan #7-3", "bayia", 7, true},
+		{"bayia Varsayılan #7-4", "bayia", 7, false}, // eski kod en çok 4 deneme yapardı
+		{"bayia Varsayılan #8", "bayia", 7, false},   // başka bayinin kimliği
+		{"bayib Varsayılan", "bayia", 7, false},      // başka bayinin adı
+		{"bayia varsayılan", "bayia", 7, false},      // bayi yeniden adlandırmış
+		{"bayia Varsayılan Plan", "bayia", 7, false},
+		{"Başlangıç", "bayia", 7, false},
+	} {
+		if g := otomatikAdMi(c.ad, c.kul, c.rid); g != c.imza {
+			t.Errorf("otomatikAdMi(%q, %q, %d) = %v, beklenen %v", c.ad, c.kul, c.rid, g, c.imza)
 		}
 	}
 }

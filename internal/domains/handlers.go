@@ -1352,8 +1352,10 @@ func (h *Handlers) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "DB kaydı bulunamadı")
 		return
 	}
-	// Rota seviyesinde {id} domain param'i yok → sahiplik BURADA dogrulanir.
-	if !middleware.YonetimSahibi(r, domainID) {
+	// Rota seviyesinde {id} domain param'i yok → sahiplik BURADA da dogrulanir
+	// (rota: DBSahipligiMusteri). Kok her DB'de, bayi kendi hosting hesaplarinda,
+	// hosting sahibi (musteri) KENDI domaininin DB'sinde.
+	if !middleware.DomainSahibiMi(r, domainID) {
 		httpx.WriteError(w, http.StatusForbidden, "bu veritabanına erişiminiz yok")
 		return
 	}
@@ -1367,7 +1369,7 @@ func (h *Handlers) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
 	// 🔴 Eskiden "başka satırda yok" (paylasim=0) yetiyordu: yedekten kurtarılan wp-config ile
 	// satıra yazdırılmış "roundcube"/"pma"/"pureftpd" ya da komşunun kayıtsız kullanıcısı
 	// DROP USER ile düşüyordu (sunucu geneli webmail/phpMyAdmin/FTP kesintisi).
-	if err := hesaplar.MySQLDropDBSahipli(h.DB, domainID, dbName, dbUser); err != nil {
+	if err := dbSilSahipli(h.DB, domainID, dbName, dbUser); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB silme: "+err.Error())
 		return
 	}

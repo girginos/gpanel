@@ -9,7 +9,7 @@ namespace GirginOSPanel\WHMCS;
 
 final class Yardimci
 {
-    public const SURUM = '1.0.0';
+    public const SURUM = '1.0.3';
 
     /** Degeri HER ZAMAN maskelenen alan adlari (kucuk harf). */
     private const GIZLI_ANAHTARLAR = [
@@ -110,24 +110,121 @@ final class Yardimci
     /**
      * Panelin parola kurali (internal/hesaplar ParolaGucluMu + api_parola.go):
      * en az 12, en cok 128 karakter, en az bir harf ve bir rakam, satir sonu yok.
-     * Gecerliyse null, degilse Turkce neden.
+     * Gecerliyse null, degilse neden (Ceviri: yonetici/sistem dilinde).
      */
     public static function parolaHatasi(string $pw): ?string
     {
         if ($pw === '' || preg_match('/[\r\n\x00]/', $pw)) {
-            return 'Parola boş olamaz ve satır sonu/kontrol karakteri içeremez.';
+            return Ceviri::t('Parola boş olamaz ve satır sonu/kontrol karakteri içeremez.');
         }
         $uz = function_exists('mb_strlen') ? mb_strlen($pw, 'UTF-8') : strlen($pw);
         if ($uz < 12) {
-            return 'Parola en az 12 karakter olmalı.';
+            return Ceviri::t('Parola en az 12 karakter olmalı.');
         }
         if ($uz > 128) {
-            return 'Parola en çok 128 karakter olmalı.';
+            return Ceviri::t('Parola en çok 128 karakter olmalı.');
         }
         if (!preg_match('/[A-Za-z]/', $pw) || !preg_match('/[0-9]/', $pw)) {
-            return 'Parola harf ve rakam içermeli.';
+            return Ceviri::t('Parola harf ve rakam içermeli.');
         }
         return null;
+    }
+
+    /** Modulun varsayilan portu (MetaData DefaultSSLPort): basit "Add Server" ekraninda Port alani yok. */
+    public const VARSAYILAN_PORT = 8443;
+
+    /**
+     * Access Hash secenekleri (satir / virgul / noktali virgul / bosluk ile ayrilir):
+     *   port=30409            panel yonetici kapisi portu
+     *   tls-dogrulama-kapali  TLS dogrulamasini kapat (tehlikeli)
+     * Bilinmeyen parcalar YOK SAYILIR ve hicbir yere yazilmaz (alan gizli sayilir).
+     *
+     * @return array{port:int,tlsKapali:bool}
+     */
+    public static function erisimSecenekleri(string $ah): array
+    {
+        $out = ['port' => 0, 'tlsKapali' => false];
+        foreach (preg_split('/[\s,;]+/', trim($ah)) ?: [] as $t) {
+            if (strtolower($t) === 'tls-dogrulama-kapali') {
+                $out['tlsKapali'] = true;
+            } elseif (preg_match('/^port=(\d{1,5})$/i', $t, $m) && (int) $m[1] >= 1 && (int) $m[1] <= 65535) {
+                $out['port'] = (int) $m[1];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Sunucu adresi (host + port + portun nereden geldigi).
+     *
+     * NEDEN: WHMCS'in basit "Add Server" ekraninda Port alani yok, modulun varsayilan
+     * portu (8443) kullanilir; gPanel'in rol kapisi portlari ise rastgeledir (ör. 30409)
+     * ve guvenlik geregi anonim olarak ogrenilemez. Port su sirayla belirlenir:
+     *   1. Hostname alani: "panel.ornek.com:30409" ya da "https://panel.ornek.com:30409/"
+     *   2. Access Hash: "port=30409"
+     *   3. WHMCS Port alani (Gelismis mod) — bos ise modul varsayilani
+     *
+     * @param array<string,mixed> $p
+     * @return array{host:string,port:int,kaynak:string}  kaynak: hostname|accesshash|whmcs|varsayilan
+     */
+    public static function sunucuAdresi(array $p): array
+    {
+        [$host, $port] = self::hostPortAyir((string) ($p['serverhostname'] ?? ''));
+        if ($host === '') {
+            [$host] = self::hostPortAyir((string) ($p['serverip'] ?? ''));
+        }
+        $kaynak = 'hostname';
+        if ($port <= 0) {
+            $port = self::erisimSecenekleri((string) ($p['serveraccesshash'] ?? ''))['port'];
+            $kaynak = 'accesshash';
+        }
+        if ($port <= 0) {
+            // Port alani DOLUYSA (gecersiz olsa bile: 0, 70000) o kullanilir ve istemci
+            // reddeder; yalniz BOS alan varsayilana duser.
+            $ham = trim((string) ($p['serverport'] ?? ''));
+            if ($ham !== '') {
+                $port = (int) $ham;
+                $kaynak = 'whmcs';
+            } else {
+                $port = self::VARSAYILAN_PORT;
+                $kaynak = 'varsayilan';
+            }
+        }
+        return ['host' => $host, 'port' => $port, 'kaynak' => $kaynak];
+    }
+
+    /**
+     * "alan", "alan:PORT", "[v6]:PORT", "v6" (koseli parantezsiz, portsuz), "https://alan:PORT/yol"
+     * -> [host, port]; port yoksa 0. Kullanici bilgili URL ya da gecersiz port -> ['', 0].
+     *
+     * @return array{0:string,1:int}
+     */
+    public static function hostPortAyir(string $s): array
+    {
+        $s = trim($s);
+        if ($s === '') {
+            return ['', 0];
+        }
+        if (preg_match('#^https?://#i', $s)) {
+            $u = parse_url($s);
+            if ($u === false || empty($u['host']) || isset($u['user']) || isset($u['pass'])) {
+                return ['', 0];
+            }
+            return [trim((string) $u['host'], '[]'), (int) ($u['port'] ?? 0)];
+        }
+        $s = rtrim($s, '/');
+        if (preg_match('/^\[([0-9A-Fa-f:.]+)\](?::(\d{1,5}))?$/', $s, $m)) {
+            $pt = isset($m[2]) ? (int) $m[2] : 0;
+            return $pt > 65535 ? ['', 0] : [$m[1], $pt];
+        }
+        if (substr_count($s, ':') === 1) {
+            [$h, $pt] = explode(':', $s, 2);
+            if (preg_match('/^\d{1,5}$/', $pt) && (int) $pt >= 1 && (int) $pt <= 65535) {
+                return [$h, (int) $pt];
+            }
+            return ['', 0];
+        }
+        return [$s, 0];
     }
 
     /** Ana bilgisayar adi/IP dogrulamasi (URL numarasi yok: @ / ? # bosluk). */
@@ -165,6 +262,17 @@ final class Yardimci
     public static function esc($s): string
     {
         return htmlspecialchars((string) $s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    /** MB -> okunakli metin: 1023 MB, 1 GB, 1.5 GB, 50 GB (GB'de en cok bir ondalik). */
+    public static function boyutMetin(int $mb): string
+    {
+        $mb = max(0, $mb);
+        if ($mb < 1024) {
+            return $mb . ' MB';
+        }
+        $gb = round($mb / 1024, 1);
+        return (fmod($gb, 1.0) === 0.0 ? (string) (int) $gb : number_format($gb, 1, '.', '')) . ' GB';
     }
 
     /** KB -> MB (asagi). */

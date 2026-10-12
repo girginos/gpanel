@@ -14,7 +14,10 @@ package plans_test
 //   - GL-06 / BAYI-UI-03: kökün global katalog planı bayiye YALNIZ seçim
 //     özetiyle (ad + temel kotalar, global/duzenlenebilir işaretleri) döner;
 //     nginx ek direktifleri, WAF, IO/DB ayarları, açıklama dönmez.
-//   - Yönetici davranışı DEĞİŞMEZ (aynı uçlar, aynı sonuçlar).
+//   - Liste kapsamı (kullanıcı bildirimi 2026-10-12): herkes KENDİ planlarını görür —
+//     yöneticinin GET /plans'i yalnız kökün planları; bayi planları yalnız ?bayi=<id>
+//     süzgeciyle (yönetici) ya da kimlikle (GET /plans/{id}). Diğer yönetici
+//     davranışı DEĞİŞMEZ.
 //
 // Gerçek MariaDB gerekir; yoksa ATLANIR:
 //
@@ -345,7 +348,7 @@ func TestPlanKapsam_KokOzelPlanBayiyeKapali(t *testing.T) {
 	if y := pk_istek(t, h, "admin", "GET", "/plans/100", nil); y.kod != http.StatusOK || !strings.Contains(y.govde, "# KOK-OZEL-DIREKTIF") {
 		t.Errorf("yönetici GET /plans/100 → %d %s", y.kod, y.govde)
 	}
-	if p := pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans?domain=10", nil)); p[100] != nil || p[210] != nil || p[300] == nil {
+	if p := pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans?domain=10", nil)); p[100] != nil || p[210] != nil || p[1] == nil {
 		t.Errorf("D1: yönetici GET /plans?domain=10 kopya listeledi ya da katalog eksik: %v", p)
 	}
 }
@@ -553,17 +556,79 @@ func TestPlanKapsam_GlobalPlanBayiyeYalnizOzet(t *testing.T) {
 	if y := pk_istek(t, h, "A", "DELETE", "/plans/1", nil); y.kod != http.StatusForbidden {
 		t.Errorf("bayi A DELETE /plans/1 → %d", y.kod)
 	}
-	// Yönetici DEĞİŞMEZ: global plan tüm ayrıntısıyla.
+	// Yönetici: global plan tüm ayrıntısıyla (bayi planları ?bayi= ile — aşağıdaki test).
 	ya := pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans", nil))
 	if a := ya[1]; a == nil || a["nginx_ek_direktifler"] != "# KOK-GLOBAL-DIREKTIF" || a["waf_mode"] != "detect" || a["aciklama"] != "KOK-IC-NOTU" {
 		t.Errorf("yönetici global planı tam göremedi: %v", ya[1])
 	}
-	for _, id := range []int64{1, 200, 201, 202, 300} {
-		if ya[id] == nil {
-			t.Errorf("yönetici listesinde plan %d yok", id)
-		}
-	}
 	if ya[100] != nil || ya[210] != nil {
 		t.Errorf("yönetici kataloğunda özel plan listelendi (değişmemeli)")
+	}
+}
+
+// ── Liste kapsamı: herkes kendi planlarını görür ────────────────────────────
+
+// Kullanıcı bildirimi 2026-10-12: "bayinin kendi bünyesinde açtığı paketler root
+// panelde gözükmesin; herkes kendi oluşturduğu paketleri görsün". Kök listesi yalnız
+// reseller_id=0; bayi planları yöneticiye yalnız ?bayi=<id> ile (o bayinin GÖRDÜĞÜ
+// katalog: kendi + kökün global planı, tam görünüm) ve kimlikle döner. Bayi ?bayi= ile
+// kapsamından çıkamaz (IDOR — bayi_plan_http_test.go TestBayiPlan_KapsamIDOR).
+func TestPlanKapsam_ListeHerkesKendiPlanlarini(t *testing.T) {
+	db := pk_geciciDB(t)
+	h := pk_router(db)
+	idler := func(p map[int64]map[string]any) map[int64]bool {
+		out := map[int64]bool{}
+		for id := range p {
+			out[id] = true
+		}
+		return out
+	}
+	esit := func(ad string, g map[int64]bool, bek ...int64) {
+		t.Helper()
+		ok := len(g) == len(bek)
+		for _, id := range bek {
+			ok = ok && g[id]
+		}
+		if !ok {
+			t.Errorf("%s: %v (beklenen %v)", ad, g, bek)
+		}
+	}
+
+	// Kök: YALNIZ kendi katalog planları (bayi A/B'nin 200/201/202/300'ü YOK).
+	esit("yönetici GET /plans", idler(pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans", nil))), 1)
+
+	// ?bayi=<id>: o bayinin gördüğü katalog, yönetici TAM görünümle (düzenlenebilir).
+	pa := pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans?bayi=2", nil))
+	esit("yönetici GET /plans?bayi=2", idler(pa), 1, 200, 201, 202)
+	if pa[200]["duzenlenebilir"] != true || pa[200]["aciklama"] != "A aciklama" || pa[200]["global"] != false {
+		t.Errorf("yönetici bayi planını tam göremedi: %v", pa[200])
+	}
+	if pa[1]["global"] != true || pa[1]["nginx_ek_direktifler"] != "# KOK-GLOBAL-DIREKTIF" {
+		t.Errorf("yönetici ?bayi= görünümünde global plan tam değil: %v", pa[1])
+	}
+	esit("yönetici GET /plans?bayi=3", idler(pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans?bayi=3", nil))), 1, 300)
+	// Planı olmayan / var olmayan bayi: yalnız global katalog (kimlik sızmaz).
+	esit("yönetici GET /plans?bayi=99", idler(pk_planlar(t, pk_istek(t, h, "admin", "GET", "/plans?bayi=99", nil))), 1)
+	for _, q := range []string{"/plans?bayi=", "/plans?bayi=abc", "/plans?bayi=0", "/plans?bayi=-2"} {
+		if y := pk_istek(t, h, "admin", "GET", q, nil); y.kod != http.StatusBadRequest {
+			t.Errorf("yönetici GET %s → %d %s (beklenen 400)", q, y.kod, y.govde)
+		}
+	}
+	// Tek plan kimlikle her durumda okunur (hosting ayrıntısı / plan detay sayfası).
+	if y := pk_istek(t, h, "admin", "GET", "/plans/300", nil); y.kod != http.StatusOK || !strings.Contains(y.govde, "B Plani") {
+		t.Errorf("yönetici GET /plans/300 → %d %s", y.kod, y.govde)
+	}
+
+	// Bayi: kendi + kökün global planı (özet); başka bayinin planı YOK.
+	esit("bayi A GET /plans", idler(pk_planlar(t, pk_istek(t, h, "A", "GET", "/plans", nil))), 1, 200, 201, 202)
+	esit("bayi B GET /plans?bayi=2", idler(pk_planlar(t, pk_istek(t, h, "B", "GET", "/plans?bayi=2", nil))), 1, 300)
+
+	// 🔴 Kimliksiz bayi jetonu (rol reseller, bayi kimliği 0) kökün tam görünümünü ALAMAZ.
+	tok, err := auth.IssueAt(pk_sir, 3600, 9, "kimliksiz", "reseller", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if y := pk_istekJeton(t, h, tok, "GET", "/plans", nil); y.kod != http.StatusForbidden || strings.Contains(y.govde, "KOK-") {
+		t.Errorf("kimliksiz bayi jetonu GET /plans → %d %s (beklenen 403)", y.kod, y.govde)
 	}
 }

@@ -2,9 +2,12 @@ package apianahtar
 
 import (
 	"errors"
+	"net"
 	"net/netip"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // IP izin listesi: tek IP ya da CIDR. Kökte ZORUNLU (en az 1), bayide isteğe bağlı
@@ -98,6 +101,62 @@ func IPIzinli(liste []string, ip string) bool {
 			continue
 		}
 		if pfx.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// SunucuIPleri: bu sunucunun kendi arayüz adresleri (loopback ve link-local hariç).
+// Dikiş: testler değiştirir. Üretimde 60 sn önbellekli.
+var SunucuIPleri = sunucuIPleriOnbellekli
+
+var (
+	sunucuIPMu    sync.Mutex
+	sunucuIPLer   []string
+	sunucuIPZaman time.Time
+)
+
+func sunucuIPleriOnbellekli() []string {
+	sunucuIPMu.Lock()
+	defer sunucuIPMu.Unlock()
+	if time.Since(sunucuIPZaman) < time.Minute && sunucuIPLer != nil {
+		return sunucuIPLer
+	}
+	out := []string{}
+	if adresler, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range adresler {
+			n, ok := a.(*net.IPNet)
+			if !ok || n.IP.IsLoopback() || n.IP.IsLinkLocalUnicast() || n.IP.IsUnspecified() {
+				continue
+			}
+			out = append(out, n.IP.String())
+		}
+	}
+	sunucuIPLer, sunucuIPZaman = out, time.Now()
+	return out
+}
+
+// IPIzinliYerel: IPIzinli + YEREL (loopback) istek, sunucunun kendi IP'lerinden biri
+// listedeyse kabul edilir.
+//
+// NEDEN: panelle AYNI sunucudaki istemci (ör. WHMCS) panel adını yerelde çözer
+// (/etc/hosts → ::1 / 127.0.0.1) ve istek loopback'ten gelir; kullanıcı ise listeye
+// doğal olarak sunucunun IP'sini yazar. Ölçüldü (.180, 2026-10-12): liste
+// "203.0.113.180/32", WHMCS isteği "::1" → 403 "bu IP'den erişim izni yok".
+// Yeni açıklık DEĞİL: aynı sunucudaki süreç panele sunucunun genel IP'sinden
+// bağlanınca kaynak adres zaten o IP olur ve listeyi bugün de geçerdi. Kanıtsız
+// istek (ip "") ve loopback olmayan yabancı IP'ler yine reddedilir.
+func IPIzinliYerel(liste []string, ip string) bool {
+	if IPIzinli(liste, ip) {
+		return true
+	}
+	a, err := netip.ParseAddr(strings.TrimSpace(ip))
+	if err != nil || !a.Unmap().IsLoopback() {
+		return false
+	}
+	for _, s := range SunucuIPleri() {
+		if IPIzinli(liste, s) {
 			return true
 		}
 	}

@@ -30,7 +30,9 @@ final class FakePanel
         'DELETE /resellers/{id}' => ['bayi', 'yaz'],
         'POST /domains/{id}/sso' => ['sso', 'yaz'],
     ];
-    public static $herZaman = ['GET /api-anahtari/ben'];
+    public static $herZaman = ['GET /api-anahtari/ben', 'GET /kapi/adres'];
+    /** /kapi/adres yaniti: bos = yeni kapidayiz; ['adres' => 'https://h:P'] = eski kapi */
+    public $kapiAdres = [];
 
     public $izinler = ['hesap:yaz', 'plan:yaz', 'ftp.parola:yaz', 'bayi:yaz', 'sso:yaz'];
     public $istekler = [];
@@ -197,6 +199,8 @@ final class FakePanel
     {
         $k = $m . ' ' . $desen;
         switch ($k) {
+            case 'GET /kapi/adres':
+                return $this->yanit(200, $this->kapiAdres === [] ? new \stdClass() : $this->kapiAdres);
             case 'GET /api-anahtari/ben':
                 return $this->yanit(200, ['anahtar_id' => 1, 'ad' => 'whmcs', 'gosterim' => 'gosp_ABCDEFGHJKLM…EFG', 'rol' => 'admin', 'izinler' => $this->izinler, 'son_kullanma_at' => null]);
             case 'GET /plans':
@@ -257,13 +261,18 @@ final class FakePanel
                 if ($this->ssoModu === '429') {
                     return $this->hata(429, 'API anahtarı hız sınırı aşıldı');
                 }
-                $url = 'https://panel.example.test:8443/#SSOKOD-ONCE-1234567890';
+                $url = 'https://panel.example.test:8443/adina#kod=SSOKOD-ONCE-1234567890';
                 if ($this->ssoModu === 'url_http') {
-                    $url = 'http://panel.example.test:8443/#SSOKOD-ONCE-1234567890';
+                    $url = 'http://panel.example.test:8443/adina#kod=SSOKOD-ONCE-1234567890';
                 } elseif ($this->ssoModu === 'url_baska') {
-                    $url = 'https://evil.example.org:8443/#SSOKOD-ONCE-1234567890';
+                    $url = 'https://evil.example.org:8443/adina#kod=SSOKOD-ONCE-1234567890';
                 } elseif ($this->ssoModu === 'url_user') {
-                    $url = 'https://panel.example.test@evil.example.org/#SSOKOD-ONCE-1234567890';
+                    $url = 'https://panel.example.test@evil.example.org/adina#kod=SSOKOD-ONCE-1234567890';
+                } elseif ($this->ssoModu === 'url_alt') {
+                    // 0.3.0-20261009: ana bilgisayar adi ayarlanmamis panel (server_name _)
+                    $url = 'https://_:8443/adina#kod=SSOKOD-ONCE-1234567890';
+                } elseif ($this->ssoModu === 'url_kodsuz') {
+                    $url = 'https://panel.example.test:8443/adina';
                 }
                 return $this->yanit(200, ['ok' => true, 'url' => $url, 'gecerlilik_sn' => 60]);
             case 'GET /resellers':
@@ -280,7 +289,7 @@ final class FakePanel
                     return $this->hata(400, 'parola 8-128 karakter olmalı');
                 }
                 $b = $this->bayiEkle($g['kullanici'], ['paket_id' => $g['paket_id'], 'ad_soyad' => $g['ad_soyad'] ?? '']);
-                return $this->yanit(201, ['id' => $b['id'], 'kullanici' => $b['kullanici'], 'varsayilan_plan_id' => 55]);
+                return $this->yanit(201, ['id' => $b['id'], 'kullanici' => $b['kullanici']]);
             case 'PUT /resellers/{id}':
                 $id = $this->idAl($yol);
                 if (!isset($this->bayiler[$id])) {

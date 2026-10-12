@@ -16,8 +16,9 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button, butonSinifi } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
-import { useBayiSinir, havuzDurumu, mbOkunur, type BayiSinir } from '@/lib/bayiPlan'
+import { useBayiSinir, havuzDurumu, mbOkunur, planListesiYolu, type BayiSinir } from '@/lib/bayiPlan'
 import { cevirT } from '@/lib/cevirT'
+import { useRol } from '@/lib/rol'
 
 type Plan = {
   id: number
@@ -44,6 +45,7 @@ type Plan = {
   ozet?: boolean
 }
 type Surum = { surum: string; aciklama?: string }
+type Bayi = { id: number; kullanici: string; ad_soyad?: string }
 
 
 const SVCPLAN_EN: Record<string, string> = {
@@ -94,8 +96,14 @@ const SVCPLAN_EN: Record<string, string> = {
   "Yönetici tarafından tanımlanır: hostinglerinize atayabilirsiniz, düzenleyemezsiniz.": "Defined by the administrator: you can assign them to your hostings but cannot edit them.",
   "Varsayılan yap": "Make default",
   "Varsayılan plan değiştirildi": "Default plan changed",
-  "Son planınız silinemez": "Your last plan cannot be deleted",
   "Henüz kendi planınız yok": "You have no plans of your own yet",
+  "Paylaşılan planları hostinglerinize atayabilir ya da “Plan Ekle” ile kendi planınızı oluşturabilirsiniz.": "You can assign shared plans to your hostings or create your own plan with “Add Plan”.",
+  "Gösterilen planlar": "Plans shown",
+  "Benim planlarım": "My plans",
+  "Bayi: {0}": "Reseller: {0}",
+  "Bayinin kendi planları — yalnız o bayinin hostinglerinde kullanılır; burada inceleyip düzenleyebilirsiniz. Paylaşılan planlarınız bayiye de açıktır.": "The reseller's own plans — used only on that reseller's hostings; you can review and edit them here. Your shared plans are also available to the reseller.",
+  "Bu bayinin kendi planı yok": "This reseller has no plans of its own",
+  "Bayi hostinglerinde sizin paylaşılan planlarınızı kullanıyor.": "The reseller uses your shared plans on its hostings.",
   "Paylaşılan plan yok": "No shared plans",
   "Bayi planında 0 (sınırsız) olamaz.": "Cannot be 0 (unlimited) in a reseller plan.",
   "Paketinizde kalan: {0} / {1}": "Left in your package: {0} / {1}",
@@ -121,15 +129,31 @@ export default function ServicePlansPage() {
   const bayi = !!sinir?.bayi || items.some(p => p.duzenlenebilir === false)
   const kendi = items.filter(p => p.duzenlenebilir !== false)
   const paylasilan = items.filter(p => p.duzenlenebilir === false)
+  // Yönetici: sunucu YALNIZ kökün planlarını döner (bayilerin kendi planları listeyi
+  // kalabalıklaştırmaz). İsteğe bağlı süzgeçle bir bayinin kendi planları incelenir
+  // (?bayi=<id> o bayinin gördüğü katalogu döner; kökün paylaşılan planları ayıklanır).
+  const yonetici = useRol() === 'admin'
+  const [bayiler, setBayiler] = useState<Bayi[]>([])
+  const [bayiSuzgec, setBayiSuzgec] = useState(0)
+  const gosterilen = bayiSuzgec > 0 ? items.filter(p => !p.global) : items
 
   function yukle() {
     setYuk(true); setHata(null)
-    api.get<Plan[]>('/plans')
+    api.get<Plan[]>(planListesiYolu(yonetici ? bayiSuzgec : 0))
       .then(r => setItems(r.data))
       .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))
   }
-  useEffect(yukle, [])
+  // yukle/toast kararlı değil; yalnız rol ve süzgeç değişince yeniden yüklenmeli.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(yukle, [yonetici, bayiSuzgec])
+  useEffect(() => {
+    // /resellers AdminOnly: bayi oturumunda istenmez.
+    if (!yonetici) return
+    let iptal = false
+    api.get<Bayi[]>('/resellers').then(r => { if (!iptal) setBayiler(r.data || []) }).catch(() => { /* süzgeç isteğe bağlı */ })
+    return () => { iptal = true }
+  }, [yonetici])
   useEffect(() => {
     let iptal = false
     api.get<Surum[]>('/php/versions').then(r => { if (iptal) return; setSurumler(r.data || []) }).catch(e => { if (!iptal) hataYakala(cevir("PHP sürümleri alınamadı"))(e) })
@@ -156,8 +180,8 @@ export default function ServicePlansPage() {
     }
   }
 
-  // Plan kartı. sonPlan: bayinin tek kendi planı (sunucu silmeyi reddeder; düğme gizli).
-  function kart(p: Plan, sonPlan: boolean) {
+  // Plan kartı.
+  function kart(p: Plan) {
     // Eski sunucu yanıtında işaret yoksa düzenlenebilir say (geri uyum).
     const duzenlenebilir = p.duzenlenebilir !== false
     return (
@@ -188,8 +212,7 @@ export default function ServicePlansPage() {
             <Ikon d={I.ileri} className="size-3.5 shrink-0 ms-1.5 -me-0.5" />
           </Link>
           {duzenlenebilir && bayi && !p.varsayilan && <Button onClick={() => varsayilanYap(p)} variant="outlined" boyut="sm" ikon={I.onay}>{cevir("Varsayılan yap")}</Button>}
-          {duzenlenebilir && !sonPlan && <Button onClick={() => setSilinecek(p)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>}
-          {duzenlenebilir && sonPlan && <span className="self-center text-[11px] text-slate-400 dark:text-slate-500">{cevir("Son planınız silinemez")}</span>}
+          {duzenlenebilir && <Button onClick={() => setSilinecek(p)} color="error" variant="soft" boyut="sm" ikon={I.cop}>{cevir("Sil")}</Button>}
         </div>
       </div>
     )
@@ -205,12 +228,33 @@ export default function ServicePlansPage() {
       </p>
 
       <ListToolbar
-        birincil={{ etiket: cevir('Plan Ekle'), onClick: () => setModal({} as Plan) }}
+        birincil={bayiSuzgec > 0 ? undefined : { etiket: cevir('Plan Ekle'), onClick: () => setModal({} as Plan) }}
         butonlar={[]}
       />
 
+      {yonetici && bayiler.length > 0 && (
+        <div className="mb-4">
+          <label className="flex flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <span>{cevir("Gösterilen planlar")}</span>
+            <select value={bayiSuzgec} onChange={e => setBayiSuzgec(Number(e.target.value))}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15 dark:border-dark-600 dark:bg-dark-800/60 dark:text-slate-100">
+              <option value={0}>{cevir("Benim planlarım")}</option>
+              {bayiler.map(b => <option key={b.id} value={b.id}>{cevirT(cevir("Bayi: {0}"), b.ad_soyad ? `${b.ad_soyad} (${b.kullanici})` : b.kullanici)}</option>)}
+            </select>
+          </label>
+          {bayiSuzgec > 0 && (
+            <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">{cevir("Bayinin kendi planları — yalnız o bayinin hostinglerinde kullanılır; burada inceleyip düzenleyebilirsiniz. Paylaşılan planlarınız bayiye de açıktır.")}</p>
+          )}
+        </div>
+      )}
+
       {yuk ? (
         <div className="py-12 text-center text-sm text-slate-400 dark:text-slate-500">{cevir("Yükleniyor…")}</div>
+      ) : bayiSuzgec > 0 && gosterilen.length === 0 ? (
+        <EmptyState
+          baslik={cevir("Bu bayinin kendi planı yok")}
+          aciklama={cevir("Bayi hostinglerinde sizin paylaşılan planlarınızı kullanıyor.")}
+        />
       ) : items.length === 0 ? (
         <EmptyState
           baslik={cevir("Henüz hizmet planı yok")}
@@ -223,20 +267,20 @@ export default function ServicePlansPage() {
             <h2 id="planlarim-baslik" className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Planlarım")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 mb-3">{cevir("Düzenleyebileceğiniz planlar. Varsayılan plan yeni hostinglerde ön seçilir ve site taşımada plansız hesaplara uygulanır.")}</p>
             {kendi.length === 0
-              ? <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz kendi planınız yok")}</p>
-              : <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{kendi.map(p => kart(p, kendi.length <= 1))}</div>}
+              ? <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Henüz kendi planınız yok")} — {cevir("Paylaşılan planları hostinglerinize atayabilir ya da “Plan Ekle” ile kendi planınızı oluşturabilirsiniz.")}</p>
+              : <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{kendi.map(p => kart(p))}</div>}
           </section>
           <section aria-labelledby="paylasilan-baslik">
             <h2 id="paylasilan-baslik" className="text-base font-semibold text-slate-900 dark:text-slate-100">{cevir("Paylaşılan planlar")}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 mb-3">{cevir("Yönetici tarafından tanımlanır: hostinglerinize atayabilirsiniz, düzenleyemezsiniz.")}</p>
             {paylasilan.length === 0
               ? <p className="text-sm text-slate-500 dark:text-slate-400">{cevir("Paylaşılan plan yok")}</p>
-              : <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{paylasilan.map(p => kart(p, false))}</div>}
+              : <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{paylasilan.map(p => kart(p))}</div>}
           </section>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {items.map(p => kart(p, false))}
+          {gosterilen.map(p => kart(p))}
         </div>
       )}
 

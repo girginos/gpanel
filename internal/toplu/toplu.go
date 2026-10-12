@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -80,10 +81,12 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Tip == "plan" {
-		if req.PlanID == nil || *req.PlanID <= 0 || !varMi(h.DB, "SELECT COUNT(*) FROM service_plans WHERE id=? AND domain_id IS NULL", *req.PlanID) {
-			// Yalnız katalog planı: eski hostinge özel kopya toplu olarak başka hostinglere
-			// bağlanamaz (D1). Hostinge özel limitler (üst yazım) plan değişiminde korunur.
+		if req.PlanID == nil || *req.PlanID <= 0 {
 			httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
+			return
+		}
+		if kod, mesaj := planHedeflereUygun(r.Context(), h.DB, *req.PlanID, req.IDs); kod != 0 {
+			httpx.WriteError(w, kod, mesaj)
 			return
 		}
 	}
@@ -133,6 +136,46 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 
 	go h.calistir(ctx, isID, req, aktorUID, aktor)
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{"is_id": isID, "toplam": len(req.IDs)})
+}
+
+// planHedeflereUygun: toplu plan değişiminde plan seçilen hostinglerin HEPSİNE uygun mu?
+//   - Yalnız katalog planı: eski hostinge özel kopya toplu olarak başka hostinglere
+//     bağlanamaz (D1). Hostinge özel limitler (üst yazım) plan değişiminde korunur.
+//   - Kökün planı (reseller_id=0) her hostinge atanabilir (bayiler kökün paylaşılan
+//     planlarını da seçebilir).
+//   - Bir BAYİNİN planı yalnız o bayinin hostinglerine atanabilir. Eskiden yalnız planın
+//     varlığına bakılıyordu: kök, A bayisinin planını kendi ya da B bayisinin
+//     hostinglerine bağlayabiliyordu (A planını düzenleyince başkasının hostingi değişirdi).
+//
+// (0,"") = uygun. Ölçüm hatası = red (fail-closed).
+func planHedeflereUygun(ctx context.Context, db *sql.DB, planID int64, ids []int64) (int, string) {
+	var planRID int64
+	err := db.QueryRowContext(ctx,
+		"SELECT reseller_id FROM service_plans WHERE id=? AND domain_id IS NULL", planID).Scan(&planRID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return http.StatusBadRequest, "plan bulunamadı"
+	}
+	if err != nil {
+		return http.StatusInternalServerError, "plan okunamadı"
+	}
+	if planRID == 0 || len(ids) == 0 {
+		return 0, ""
+	}
+	yer := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, planRID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	var uyumsuz int
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM domains WHERE reseller_id<>? AND id IN ("+yer+")", args...).Scan(&uyumsuz); err != nil {
+		return http.StatusInternalServerError, "hostingler denetlenemedi"
+	}
+	if uyumsuz > 0 {
+		return http.StatusBadRequest, fmt.Sprintf("bu plan bir bayiye ait; yalnız o bayinin hostinglerine atanabilir (%d hosting uygun değil)", uyumsuz)
+	}
+	return 0, ""
 }
 
 func varMi(db *sql.DB, q string, arg any) bool {

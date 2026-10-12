@@ -14,6 +14,7 @@ import { useRol } from '@/lib/rol'
 import { useDialog } from '@/components/Dialog'
 import { limitGetir, type LimitYanit } from '@/lib/limit'
 import OzelLimitDuzenleyici from '@/components/OzelLimitDuzenleyici'
+import { planListesiYolu } from '@/lib/bayiPlan'
 
 type Plan = {
   id: number; ad: string; aciklama: string
@@ -26,7 +27,7 @@ type Plan = {
   ozet?: boolean; duzenlenebilir?: boolean; domain_id?: number
   [k: string]: unknown // PUT'ta bilinmeyen alanlar KAYBOLMASIN (waf, io, nginx…)
 }
-type Domain = { id: number; alan_adi: string; plan_id?: number; plan_ad?: string }
+type Domain = { id: number; alan_adi: string; plan_id?: number; plan_ad?: string; reseller_id?: number }
 
 // Plan "ağırlığı": yükseltme mi düşürme mi olduğunu göstermek için kaba bir puan.
 // Sınırsız (0) alanlar en yükseğe sayılır — aksi halde "sınırsız" düşürme görünür.
@@ -108,12 +109,11 @@ export default function DomainPlanPage() {
   function yukle() {
     if (!id) return
     setYuk(true); setHata(null)
-    Promise.all([
-      api.get<Domain>(`/domains/${id}`),
-      // Yalnız KATALOG planları (hostinge özel limitler plan kopyası değil, üst yazım).
-      api.get<Plan[]>('/plans'),
-      limitGetir(id).catch(() => null),
-    ])
+    // Yalnız KATALOG planları (hostinge özel limitler plan kopyası değil, üst yazım).
+    // Bayinin hostinginde o bayinin seçebildiği katalog (kendi + paylaşılan): kökün kendi
+    // listesinde bayi planları yoktur (planListesiYolu).
+    api.get<Domain>(`/domains/${id}`)
+      .then(d => Promise.all([d, api.get<Plan[]>(planListesiYolu(d.data.reseller_id)), limitGetir(id).catch(() => null)]))
       .then(([d, p, l]) => { setDomain(d.data); setPlanlar(p.data || []); setLimit(l) })
       .catch(e => { const m = apiHata(e); setHata(m); toast.hata(cevir("İşlem başarısız"), m) })
       .finally(() => setYuk(false))

@@ -197,7 +197,7 @@ func main() {
 		log.Printf("plans seed-sync warn: %v", err)
 	}
 	ozelPlanAcilis(d) // D1: eski özel kopya planlar → hostinge özel üst yazım (Heal'lerden ÖNCE)
-	bayiPlanAcilis(d) // her bayinin kendi varsayılan planı (idempotent) + plan düzenle → yeniden uygula
+	bayiPlanAcilis(d) // bayi varsayılan İŞARETİ (plan oluşturmaz) + plan düzenle → yeniden uygula
 	if err := dns.SeedTemplateIfEmpty(context.Background(), d); err != nil {
 		log.Printf("dns template seed warn: %v", err)
 	}
@@ -976,9 +976,12 @@ func main() {
 				r.With(middleware.SahipYonetim).Put("/domains/{id}/databases/users/{kullanici}/password", domainsH.DBKullaniciParola)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/databases", domainsH.ListDatabases)
 				r.With(middleware.MusteriScope).Post("/domains/{id}/databases", domainsH.CreateDatabase)
-				r.With(middleware.DBSahipligi("dbid")).Delete("/databases/{dbid}", domainsH.DeleteDatabase)
-				r.With(middleware.DBSahipligi("dbid")).Put("/databases/{dbid}/password", domainsH.SetDatabasePassword)
-				r.With(middleware.DBSahipligi("dbid")).Post("/databases/{dbid}/optimize", domainsH.OptimizeDatabase)
+				// Silme, parola sıfırlama ve optimize: kök her DB'de, bayi kendi hosting
+				// hesaplarında, hosting sahibi (müşteri) KENDİ DB'sinde (müşteri ekranında
+				// düğmeleri var; eskiden DBSahipligi müşteriyi 404'lüyordu).
+				r.With(middleware.DBSahipligiMusteri("dbid")).Delete("/databases/{dbid}", domainsH.DeleteDatabase)
+				r.With(middleware.DBSahipligiMusteri("dbid")).Put("/databases/{dbid}/password", domainsH.SetDatabasePassword)
+				r.With(middleware.DBSahipligiMusteri("dbid")).Post("/databases/{dbid}/optimize", domainsH.OptimizeDatabase)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files", filesH.List)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files/oku", filesH.Read)
 				r.With(middleware.MusteriScope).Get("/domains/{id}/files/indir", filesH.Download)

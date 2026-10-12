@@ -44,6 +44,12 @@ const API_EN: Record<string, string> = {
   'Boş bırakılırsa her IP\'den kullanılabilir (önerilmez).': 'If left empty, it can be used from any IP (not recommended).',
   'Geçerlilik süresi': 'Validity period',
   '{0} gün': '{0} days',
+  'Süresiz': 'No expiry',
+  'Süresiz anahtarda en az bir izinli IP zorunludur.': 'A key with no expiry requires at least one allowed IP.',
+  'Süresiz anahtar hiç dolmaz; yalnız siz iptal edince geçersiz olur. Bu yüzden izinli IP listesi zorunludur. Kullanılmayan anahtarı iptal etmeyi ve anahtarı ara sıra yenilemeyi unutmayın.':
+    'A key with no expiry never expires; it becomes invalid only when you revoke it. An allowed-IP list is therefore required. Remember to revoke unused keys and rotate keys from time to time.',
+  "Panelle aynı sunucudaki uygulama (ör. WHMCS) için sunucunun kendi IP'sini yazmanız yeterlidir.":
+    "For an application on the same server as the panel (e.g. WHMCS), entering the server's own IP is enough.",
   'Hız sınırı (istek/dk)': 'Rate limit (requests/min)',
   'Kimliğinizi doğrulayın': 'Confirm your identity',
   'Parolanız': 'Your password',

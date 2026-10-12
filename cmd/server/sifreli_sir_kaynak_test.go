@@ -31,6 +31,7 @@ var sifreliSirYazanDosyalar = map[string]string{
 	"internal/domains/handlers_dbpw.go":        "db_accounts.db_pass_plain varchar(255)",
 	"internal/git/git.go":                      "git_repos.webhook_secret — sifreliSirGenislik (0218: varchar(191))",
 	"internal/github/github.go":                "github_connections.pat varchar(255); git_repos.webhook_secret — sifreliSirGenislik",
+	"internal/hesaplar/dbgiris.go":             "db_accounts.db_pass_plain varchar(255) (girdi ≤ kayitParolaAzami=128 bayt → şifreli ≤ 213)",
 	"internal/hesaplar/hesaplar.go":            "db_accounts.db_pass_plain varchar(255)",
 	"internal/hesaplar/password.go":            "db_accounts.db_pass_plain varchar(255)",
 	"internal/hesaplar/parola_api.go":          "db_accounts.db_pass_plain varchar(255)",

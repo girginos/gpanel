@@ -13,18 +13,19 @@ WHMCS 8.x (PHP 8.1+) için sunucu (provisioning) modülü. Hosting hesabı ve ba
 | WHMCS alanı | Değer |
 |---|---|
 | Hostname | Panelin alan adı ya da IP'si |
-| **Port** | **Yönetici kapısı portu** (panele tarayıcıyla girdiğiniz yönetici portu; rastgele port). Bayi anahtarı kullanacaksanız bayi kapısı portu |
+| **Port** | **Yönetici kapısı portu** (panele tarayıcıyla girdiğiniz adresteki port; rastgele). Bayi anahtarında bayi kapısı portu. **Basit ekranda Port alanı yoktur:** Hostname'e `panel.ornek.com:PORT` ya da Access Hash'e `port=PORT` yazın |
 | Kullanıcı adı | Anahtarın **sahibinin** panel kullanıcı adı (`root` ya da bayi kullanıcı adı) |
 | **Parola** | API anahtarı (`gosp_…`) |
 | Güvenli (SSL) | **İşaretli olmalı** (işaretsizse modül anahtarı göndermeyi reddeder) |
 | Modül | GirginOSPanel |
-| Access Hash | Boş. (`tls-dogrulama-kapali` yazmak TLS doğrulamasını kapatır — aşağıya bakın) |
+| Access Hash | Boş ya da satır başına bir seçenek: `port=PORT` (portu buradan vermek için) · `tls-dogrulama-kapali` (TLS doğrulamasını kapatır — tehlikeli, aşağıya bakın) |
 
 Kimlik biçimi panelde `Authorization: gosp <kullanıcı adı>:<anahtar>`; kullanıcı adı anahtarın
 sahibiyle eşleşmezse 401 alırsınız.
 
 4. "Bağlantıyı Sına" (TestConnection): `GET /api/v1/api-anahtari/ben` çağırır ve anahtarda
-   en az `hesap:yaz` ve `plan:oku` izni arar.
+   en az `hesap:yaz` ve `plan:oku` izni arar; ardından `GET /api/v1/kapi/adres` ile bağlanılan portun
+   panelin ESKİ (geçiş dönemi) kapısı olup olmadığını denetler ve öyleyse yeni portu söyler.
 
 ## API anahtarı izinleri
 
@@ -79,8 +80,14 @@ harf/rakam/`._-`); parola 8-128 karakter. Bayi parolası API ile **değiştirile
 
 ## Tek tıkla giriş (SSO)
 
+> **Önerilen:** hosting ürününde **Panel adresi** alanına müşteri kapısını girin
+> (`https://panel.alanadiniz.com:MUSTERI_PORT/`). Girilmişse müşteri her zaman o adrese gider
+> (panelin `/adina#kod=…` yolu ve kodu korunur). Girilmemişse panelin döndürdüğü adresin ana
+> bilgisayarı sunucu ayarındaki hostname/IP ile aynı olmalıdır; aksi halde güvenlik nedeniyle
+> yönlendirilmez (ör. panel ana bilgisayar adı ayarlanmamışsa).
+
 `ServiceSingleSignOn` (müşteri) ve `AdminSingleSignOn` (yönetici) panelin
-`POST /api/v1/domains/{id}/sso` ucunu çağırır (`{"ok":true,"url":"https://host:port/#kod","gecerlilik_sn":60}`)
+`POST /api/v1/domains/{id}/sso` ucunu çağırır (`{"ok":true,"url":"https://host:port/adina#kod=…","gecerlilik_sn":60}`)
 ve tarayıcıyı o adrese yönlendirir. Adres https olmalı, kullanıcı bilgisi içermemeli ve ana bilgisayarı
 sunucu ayarındaki hostname/IP (ya da "Panel adresi") ile aynı olmalıdır; aksi halde reddedilir.
 Uç yoksa (404) ya da anahtarda izin yoksa (403): **müşteri** düz panel bağlantısına yönlendirilir,
@@ -106,11 +113,24 @@ günceller (200'lük parçalarla). Panel hata verirse veritabanına dokunulmaz.
 
 Modül Günlüğü: Yönetim > Sistem Günlükleri > Modül Günlüğü (Modül Günlüğünü Etkinleştir).
 
+## Dil
+
+Yönetici ve sistem metinleri (ürün ayarları, yönetici hizmet sekmesi, hata mesajları, Etkinlik
+Günlüğü) **yönetici dili Türkçe ise Türkçe, değilse İngilizce** gösterilir (`lib/Ceviri.php`). Dil
+sırası: oturumdaki yöneticinin dili (`tbladmins.language`) → müşterinin dili (`tblclients.language`,
+boşsa sistem) → oturum yoksa (cron) sistem varsayılanı (`$CONFIG['Language']`) → İngilizce.
+Yukarıdaki tablodaki Türkçe mesajların İngilizce karşılıkları aynı sıradadır (ör. "Invalid API key",
+"Could not connect to the panel", "not linked to a panel account"). Panelden gelen ham mesaj
+(`Panel: …`) çevrilmez. Müşteri alanı şablonu `lang/turkish.php` / `lang/english.php` kullanır.
+Yeni metin eklerken `Ceviri::t('Türkçe metin', [$deger])` yazın ve İngilizcesini sözlüğe ekleyin;
+test sözlükte olmayan ya da sarılmamış Türkçe metni yakalar.
+
 ## Geliştirme / test
 
 ```
 php whmcs/tests/run.php        # sahte panel + WHMCS saplamaları, PHPUnit gerekmez
-bash whmcs/tests/mutasyon.sh   # elle mutasyon testi (18 mutant)
+php whmcs/tests/canli.php      # GERÇEK panele karşı uçtan uca (ortam değişkenleri: dosyanın başı)
+bash whmcs/tests/mutasyon.sh   # elle mutasyon testi (26 mutant)
 bash whmcs/build.sh            # test + zip
 ```
 Testteki sahte panel yanıtları `internal/` Go kodundaki JSON etiketlerinden alınmıştır; izin tablosu

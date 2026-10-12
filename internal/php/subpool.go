@@ -29,7 +29,7 @@ func SubPoolName(sk string, subID int64) string {
 
 // subPoolTmpl: named pool — bölüm adı poolName, ama user/group = sk (gerçek Linux
 // kullanıcısı), listen = sockDir/poolName.sock. Sertleştirme poolTmpl ile birebir.
-var subPoolTmpl = template.Must(template.New("subpool").Funcs(template.FuncMap{"onoff": onoff, "aclSatiri": aclSatiri}).Parse(`[{{.Pool}}]
+var subPoolTmpl = template.Must(template.New("subpool").Funcs(template.FuncMap{"onoff": onoff, "aclSatiri": aclSatiri, "mailYasakSatiri": provisioner.MailYasakPoolSatiri}).Parse(`[{{.Pool}}]
 user = {{.SK}}
 group = {{.SK}}
 listen = {{.SockDir}}/{{.Pool}}.sock
@@ -54,6 +54,7 @@ php_admin_value[post_max_size] = {{.S.PostMaxSize}}
 php_admin_value[upload_max_filesize] = {{.S.UploadMaxFilesize}}
 php_admin_value[max_input_vars] = 10000
 php_admin_value[disable_functions] = {{.S.DisableFunctions}}
+{{mailYasakSatiri}}
 
 ; ---- Common ----
 php_admin_flag[display_errors] = {{onoff .S.DisplayErrors}}

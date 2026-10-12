@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
@@ -24,6 +27,14 @@ import (
 var (
 	dbKullaniciEkle  = hesaplar.MySQLKullaniciEkle
 	dbParolaDegistir = hesaplar.MySQLChangePassword
+	dbParolaEsitle   = hesaplar.MySQLKayitliParolaEsitle
+	// dbOptimizeCalistir / dbBoyutFn: optimize ucunun root-soket adımları (testte sahte).
+	dbOptimizeCalistir = func(ctx context.Context, dbName string) ([]byte, error) {
+		return exec.CommandContext(ctx, "mysqlcheck", "--optimize", "--skip-write-binlog", dbName).CombinedOutput()
+	}
+	dbBoyutFn = dbBoyutBayt
+	// dbSilSahipli: DB silme (DROP DATABASE + güvenliyse DROP USER) — testte sahte.
+	dbSilSahipli = hesaplar.MySQLDropDBSahipli
 )
 
 // adKullanilamaz: "kullanicisi olmayan DB" dalinda ad reddi — TEK genel mesaj.
@@ -37,6 +48,11 @@ type setDBPwReq struct {
 	// Kullanici: YALNIZ db_user bos oldugunda (kullanicisi olmayan veritabani)
 	// zorunludur — o durumda bu ad ile kullanici olusturulur.
 	Kullanici string `json:"kullanici"`
+	// YalnizKayit: MariaDB'ye DOKUNMA — yalniz panel kaydini (db_accounts) bu parolaya
+	// esitle; parola MariaDB'de GERCEKTEN giris yapabiliyorsa. Parola panel disindan
+	// degistiginde (kayit bayat → phpMyAdmin "Access denied") calisan siteyi kirmadan
+	// duzeltmenin yolu; ALTER USER yolu sitenin config'teki parolasini gecersiz kilardi.
+	YalnizKayit bool `json:"yalniz_kayit"`
 }
 
 // SetDatabasePassword: PUT /api/v1/databases/:dbid/password
@@ -58,7 +74,9 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz parola")
 		return
 	}
-	if len(req.Parola) < 6 {
+	// Yalniz-kayit modunda parola YENI degil, MEVCUT (uygulamanin config'indeki) deger:
+	// asgari uzunluk kurali ona uygulanmaz (MariaDB'de giris ile ayrica dogrulanir).
+	if !req.YalnizKayit && len(req.Parola) < 6 {
 		httpx.WriteError(w, http.StatusBadRequest, "parola en az 6 karakter olmalı")
 		return
 	}
@@ -78,8 +96,10 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "okuma: "+err.Error())
 		return
 	}
-	// Rota seviyesinde {id} domain param'i yok → sahiplik BURADA dogrulanir.
-	if !middleware.YonetimSahibi(r, domainID) {
+	// Rota seviyesinde {id} domain param'i yok → sahiplik BURADA da dogrulanir
+	// (rota: DBSahipligiMusteri). Kok/bayi kendi kapsaminda; MUSTERI yalniz KENDI
+	// domaininin DB'sinde (musteri ekranindaki "Parola Sifirla" — eskiden 404).
+	if !middleware.DomainSahibiMi(r, domainID) {
 		httpx.WriteError(w, http.StatusForbidden, "bu veritabanına erişiminiz yok")
 		return
 	}
@@ -89,7 +109,29 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	islem := "db.parola"
-	if strings.TrimSpace(dbUser) == "" {
+	if req.YalnizKayit {
+		if strings.TrimSpace(dbUser) == "" {
+			httpx.WriteError(w, http.StatusBadRequest, "bu veritabanının kullanıcısı yok — önce kullanıcı oluşturun")
+			return
+		}
+		if err := dbParolaEsitle(r.Context(), h.DB, domainID, dbUser, req.Parola); err != nil {
+			switch {
+			case errors.Is(err, hesaplar.ErrDBParolaUyusmuyor):
+				// Basarisiz deneme de denetime yazilir (parola deneme izi).
+				uid, kul := middleware.Aktor(r)
+				httpx.DenetimDomain(h.DB, r, uid, kul, "db.parola-kayit-esitle", dbName, "kullanici="+dbUser+" parola MariaDB'de reddedildi", domainID, false)
+				httpx.WriteErrorKod(w, http.StatusConflict,
+					"girilen parola MySQL'deki parolayla uyuşmuyor — uygulamanızın yapılandırma dosyasındaki (ör. XenForo src/config.php, WordPress wp-config.php) mevcut parolayı girin",
+					"db_parola_uyusmuyor")
+			case errors.Is(err, hesaplar.ErrSistemDBHesabi):
+				httpx.WriteError(w, http.StatusForbidden, "sistem veritabanı hesabının kaydı panelden değiştirilemez")
+			default:
+				httpx.WriteError(w, http.StatusInternalServerError, "panel kaydı güncellenemedi: "+err.Error())
+			}
+			return
+		}
+		islem = "db.parola-kayit-esitle"
+	} else if strings.TrimSpace(dbUser) == "" {
 		// 🔴 KULLANICISI OLMAYAN VERITABANI. Bu durum, DB panelden silinip
 		// yedekten geri yuklendiginde olusur: yedek yalniz sema+veri icerir,
 		// MySQL kullanicisi ve GRANT'ler arsivde BULUNMAZ. Panel ise her DB'nin
@@ -178,9 +220,22 @@ func (h *Handlers) SetDatabasePassword(w http.ResponseWriter, r *http.Request) {
 
 var reOptDBAdi = regexp.MustCompile("^[A-Za-z0-9_]+$")
 
+// Optimize agir bir IO isidir ve artik musteri panelinden de tetiklenir:
+//   - ayni DB icin es zamanli ikinci istek 409 (ust uste yigilmaz);
+//   - musteri oturumu (adina/SSO dahil) ayni DB'yi son basarili optimizeden
+//     optMusteriAralik gecmeden yeniden calistiramaz (429). Kok/bayi beklemez.
+var (
+	optCalisan       sync.Map // dbid -> struct{}
+	optSonMu         sync.Mutex
+	optSon           = map[int64]time.Time{} // dbid -> son basarili optimize
+	optMusteriAralik = 10 * time.Minute
+	optSimdi         = time.Now
+)
+
 // OptimizeDatabase: POST /api/v1/databases/:dbid/optimize
 // DB nin TUM tablolarini optimize eder (InnoDB: recreate+analyze -> fragmentasyon
-// giderir, alan geri kazanir). Sahiplik route middleware (DBSahipligi) + burada teyit.
+// giderir, alan geri kazanir). Sahiplik route middleware (DBSahipligiMusteri) + burada
+// teyit: kok/bayi kendi kapsaminda, musteri KENDI domaininin DB'sinde.
 // ROOT mysqlcheck (panel user tenant DB gormez). Non-destructive.
 func (h *Handlers) OptimizeDatabase(w http.ResponseWriter, r *http.Request) {
 	dbid, _ := strconv.ParseInt(chi.URLParam(r, "dbid"), 10, 64)
@@ -198,7 +253,7 @@ func (h *Handlers) OptimizeDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "okuma: "+err.Error())
 		return
 	}
-	if !middleware.YonetimSahibi(r, domainID) {
+	if !middleware.DomainSahibiMi(r, domainID) {
 		httpx.WriteError(w, http.StatusForbidden, "bu veritabanına erişiminiz yok")
 		return
 	}
@@ -210,13 +265,32 @@ func (h *Handlers) OptimizeDatabase(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz DB adı")
 		return
 	}
-	once := dbBoyutBayt(r.Context(), dbName)
-	out, cerr := exec.CommandContext(r.Context(), "mysqlcheck", "--optimize", "--skip-write-binlog", dbName).CombinedOutput()
+	if middleware.MusteriClaimsFrom(r) != nil {
+		optSonMu.Lock()
+		son, vardi := optSon[dbid]
+		optSonMu.Unlock()
+		if gecen := optSimdi().Sub(son); vardi && gecen < optMusteriAralik {
+			dk := int((optMusteriAralik - gecen + time.Minute - 1) / time.Minute)
+			httpx.WriteError(w, http.StatusTooManyRequests,
+				fmt.Sprintf("bu veritabanı kısa süre önce optimize edildi — %d dakika sonra tekrar deneyin", dk))
+			return
+		}
+	}
+	if _, calisiyor := optCalisan.LoadOrStore(dbid, struct{}{}); calisiyor {
+		httpx.WriteError(w, http.StatusConflict, "bu veritabanı şu anda optimize ediliyor — bitmesini bekleyin")
+		return
+	}
+	defer optCalisan.Delete(dbid)
+	once := dbBoyutFn(r.Context(), dbName)
+	out, cerr := dbOptimizeCalistir(r.Context(), dbName)
 	if cerr != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "optimize: "+strings.TrimSpace(string(out)))
 		return
 	}
-	sonra := dbBoyutBayt(r.Context(), dbName)
+	optSonMu.Lock()
+	optSon[dbid] = optSimdi()
+	optSonMu.Unlock()
+	sonra := dbBoyutFn(r.Context(), dbName)
 	kazanilan := once - sonra
 	if kazanilan < 0 {
 		kazanilan = 0

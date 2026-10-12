@@ -116,8 +116,14 @@ func scan(rs interface{ Scan(...any) error }) (Plan, error) {
 }
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
-	// Admin: hepsi. Bayi: kapsam.go kuralı — kendi planlari (tam) + kokun GLOBAL
-	// katalogu (yalniz secim ozeti).
+	// Herkes KENDİ planlarını görür (kullanıcı kararı 2026-10-12: bayilerin kendi
+	// planları kökün listesini kalabalıklaştırmasın):
+	//   Bayi     kapsam.go kuralı — kendi planları (tam) + kökün GLOBAL katalogu
+	//            (yalnız seçim özeti); ?bayi= YOK SAYILIR (kapsamı dışına çıkamaz).
+	//   Yönetici YALNIZ kökün planları (reseller_id=0). ?bayi=<id>: o bayinin GÖRDÜĞÜ
+	//            katalog (kendi + global; yönetici tam görünümle) — bayi hostinginin
+	//            planını değiştirme, bayiye taşıma ve bayi planlarını inceleme için.
+	//            Tek plan kimlikle (GET /plans/{id}) her durumda okunur.
 	// 🔴 YALNIZ KATALOG (domain_id IS NULL): hostinge özel limitler artık plan
 	// kopyası değil, hosting üzerinde üst yazım (GET /domains/{id}/limitler).
 	// Eski `?domain=<id>` parametresi YOK SAYILIR — dönüştürülmemiş eski kopya plan
@@ -126,10 +132,26 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	kosul := " WHERE domain_id IS NULL"
 	args := []any{}
 	rid := middleware.ResellerIDFrom(r)
-	if rid > 0 {
+	switch {
+	case rid > 0:
 		k, a := bayiGorurKosul(rid)
 		kosul += " AND " + k
 		args = append(args, a...)
+	case middleware.RolFrom(r) != "admin":
+		// 🔴 Kimliksiz bayi jetonu (rol reseller, kimlik 0) kökün TAM görünümünü almasın.
+		httpx.WriteError(w, http.StatusForbidden, "yetkiniz yok")
+		return
+	case r.URL.Query().Has("bayi"):
+		hedef, err := strconv.ParseInt(r.URL.Query().Get("bayi"), 10, 64)
+		if err != nil || hedef <= 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "geçersiz bayi kimliği")
+			return
+		}
+		k, a := bayiGorurKosul(hedef)
+		kosul += " AND " + k
+		args = append(args, a...)
+	default:
+		kosul += " AND reseller_id=0"
 	}
 	sorgu := selectAll + kosul + " ORDER BY varsayilan DESC, id ASC"
 	rows, err := h.DB.QueryContext(r.Context(), sorgu, args...)
@@ -262,8 +284,8 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ridC > 0 && !p.Varsayilan {
-		// Varsayılanı olmayan bayinin (uzlaştırma öncesi / elle silinmiş) yeni planı
-		// varsayılan olur: bayinin her zaman tek bir varsayılanı vardır.
+		// Bayinin İLK kendi planı (ya da varsayılanı kalmamışsa yeni planı) varsayılan
+		// olur: kendi planı olan bayinin her zaman tek bir varsayılanı vardır.
 		var n int
 		if err := h.DB.QueryRowContext(r.Context(),
 			`SELECT COUNT(*) FROM service_plans WHERE reseller_id=? AND varsayilan=1 AND domain_id IS NULL`, ridC).Scan(&n); err == nil && n == 0 {
@@ -370,8 +392,9 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "nginx direktif doğrulaması başarısız:\n"+nginxset.DirektifHatasi(r, "plans.guncelle", 0, err, p.NginxEkDirektifler))
 		return
 	}
-	// Bayi planının varsayılan işareti düzenlemeyle KALDIRILAMAZ (bayinin her zaman
-	// bir varsayılanı olur): başka planı varsayılan yaparak değişir (VarsayilanYap).
+	// Bayi planının varsayılan işareti düzenlemeyle KALDIRILAMAZ (kendi planı olan
+	// bayinin her zaman bir varsayılanı olur): başka planı varsayılan yaparak değişir
+	// (VarsayilanYap).
 	if mevcut.resellerID > 0 && mevcut.Varsayilan && mevcut.DomainID == nil {
 		p.Varsayilan = true
 	}
@@ -517,10 +540,11 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// planSil — planı siler. Bayi planı (reseller_id>0, katalog) için: bayinin SON
-// katalog planı silinemez (bayinin her zaman bir varsayılanı olur); silinen plan
-// varsayılansa en eski kalan planı varsayılan olur. Sahibin planları kilitlenir
-// (eşzamanlı iki silme son planı birlikte götürmesin).
+// planSil — planı siler. Bayi planı (reseller_id>0, katalog) için: silinen plan
+// varsayılansa en eski kalan kendi planı varsayılan olur; SON planı da silinebilir
+// (bayiye plan otomatik açılmaz — kendi planı kalmayan bayi kökün paylaşılan
+// katalogunu kullanır). Sahibin planları kilitlenir (eşzamanlı iki silme varsayılanı
+// silinmiş bir plana devretmesin).
 func (h *Handlers) planSil(ctx context.Context, rid, id int64) (string, int64, error) {
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -556,13 +580,6 @@ func (h *Handlers) planSil(ctx context.Context, rid, id int64) (string, int64, e
 			}
 		}
 		rows.Close()
-		if len(digerleri) == 0 {
-			m := "bayinin son planı silinemez — önce başka bir plan oluşturun"
-			if rid > 0 {
-				m = "son planınız silinemez — önce yeni bir plan oluşturun"
-			}
-			return "", 0, &planHata{http.StatusConflict, m}
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM service_plans WHERE id=?`, id); err != nil {
 		return "", 0, err

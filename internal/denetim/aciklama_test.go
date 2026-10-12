@@ -111,6 +111,8 @@ func TestAciklamaKur(t *testing.T) {
 		{ad: "api oluştur", eylem: "api_anahtar.olustur", detail: n("ad=WHMCS ana izinler=hosting.oku,hosting.yaz ip=2 gün=365"),
 			tr: "Ad: WHMCS ana · İzinler: hosting.oku, hosting.yaz · 2 IP adresi · 365 gün geçerli",
 			en: "Name: WHMCS ana · Permissions: hosting.oku, hosting.yaz · 2 IP addresses · valid for 365 days"},
+		{ad: "api oluştur süresiz", eylem: "api_anahtar.olustur", detail: n("ad=WHMCS izinler=hesap:yaz ip=2 gün=süresiz"),
+			tr: "Ad: WHMCS · İzinler: hesap:yaz · 2 IP adresi · süresiz (bitiş yok)", en: "Name: WHMCS · Permissions: hesap:yaz · 2 IP addresses · no expiry"},
 		{ad: "api oluştur izinsiz", eylem: "api_anahtar.olustur", detail: n("ad=x izinler= ip=1 gün=1"),
 			tr: "Ad: x · İzinler: izin yok · 1 IP adresi · 1 gün geçerli", en: "Name: x · Permissions: no permissions · 1 IP address · valid for 1 day"},
 		{ad: "api yenile", eylem: "api_anahtar.yenile", detail: n("eski=gosp_ab12_…9f3c geçiş=24 saat"),

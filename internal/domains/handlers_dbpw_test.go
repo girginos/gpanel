@@ -11,7 +11,8 @@ package domains
 // Meşru kullanım bozulmaz: kendi ad alanındaki ya da kimseye ait olmayan ad
 // (wpu_*, taşınmış orijinal adlar — wp-config DB_USER) ile kullanıcı oluşur.
 //
-// Zincir main.go ile AYNI: RequireAuth → DBSahipligi("dbid") → SetDatabasePassword.
+// Zincir main.go ile AYNI: RequireAuth → DBSahipligiMusteri("dbid") → SetDatabasePassword
+// (silme ve optimize de DBSahipligiMusteri — handlers_dbmusteri_test.go).
 // Gerçek MariaDB gerekir (GOSP_TEST_GECICI_DSN yoksa ATLANIR). MariaDB hesap
 // işlemi SAHTE (dbKullaniciEkle dikişi): canlı sunucunun hesaplarına dokunulmaz.
 
@@ -133,7 +134,12 @@ func dp_db(t *testing.T) *sql.DB {
 			token_gecersiz_ts BIGINT NULL, last_activity_ts BIGINT NOT NULL DEFAULT 0)`,
 		`CREATE TABLE domains (id BIGINT UNSIGNED PRIMARY KEY, alan_adi VARCHAR(253) NOT NULL,
 			sistem_kullanici VARCHAR(64) NOT NULL DEFAULT '', reseller_id BIGINT NOT NULL DEFAULT 0,
-			is_demo TINYINT NOT NULL DEFAULT 0)`,
+			is_demo TINYINT NOT NULL DEFAULT 0, askida TINYINT NOT NULL DEFAULT 0,
+			askida_kaynak VARCHAR(32) NOT NULL DEFAULT '')`,
+		// Müşteri oturumu (RequireAuth → musteriOturumGecerli) FTP hesap satırına bakar.
+		`CREATE TABLE ftp_accounts (id BIGINT UNSIGNED PRIMARY KEY, domain_id BIGINT UNSIGNED NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT 'active', token_gecersiz_ts BIGINT NULL)`,
+		`INSERT INTO ftp_accounts (id, domain_id) VALUES (900, 30), (901, 20)`,
 		`CREATE TABLE db_accounts (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 			domain_id BIGINT UNSIGNED NOT NULL, db_name VARCHAR(64) NOT NULL UNIQUE,
 			db_user VARCHAR(64) NOT NULL, db_pass_plain TEXT NOT NULL,
@@ -160,7 +166,9 @@ func dp_router(h *Handlers) http.Handler {
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth(dp_sir))
-		r.With(middleware.DBSahipligi("dbid")).Put("/databases/{dbid}/password", h.SetDatabasePassword)
+		r.With(middleware.DBSahipligiMusteri("dbid")).Delete("/databases/{dbid}", h.DeleteDatabase)
+		r.With(middleware.DBSahipligiMusteri("dbid")).Put("/databases/{dbid}/password", h.SetDatabasePassword)
+		r.With(middleware.DBSahipligiMusteri("dbid")).Post("/databases/{dbid}/optimize", h.OptimizeDatabase)
 	})
 	return r
 }

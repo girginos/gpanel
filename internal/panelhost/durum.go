@@ -61,7 +61,7 @@ type Durum struct {
 func DurumOku() Durum {
 	d := Durum{Izinliler: []string{}, SunucuIP4: []string{}, SunucuIP6: []string{}}
 	// nginx vhost'tan server_name — girginospanel-panelhost sıfırlarda
-	// "148.251.169.181 localhost 127.0.0.1" gibi bir liste yazar.
+	// "203.0.113.181 localhost 127.0.0.1" gibi bir liste yazar.
 	if raw, err := os.ReadFile(PanelVhostPath); err == nil {
 		s := string(raw)
 		for _, ln := range strings.Split(s, "\n") {
@@ -72,17 +72,8 @@ func DurumOku() Durum {
 				break
 			}
 		}
-		// İlk hostname (localhost/IP olmayan)
-		for _, ad := range d.Izinliler {
-			if ad == "localhost" || ad == "127.0.0.1" {
-				continue
-			}
-			if net.ParseIP(ad) != nil {
-				continue
-			}
-			d.Hostname = ad
-			break
-		}
+		// İlk gerçek ana bilgisayar adı (bkz. ilkHostAdi).
+		d.Hostname = ilkHostAdi(d.Izinliler)
 	}
 	// Sunucu IP'leri — YALNIZ dış erişilebilir (public). 🔴 Docker/libvirt/br-*
 	// arayüzlerinin private IP'leri (172.17.x, 192.168.x, 10.x) DAHIL EDİLİRSE
@@ -192,4 +183,25 @@ func DNSCoz(hostname string, sunucuIP4 []string, sunucuIP6 []string) (cozulen []
 		}
 	}
 	return
+}
+
+// ilkHostAdi: nginx server_name listesinden ilk GERÇEK ana bilgisayar adı.
+// localhost/IP dışında nginx'in özel adları da ad SAYILMAZ: "_" (yakala-hepsi;
+// ana bilgisayar adı ayarlanmamış kurulumun varsayılanı), joker ("*.ornek.com",
+// ".ornek.com"), düzenli ifade ("~…") ve tek etiketli ad (noktasız; dışarıdan
+// çözülmez). 🔴 Eskiden "_" ad sanılıyordu: API anahtarıyla müşteri girişi
+// (WHMCS SSO) müşteriyi https://_:PORT/ adresine gönderiyordu — gerçek VPS'te
+// ölçüldü (2026-10-12, 0.3.0-20261009).
+func ilkHostAdi(adlar []string) string {
+	for _, ad := range adlar {
+		if ad == "" || ad == "_" || ad == "localhost" || strings.ContainsAny(ad, "*~$") ||
+			strings.HasPrefix(ad, ".") || !strings.Contains(strings.Trim(ad, "."), ".") {
+			continue
+		}
+		if net.ParseIP(strings.Trim(ad, "[]")) != nil {
+			continue
+		}
+		return ad
+	}
+	return ""
 }

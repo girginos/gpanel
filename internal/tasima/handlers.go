@@ -581,7 +581,8 @@ func (h *Handlers) Baslat(w http.ResponseWriter, r *http.Request) {
 // bayiPlanCoz — bayi işinin planı: istenen plan BaglanabilirMi'den geçmeli;
 // istenmediyse bayinin (yoksa genel) VARSAYILAN katalog planı. Plan bulunamazsa
 // ret: plansız hosting kaynak limitsiz açılır (kaynaklimit: plansız = sınırsız),
-// taşınan hesap bayinin plan/havuz sınırının dışına çıkmasın.
+// taşınan hesap bayinin plan/havuz sınırının dışına çıkmasın. Bayiye plan
+// OLUŞTURULMAZ (plans.BayiVarsayilanIsaretle yalnız işaretler).
 func (h *Handlers) bayiPlanCoz(ctx context.Context, rid, planID int64) (int64, int, string) {
 	if planID > 0 {
 		if err := plans.BaglanabilirMi(ctx, h.DB, rid, planID, 0); err != nil {
@@ -589,10 +590,9 @@ func (h *Handlers) bayiPlanCoz(ctx context.Context, rid, planID int64) (int64, i
 		}
 		return planID, 0, ""
 	}
-	// Bayinin KENDİ varsayılan planı (plans.BayiVarsayilanSagla: yoksa oluşturur /
-	// işaretler — açılış uzlaştırmasından sonra eklenen bayi için de). Yalnız sağlama
-	// düşerse eski davranış: genel (kök) varsayılan katalog planı.
-	if defID, _, err := plans.BayiVarsayilanSagla(ctx, h.DB, rid, 0, "sistem"); err == nil && defID > 0 {
+	// Bayinin KENDİ varsayılan planı (planı var ama hiçbiri varsayılan değilse en
+	// eskisi işaretlenir). Kendi planı yoksa genel (kök) varsayılan katalog planı.
+	if defID, _, err := plans.BayiVarsayilanIsaretle(ctx, h.DB, rid, 0, "sistem"); err == nil && defID > 0 {
 		return defID, 0, ""
 	}
 	var defID int64

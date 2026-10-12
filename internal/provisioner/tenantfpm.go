@@ -640,9 +640,17 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 		fmt.Fprintf(&b, "pm.process_idle_timeout = 30s\n")
 	}
 	fmt.Fprintf(&b, "pm.max_requests = %d\n", ps.PMMaxRequests)
+	// Duvar saati sınırı: asılı işçi havuzu tüketip siteyi çökertmesin (IstekZamanAsimiSn).
+	// Açılıştaki repairTenantPoolDrift mevcut havuzlara da uygular (graceful reload).
+	fmt.Fprintf(&b, "request_terminate_timeout = %ds\n", IstekZamanAsimiSn(ps.MaxExecutionTime))
 	b.WriteString("; ---- Güvenlik sertleştirmesi (php_admin_* → kullanıcı ini_set ile EZEMEZ) ----\n")
 	fmt.Fprintf(&b, "php_admin_value[open_basedir] = /home/%s/:/tmp/\n", sk)
 	fmt.Fprintf(&b, "php_admin_value[disable_functions] = %s\n", ps.DisableFunctions)
+	// Düz mail çıkışı KAPALI (operatör kararı 2026-10-09; bkz. mail_yasak.go). Kafeste postdrop
+	// (NoNewPrivileges) zaten çalışamaz: sendmail_path hızlı-başarısız betiğe yönlendirilir — mail() hemen
+	// false döner, işçi takılmaz, journal'a yinelenen yazı düşmez. php_admin_value → kullanıcı ini_set /
+	// .user.ini ile EZEMEZ.
+	b.WriteString(MailYasakPoolSatiri() + "\n")
 	fmt.Fprintf(&b, "php_admin_value[upload_tmp_dir] = /home/%s/tmp\n", sk)
 	fmt.Fprintf(&b, "php_admin_value[sys_temp_dir] = /home/%s/tmp\n", sk)
 	fmt.Fprintf(&b, "php_admin_value[session.save_path] = /home/%s/tmp\n", sk)

@@ -224,7 +224,7 @@ func onoff(b bool) string {
 }
 
 // poolTmpl: PHP-FPM pool conf icerigi - tum ayarlari icerir
-var poolTmpl = template.Must(template.New("pool").Funcs(template.FuncMap{"onoff": onoff, "aclSatiri": aclSatiri}).Parse(`[{{.SK}}]
+var poolTmpl = template.Must(template.New("pool").Funcs(template.FuncMap{"onoff": onoff, "aclSatiri": aclSatiri, "mailYasakSatiri": provisioner.MailYasakPoolSatiri}).Parse(`[{{.SK}}]
 user = {{.SK}}
 group = {{.SK}}
 listen = {{.SockDir}}/{{.SK}}.sock
@@ -249,6 +249,7 @@ php_admin_value[post_max_size] = {{.S.PostMaxSize}}
 php_admin_value[upload_max_filesize] = {{.S.UploadMaxFilesize}}
 php_admin_value[max_input_vars] = 10000
 php_admin_value[disable_functions] = {{.S.DisableFunctions}}
+{{mailYasakSatiri}}
 
 ; ---- Common ----
 php_admin_flag[display_errors] = {{onoff .S.DisplayErrors}}

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Ikon, I } from '@/components/Ikon'
 import { api, apiHata } from '@/lib/api'
+import { hataKodu } from '@/lib/apiAnahtar'
 import { Button, butonSinifi } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -44,6 +45,8 @@ const DBDETAIL_EN: Record<string, string> = {
   "Evet, sil": "Yes, delete",
   "\"{0}\" veritabanı ve kullanıcısı kalıcı silinecek. Bu işlem geri alınamaz!": "The database \"{0}\" and its user will be permanently deleted. This action cannot be undone!",
   "Parola alınamadı": "Failed to get password",
+  "Veritabanı parolası uyuşmuyor": "Database password mismatch",
+  "Panel Kaydını Güncelle": "Update Panel Record",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (DBDETAIL_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -59,6 +62,7 @@ export default function DomainDatabaseDetailPage() {
   const [hata, setHata] = useState<string | null>(null)
   const [optCalisiyor, setOptCalisiyor] = useState(false)
   const [pwReset, setPwReset] = useState(false)
+  const [pwYalnizKayit, setPwYalnizKayit] = useState(false)
   const [silOnay, setSilOnay] = useState(false)
 
   const yukleNesli = useRef(0)
@@ -95,7 +99,17 @@ export default function DomainDatabaseDetailPage() {
       if (hedef.origin !== window.location.origin) return
       window.open(hedef.href, '_blank', 'noopener')
     } catch (e) {
-      (await bilgi({ baslik: cevir("Bilgi"), mesaj: apiHata(e, cevir("phpMyAdmin token alınamadı")), ton: 'tehlike' }))
+      const m = apiHata(e, cevir("phpMyAdmin token alınamadı"))
+      // Panel kaydındaki parola MySQL'dekiyle uyuşmuyor (parola panel dışından değişmiş):
+      // yönetici, bayi ve hosting sahibi (müşteri) doğrudan "yalnız panel kaydını güncelle"
+      // penceresine gider (uç DBSahipligiMusteri — müşteri kendi DB'sinde yetkili).
+      if (hataKodu(e) === 'db_parola_uyusmuyor' && db.db_kullanici) {
+        if (await onay({ baslik: cevir("Veritabanı parolası uyuşmuyor"), mesaj: m, ton: 'uyari', onayEtiketi: cevir("Panel Kaydını Güncelle"), onayIkonu: I.anahtar })) {
+          setPwYalnizKayit(true); setPwReset(true)
+        }
+        return
+      }
+      await bilgi({ baslik: cevir("Bilgi"), mesaj: m, ton: 'tehlike' })
     }
   }
 
@@ -173,7 +187,7 @@ export default function DomainDatabaseDetailPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{cevir("İşlemler")}</h2>
             <div className="flex flex-wrap gap-2">
               <Button onClick={pmaAc} variant="outlined" ikon={I.db} ikonSonda={I.harici}>{cevir("phpMyAdmin'de Aç")}</Button>
-              <Button onClick={() => setPwReset(true)} variant="outlined" ikon={db.db_kullanici ? I.anahtar : I.kullaniciArti}>{db.db_kullanici ? cevir("Parola Sıfırla") : cevir("Kullanıcı Oluştur")}</Button>
+              <Button onClick={() => { setPwYalnizKayit(false); setPwReset(true) }} variant="outlined" ikon={db.db_kullanici ? I.anahtar : I.kullaniciArti}>{db.db_kullanici ? cevir("Parola Sıfırla") : cevir("Kullanıcı Oluştur")}</Button>
               <Button onClick={optimizeEt} yukleniyor={optCalisiyor} variant="outlined" ikon={I.simsek}>{optCalisiyor ? cevir("Optimize ediliyor…") : cevir("Optimize Et")}</Button>
               <Button onClick={() => setSilOnay(true)} color="error" variant="soft" ikon={I.cop} className="ml-auto">{cevir("Sil")}</Button>
             </div>
@@ -182,7 +196,7 @@ export default function DomainDatabaseDetailPage() {
       )}
 
       {pwReset && db && (
-        <PwResetModal db={db} onKapat={() => setPwReset(false)} onTamam={() => { setPwReset(false); yukle() }} />
+        <PwResetModal db={db} yalnizKayitIle={pwYalnizKayit} onKapat={() => setPwReset(false)} onTamam={() => { setPwReset(false); yukle() }} />
       )}
 
       <ConfirmDialog

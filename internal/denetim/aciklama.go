@@ -73,7 +73,7 @@ var (
 	reGunSayisi      = regexp.MustCompile(`^(\d+) gün$`)
 	reWinAjan        = regexp.MustCompile(`^windows ajanı eklendi \((.*), sürüm=(.*), parmak izi=(.*)\)$`)
 	reDegisimOk      = regexp.MustCompile(`^(\S+) (\S+)→(\S+)$`)
-	reAnahtarOlustur = regexp.MustCompile(`^ad=(.*) izinler=(\S*) ip=(\d+) gün=(\d+)$`)
+	reAnahtarOlustur = regexp.MustCompile(`^ad=(.*) izinler=(\S*) ip=(\d+) gün=(\d+|süresiz)$`)
 	reAnahtarYenile  = regexp.MustCompile(`^eski=(\S+) geçiş=(\d+) saat$`)
 	reAnahtarIptal   = regexp.MustCompile(`^ad=(.*) neden=(\S+)$`)
 	reAnahtarToplu   = regexp.MustCompile(`^neden=(\S+) (?:iptal edilen=(\d+)|HATA: anahtarlar iptal edilemedi)$`)
@@ -204,15 +204,20 @@ func ozelMetin(eylem, s string) *Aciklama {
 		}
 	case "api_anahtar.olustur":
 		if m := reAnahtarOlustur.FindStringSubmatch(s); m != nil {
-			ip, gun := atoi(m[3]), atoi(m[4])
+			ip := atoi(m[3])
 			izT, izE := "izin yok", "no permissions"
 			if m[2] != "" {
 				izT = strings.ReplaceAll(m[2], ",", ", ")
 				izE = izT
 			}
+			gT, gE := "süresiz (bitiş yok)", "no expiry"
+			if m[4] != "süresiz" {
+				gun := atoi(m[4])
+				gT, gE = fmt.Sprintf("%d gün geçerli", gun), fmt.Sprintf("valid for %d %s", gun, cogul(gun, "day", "days"))
+			}
 			return &Aciklama{
-				TR: fmt.Sprintf("Ad: %s · İzinler: %s · %d IP adresi · %d gün geçerli", m[1], izT, ip, gun),
-				EN: fmt.Sprintf("Name: %s · Permissions: %s · %d IP %s · valid for %d %s", m[1], izE, ip, cogul(ip, "address", "addresses"), gun, cogul(gun, "day", "days")),
+				TR: fmt.Sprintf("Ad: %s · İzinler: %s · %d IP adresi · %s", m[1], izT, ip, gT),
+				EN: fmt.Sprintf("Name: %s · Permissions: %s · %d IP %s · %s", m[1], izE, ip, cogul(ip, "address", "addresses"), gE),
 			}
 		}
 	case "api_anahtar.yenile":

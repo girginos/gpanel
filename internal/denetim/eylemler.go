@@ -91,12 +91,13 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"hosting.sahip_devir":              {TR: "Hosting sahibi değişti", EN: "Hosting owner changed"},
 
 	// Veritabanı
-	"db.olustur":           {TR: "Veritabanı oluşturuldu", EN: "Database created"},
-	"db.sil":               {TR: "Veritabanı silindi", EN: "Database deleted"},
-	"db.parola":            {TR: "Veritabanı parolası değiştirildi", EN: "Database password changed"},
-	"db.kullanici-olustur": {TR: "Veritabanı kullanıcısı oluşturuldu", EN: "Database user created"},
-	"db.optimize":          {TR: "Veritabanı iyileştirildi", EN: "Database optimized"},
-	"db.parola_api":        {TR: "Veritabanı parolası API ile değiştirildi", EN: "Database password changed via API"},
+	"db.olustur":             {TR: "Veritabanı oluşturuldu", EN: "Database created"},
+	"db.sil":                 {TR: "Veritabanı silindi", EN: "Database deleted"},
+	"db.parola":              {TR: "Veritabanı parolası değiştirildi", EN: "Database password changed"},
+	"db.kullanici-olustur":   {TR: "Veritabanı kullanıcısı oluşturuldu", EN: "Database user created"},
+	"db.optimize":            {TR: "Veritabanı iyileştirildi", EN: "Database optimized"},
+	"db.parola-kayit-esitle": {TR: "Veritabanı parolası panel kaydına eşitlendi", EN: "Database password record synced"},
+	"db.parola_api":          {TR: "Veritabanı parolası API ile değiştirildi", EN: "Database password changed via API"},
 
 	// FTP
 	"ftp.parola":       {TR: "FTP parolası değiştirildi", EN: "FTP password changed"},

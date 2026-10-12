@@ -49,6 +49,38 @@ func PlanHavuzTavani(db *sql.DB, domainID int64, sk string, v HavuzDegerleri) Ha
 	return v
 }
 
+// İstek duvar saati sınırı (request_terminate_timeout) tabanı/tavanı, saniye.
+const (
+	istekZamanAsimiTabanSn = 600
+	istekZamanAsimiTavanSn = 3600
+)
+
+// IstekZamanAsimiSn — kafesli tenant havuzunun request_terminate_timeout'u (sn).
+//
+// 🔴 NEDEN: max_execution_time Linux'ta YALNIZ CPU süresini sayar (ITIMER_PROF);
+// G/Ç'de bekleyen işçi (takılı sendmail/postdrop, yanıt vermeyen uzak API, kilitli
+// DB) onu hiç aşmaz ve havuzdan sonsuza dek düşer. nginx 60 sn'de istemciye hata
+// verir ama PHP arka planda sürer; pm.max_children dolunca SİTE ÇÖKER. Ölçüldü:
+// 2026-10-12 .180'de WHMCS ayar kaydı mail()→postdrop'ta asılı kaldı, işçi 7+ dk
+// serbest kalmadı. Master bu süreyi aşan işçiyi sonlandırır ve tenant günlüğüne
+// "execution timed out" yazar (Günlükler'de görünür).
+//
+// Değer: max(600, 2×max_execution_time), en çok 3600; max_execution_time ≤ 0
+// (sınırsız) → 3600. Meşru uzun işler CLI/cron'da koşmalı (FPM değil).
+func IstekZamanAsimiSn(maxExec int) int {
+	if maxExec <= 0 {
+		return istekZamanAsimiTavanSn
+	}
+	s := 2 * maxExec
+	if s < istekZamanAsimiTabanSn {
+		s = istekZamanAsimiTabanSn
+	}
+	if s > istekZamanAsimiTavanSn {
+		s = istekZamanAsimiTavanSn
+	}
+	return s
+}
+
 // havuzYedekleri — dynamic havuzun başlangıç/yedek işçi sayıları (max_children'dan).
 func havuzYedekleri(maxCh int) (start, minSpare, maxSpare int) {
 	start = maxCh / 4

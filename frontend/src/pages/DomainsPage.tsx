@@ -8,7 +8,7 @@ import AramaliSecim from '@/components/AramaliSecim'
 import { Ikon, I } from '@/components/Ikon'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, apiHata, sonucBelirsiz, UZUN_ISTEK } from '@/lib/api'
-import { varsayilanPlanSec } from '@/lib/bayiPlan'
+import { planListesiYolu, varsayilanPlanSec } from '@/lib/bayiPlan'
 import { yedekAdedi } from '@/lib/silinenYedek'
 import i18nDil from '@/lib/i18n'
 import Breadcrumb from '@/components/Breadcrumb'
@@ -277,6 +277,9 @@ export default function DomainsPage() {
   const [topluHedefBayi, setTopluHedefBayi] = useState(0)
   const [topluHedefMusteri, setTopluHedefMusteri] = useState(0)
   const [topluHedefPlan, setTopluHedefPlan] = useState(0)
+  // Toplu plan modalının listesi (null = yükleniyor): seçili hostingler tek bir bayinin
+  // ise o bayinin seçebildiği katalog, değilse kökün planları.
+  const [topluPlanlar, setTopluPlanlar] = useState<Plan[] | null>(null)
   const [isleniyor, setIsleniyor] = useState(false)
   const [silOnay, setSilOnay] = useState(false)
   // Hangi toplu eylemin sürdüğü — yalnız ilgili butonda dönen gösterge için.
@@ -321,12 +324,18 @@ export default function DomainsPage() {
       api.get('/resellers').then(r => { if (iptal) return; setTopluBayiler((r.data?.bayiler || r.data || []) as never) }).catch(() => {})
       api.get('/customers').then(r => { if (iptal) return; setTopluMusteriler((r.data?.musteriler || r.data || []) as never) }).catch(() => {})
     } else if (topluModal === 'plan') {
-      // Toplu plan modalı planları modalVeriYukle üzerinden çeker; eskiden yalnız
-      // "yeni domain" modalında yükleniyordu, o yüzden toplu planda liste boştu.
-      modalVeriYukle()
+      // Kökün /plans listesi yalnız kökün planlarıdır (bayi planları ayrı). Seçili
+      // hostinglerin HEPSİ aynı bayiye aitse o bayinin kendi planları da seçilebilir
+      // (?bayi=); karışık seçimde yalnız kökün paylaşılan planları — her sahibe uyar.
+      const sahipler = new Set(Array.from(secili).map(id => items.find(x => x.id === id)?.reseller_id || 0))
+      const tekBayi = sahipler.size === 1 ? Array.from(sahipler)[0] : 0
+      setTopluPlanlar(null); setTopluHedefPlan(0)
+      api.get<Plan[]>(planListesiYolu(tekBayi))
+        .then(r => { if (!iptal) setTopluPlanlar(r.data || []) })
+        .catch(() => { if (!iptal) setTopluPlanlar([]) })
     }
     return () => { iptal = true }
-  // modalVeriYukle her çizimde yeniden kurulur; yalnız modal/rol değişince çalışmalı.
+  // Seçim (secili/items) modal AÇILIRKENKİ hâliyle okunur; yalnız modal/rol değişince çalışmalı.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topluModal, yonetici])
 
@@ -1108,8 +1117,8 @@ export default function DomainsPage() {
                   yerTutucu={cevir("Seçiniz…")}
                   aramaYerTutucu={cevir("Plan ara…")}
                   bosMetin={cevir("Plan bulunamadı")}
-                  yukleniyor={modalVeriYuk && planlar.length === 0}
-                  secenekler={planlar.map(p => ({ id: p.id, etiket: p.ad }))}
+                  yukleniyor={topluPlanlar === null}
+                  secenekler={(topluPlanlar || []).map(p => ({ id: p.id, etiket: p.ad }))}
                 />
                 <span className="mt-1 block text-[11px] text-slate-400">{cevir("Yeni plan limitleri (disk, inode, FPM) her domaine uygulanır.")}</span>
               </label>

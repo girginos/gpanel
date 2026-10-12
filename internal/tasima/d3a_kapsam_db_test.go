@@ -505,10 +505,19 @@ func TestD3_BaslatBayiPlanVeKota(t *testing.T) {
 	o.bayiAc(t, true)
 	ot := o.bayiOturum(t, 9, []Hesap{{KaynakHesap: "u", AlanAdi: "x1.test", WebRoot: "/home/u/x1"}, {KaynakHesap: "u", AlanAdi: "x2.test", WebRoot: "/home/u/x2"}})
 	iki := []Hesap{{AlanAdi: "x1.test"}, {AlanAdi: "x2.test"}}
-	// Bayi 9'un varsayılan planı yok (plan 3 bayi 7'nin) → plan zorunlu.
+	// Bayi 9'un kendi planı yok (plan 2 geçici olarak başkasında; plan 3 bayi 7'nin) ve
+	// kökün varsayılanı yok → plan zorunlu; bayiye plan OLUŞTURULMAZ.
+	o.exec(t, `UPDATE service_plans SET reseller_id=99 WHERE id=2`)
+	var planOnce, planSonra int
+	_ = o.db.QueryRow(`SELECT COUNT(*) FROM service_plans`).Scan(&planOnce)
 	if kod, g := o.istek(t, "bayi9", http.MethodPost, "/tasima/baslat", o.baslatGovde(ot, iki, Ayarlar{})); kod != http.StatusBadRequest || !strings.Contains(g, "hosting planı") {
 		t.Errorf("plansız bayi işi reddedilmeli: %d %s", kod, g)
 	}
+	_ = o.db.QueryRow(`SELECT COUNT(*) FROM service_plans`).Scan(&planSonra)
+	if planSonra != planOnce {
+		t.Errorf("plan çözülemeyen bayi işi plan oluşturdu: %d → %d", planOnce, planSonra)
+	}
+	o.exec(t, `UPDATE service_plans SET reseller_id=9 WHERE id=2`)
 	// Başkasının planı / hostinge özel plan → 403.
 	for _, p := range []int64{3, 4} {
 		if kod, g := o.istek(t, "bayi9", http.MethodPost, "/tasima/baslat", o.baslatGovde(ot, iki, Ayarlar{PlanID: p})); kod != http.StatusForbidden {

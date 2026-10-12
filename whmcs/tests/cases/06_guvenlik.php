@@ -202,7 +202,11 @@ test('sozlesme: modulun cagirdigi tum uclar izin.go Rotalar altin dosyasinda (SS
         return;
     }
     $satirlar = [];
+    $herZaman = [];
     foreach (file($golden, FILE_IGNORE_NEW_LINES) as $s) {
+        if (preg_match('#^(\S+) /api/v1(\S+)\s+\(her zaman\)$#', $s, $m)) {
+            $herZaman[$m[1] . ' ' . $m[2]] = true;
+        }
         // "GET /api/v1/domains  hesap:oku"
         if (preg_match('#^(\S+) /api/v1(\S+)\s+(\S+)$#', $s, $m)) {
             $satirlar[$m[1] . ' ' . preg_replace('/\{[a-z]+\}/', '{id}', $m[2])] = $m[3];
@@ -240,9 +244,13 @@ test('sozlesme: modulun cagirdigi tum uclar izin.go Rotalar altin dosyasinda (SS
         dogru(isset($satirlar[$k]), "altin dosyada yok: $k");
         esit($g . ':' . $e, $satirlar[$k], $k);
     }
+    // FakePanel'in "her zaman acik" uclari altin dosyada da her zaman acik
+    foreach (FakePanel::$herZaman as $k) {
+        dogru(isset($herZaman[$k]), "altin dosyada (her zaman) degil: $k");
+    }
     // modulun gercekten attigi her uc altin dosyada (benzeri) var
     foreach (array_keys($kullanilan) as $k) {
-        if ($k === 'POST /domains/{id}/sso' || $k === 'GET /api-anahtari/ben') {
+        if ($k === 'POST /domains/{id}/sso' || isset($herZaman[$k])) {
             continue;
         }
         dogru(isset($satirlar[$k]), "modul altin dosyada olmayan uc cagiriyor: $k");

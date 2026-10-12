@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"girginospanel/internal/gizli"
+	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/middleware"
 
@@ -25,6 +26,17 @@ import (
 type Handlers struct {
 	DB *sql.DB
 }
+
+// Makine okunur hata kodlari (UI dogru cozum yolunu gosterir).
+const (
+	KodDBParolaUyusmuyor = "db_parola_uyusmuyor"
+	KodDBKullaniciYok    = "db_kullanici_yok"
+	KodDBKayitCozulemedi = "db_parola_cozulemedi"
+)
+
+// dbGirisDene: kayitli kimligin MariaDB'de GERCEKTEN giris yapabildigini olcer
+// (testte sahtelenir; canli MariaDB'ye gidilmez).
+var dbGirisDene = hesaplar.DBGirisDene
 
 func randomHex(n int) string {
 	b := make([]byte, n)
@@ -75,6 +87,32 @@ func (h *Handlers) TokenIste(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin phpMyAdmin'i etkin değildir")
 		return
 	}
+	// 🔴 ON-DENETIM (2026-10-12, bir müşteri sunucusu): token, phpMyAdmin'in GIRIS
+	// YAPAMAYACAGI bir kimlikle uretiliyordu. phpMyAdmin "Access denied" alinca
+	// SignonURL'e TOKENSIZ donuyor, kullanici yalnizca "Token eksik" goruyordu —
+	// gercek neden (panel kaydindaki parola MariaDB'dekiyle uyusmuyor) hicbir yere
+	// ulasmiyordu. Sahiplik kapisindan SONRA (sahibi olmayana kimligin gecerliligi
+	// sizdirilmaz) olculur; kesin olmayan olcum hatasinda token yine verilir.
+	if strings.TrimSpace(dbKul) == "" {
+		httpx.WriteErrorKod(w, http.StatusConflict,
+			"bu veritabanının MySQL kullanıcısı yok — önce \"Kullanıcı Oluştur\" ile kullanıcı tanımlayın", KodDBKullaniciYok)
+		return
+	}
+	if gizli.SifreliMi(dbPar) {
+		// CozBagli cozemeyince degeri OLDUGU GIBI dondurur: phpMyAdmin'e ciphertext
+		// "parola" diye gidip ayni sessiz "Token eksik" dongusunu uretirdi.
+		log.Printf("pma: db=%d kullanici=%s kayitli parola cozulemedi (db.key kayip/degismis olabilir)", dbID, dbKul)
+		httpx.WriteErrorKod(w, http.StatusInternalServerError,
+			"kayıtlı veritabanı parolası çözülemedi (sunucu anahtarı) — yöneticiye başvurun", KodDBKayitCozulemedi)
+		return
+	}
+	if err := dbGirisDene(r.Context(), dbKul, dbPar); errors.Is(err, hesaplar.ErrDBParolaUyusmuyor) {
+		log.Printf("pma: db=%d kullanici=%s panel kaydindaki parola MariaDB'de reddedildi (1045) — kayit bayat (parola panel disindan degismis)", dbID, dbKul)
+		httpx.WriteErrorKod(w, http.StatusConflict, parolaUyusmuyorMesaji(), KodDBParolaUyusmuyor)
+		return
+	} else if err != nil {
+		log.Printf("pma: db=%d kimlik on-denetimi olculemedi (token yine veriliyor): %v", dbID, err)
+	}
 
 	token := randomHex(24)
 	expires := time.Now().Add(2 * time.Minute) // 2 dakika kısa pencere
@@ -101,6 +139,16 @@ func (h *Handlers) TokenIste(w http.ResponseWriter, r *http.Request) {
 		"son_kullanma":  expires.Format(time.RFC3339),
 		"gecerlilik_sn": 120,
 	})
+}
+
+// parolaUyusmuyorMesaji: kayit bayatligi mesaji. Duzeltme ("Parola Sifirla" →
+// "Yalniz panel kaydini guncelle") PUT /databases/{dbid}/password ucudur; bu uca token
+// alabilen HERKES (kok, kendi hostingindeki bayi, hosting sahibi musteri — DBSahipligiMusteri)
+// erisir, bu yuzden mesaj herkese ayni cozum yolunu gosterir.
+func parolaUyusmuyorMesaji() string {
+	return "panelde kayıtlı veritabanı parolası MySQL'deki parolayla uyuşmuyor (parola panel dışından değiştirilmiş) — phpMyAdmin bu yüzden giriş yapamıyor. " +
+		"Çözüm: \"Parola Sıfırla\" penceresinde \"Yalnız panel kaydını güncelle\" seçip uygulamanın yapılandırma dosyasındaki mevcut parolayı girin (site etkilenmez) " +
+		"ya da yeni parola belirleyip uygulamanın yapılandırmasını da güncelleyin."
 }
 
 // Bozdur: signon.php internal-auth header ile çağırır, credentials JSON döner, token tek-kullanim.

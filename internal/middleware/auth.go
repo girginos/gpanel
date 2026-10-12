@@ -338,13 +338,17 @@ func DomainSahibiMi(r *http.Request, domainID int64) bool {
 // baginliydi; ileride o satiri unutan bir handler sessizce cross-tenant IDOR
 // acardi. Handler-ici kontrol KALIYOR (iki katman).
 //
-// Yonetimsel uclar icin: musteri token'i GECMEZ (kendi DB'sini silemez).
+// Yalniz kok/bayi uclari icin: musteri token'i GECMEZ. (Bugun DB uclarinin hepsi
+// DBSahipligiMusteri kullanir; bu kapi yalniz-yonetimsel yeni bir DB ucu icindir.)
 func DBSahipligi(param string) func(http.Handler) http.Handler {
 	return dbSahipligi(param, false)
 }
 
-// DBSahipligiMusteri: okuma/oturum uclari (phpMyAdmin SSO) — musteri de kendi
-// domaininin DB'si icin gecebilir.
+// DBSahipligiMusteri: hosting sahibinin (musteri) de KENDI domaininin DB'si icin
+// yapabildigi uclar — phpMyAdmin SSO, parola sifirlama, optimize, silme (kullanici
+// karari 2026-10-12: "musteri veritabani silebilsin"). Kok her DB'de, bayi yalniz kendi
+// hosting hesaplarinda. Musteri (adina olmayan) icin domain askisi MusteriScope ile
+// AYNI sekilde zorlanir (askidaki hesap DB islemi yapamaz).
 func DBSahipligiMusteri(param string) func(http.Handler) http.Handler {
 	return dbSahipligi(param, true)
 }
@@ -365,8 +369,18 @@ func dbSahipligi(param string, musteriGecer bool) func(http.Handler) http.Handle
 				return
 			}
 			izin := YonetimSahibi(r, domainID)
+			mc := MusteriClaimsFrom(r)
 			if !izin && musteriGecer {
 				izin = DomainSahibiMi(r, domainID)
+				// Askı zorlaması (MusteriScope ile aynı, fail-CLOSED): RequireAuth yalnız
+				// FTP hesabının durumuna bakar; domain askısı burada kesilir. Adına-oturum
+				// (bayi/yönetici) askıdaki hesabı inceleyebilir — karar adinaOturumGecerli'de.
+				if izin && mc != nil && !mc.Adina() {
+					if kod, mesaj := domainAskidaKod(r.Context(), domainID); kod != 0 {
+						redYaz(w, kod, mesaj)
+						return
+					}
+				}
 			}
 			if !izin {
 				httpx.WriteError(w, http.StatusNotFound, "veritabanı bulunamadı")

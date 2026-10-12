@@ -43,6 +43,8 @@ final class ApiIstemci
     private $eylem = 'API';
     /** @var string[] ek gizli degerler (maskeleme) */
     private $ekGizli = [];
+    /** @var string portun kaynagi (Yardimci::sunucuAdresi): hostname|accesshash|whmcs|varsayilan */
+    public $portKaynagi = 'whmcs';
 
     public function __construct(string $host, int $port, string $kullanici, string $anahtar, bool $dogrula = true, ?callable $tasiyici = null)
     {
@@ -57,7 +59,8 @@ final class ApiIstemci
     /**
      * WHMCS $params dizisinden istemci uretir.
      *   serverhostname|serverip, serverport, serversecure, serverusername, serverpassword (= API anahtari)
-     *   serveraccesshash = "tls-dogrulama-kapali" -> TLS dogrulamasi KAPALI (acik secim)
+     *   serveraccesshash: "tls-dogrulama-kapali" -> TLS dogrulamasi KAPALI (acik secim); "port=N" -> port
+     *   Port onceligi: Hostname "alan:PORT" > Access Hash "port=N" > WHMCS Port > 8443 (Yardimci::sunucuAdresi)
      *   $dogrulamaKapali: urun duzeyindeki "TLS dogrulamasini kapat" secenegi
      *
      * @param array<string,mixed> $params
@@ -65,27 +68,32 @@ final class ApiIstemci
      */
     public static function paramsdan(array $params, bool $dogrulamaKapali = false): self
     {
-        $host = trim((string) ($params['serverhostname'] ?? ''));
-        if ($host === '') {
-            $host = trim((string) ($params['serverip'] ?? ''));
-        }
+        $adres = Yardimci::sunucuAdresi($params);
+        $host = $adres['host'];
         if (!Yardimci::hostGecerli($host)) {
-            throw new ApiHatasi(0, 'Sunucu ayarında geçerli bir ana bilgisayar adı/IP yok.');
+            throw new ApiHatasi(0, Ceviri::t('Sunucu ayarında geçerli bir ana bilgisayar adı/IP yok (port yazacaksanız biçim: panel.ornek.com:30409).'));
         }
-        $port = (int) ($params['serverport'] ?? 0);
+        $port = $adres['port'];
         if ($port < 1 || $port > 65535) {
-            throw new ApiHatasi(0, 'Sunucu ayarındaki Port (yönetici kapısı portu) geçersiz.');
+            throw new ApiHatasi(0, Ceviri::t('Sunucu ayarındaki Port (yönetici kapısı portu) geçersiz.'));
         }
         if (!Yardimci::acik($params['serversecure'] ?? '')) {
             // Panel yalniz TLS konusur; API anahtarini duz metin gondermeyiz.
-            throw new ApiHatasi(0, "Sunucu ayarında 'Güvenli (SSL)' kutusu işaretli olmalı; API anahtarı düz HTTP ile gönderilmez.");
+            throw new ApiHatasi(0, Ceviri::t("Sunucu ayarında 'Güvenli (SSL)' kutusu işaretli olmalı; API anahtarı düz HTTP ile gönderilmez."));
         }
         $anahtar = (string) ($params['serverpassword'] ?? '');
         if ($anahtar === '') {
-            throw new ApiHatasi(0, "Sunucu ayarındaki 'Parola' alanına panel API anahtarı (gosp_...) girilmeli.");
+            throw new ApiHatasi(0, Ceviri::t("Sunucu ayarındaki 'Parola' alanına panel API anahtarı (gosp_...) girilmeli."));
         }
-        $dogrula = !($dogrulamaKapali || trim((string) ($params['serveraccesshash'] ?? '')) === 'tls-dogrulama-kapali');
-        return new self($host, $port, (string) ($params['serverusername'] ?? ''), $anahtar, $dogrula);
+        $dogrula = !($dogrulamaKapali || Yardimci::erisimSecenekleri((string) ($params['serveraccesshash'] ?? ''))['tlsKapali']);
+        $c = new self($host, $port, (string) ($params['serverusername'] ?? ''), $anahtar, $dogrula);
+        $c->portKaynagi = $adres['kaynak'];
+        return $c;
+    }
+
+    public function port(): int
+    {
+        return $this->port;
     }
 
     public function dogrulaAcik(): bool
@@ -225,7 +233,7 @@ final class ApiIstemci
     {
         // Panel duz dizi doner (handlers.List, plans.List, reseller.Liste).
         if (!is_array($d) || ($d !== [] && array_keys($d) !== range(0, count($d) - 1))) {
-            throw new ApiHatasi(502, 'Panel yanıtı beklenen liste biçiminde değil.');
+            throw new ApiHatasi(502, Ceviri::t('Panel yanıtı beklenen liste biçiminde değil.'));
         }
         return $d;
     }
@@ -248,7 +256,7 @@ final class ApiIstemci
         if ($govde !== null && $metod !== 'GET' && $metod !== 'DELETE') {
             $govdeMetin = json_encode($govde === [] ? new \stdClass() : $govde, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             if ($govdeMetin === false) {
-                throw new ApiHatasi(0, 'İstek gövdesi JSON’a çevrilemedi.');
+                throw new ApiHatasi(0, Ceviri::t('İstek gövdesi JSON’a çevrilemedi.'));
             }
         }
         $basliklar = [
@@ -277,11 +285,13 @@ final class ApiIstemci
         $this->gunlukle($metod, $url, $govde, $durum, $ham, $cozulen, $ag);
 
         if ($durum === 0) {
-            throw new ApiHatasi(0, 'Panele bağlanılamadı: ' . ($ag !== '' ? $this->temizle($ag) : 'yanıt yok'), $ag);
+            throw new ApiHatasi(0, Ceviri::t('Panele bağlanılamadı ({0}:{1}): {2}', [
+                $this->host, $this->port, $ag !== '' ? $this->temizle($ag) : Ceviri::t('yanıt yok'),
+            ]) . $this->portIpucu(), $ag);
         }
         if ($durum >= 200 && $durum < 300) {
             if (!is_array($cozulen)) {
-                throw new ApiHatasi($durum, 'Panel yanıtı çözümlenemedi (JSON değil).');
+                throw new ApiHatasi($durum, Ceviri::t('Panel yanıtı çözümlenemedi (JSON değil).'));
             }
             return $cozulen;
         }
@@ -290,33 +300,47 @@ final class ApiIstemci
         throw new ApiHatasi($durum, self::hataMesaji($durum, $pm, $kod, $izinGrubu), $pm, $kod, $izinGrubu);
     }
 
-    /** HTTP durumu -> Turkce, eyleme donuk hata metni. Panel mesaji aynen eklenir. */
+    /**
+     * Port acikca verilmemisse (WHMCS varsayilani / Port alani) baglanti hatasinda
+     * portun nereye yazilacagini soyler: gPanel'in rol kapisi portlari rastgeledir.
+     */
+    private function portIpucu(): string
+    {
+        if ($this->portKaynagi !== 'whmcs' && $this->portKaynagi !== 'varsayilan') {
+            return '';
+        }
+        return ' — ' . Ceviri::t('Port {0} kullanıldı. gPanel yönetici kapısı portunu (panele tarayıcıda girdiğiniz adresteki port) Hostname alanına "{1}:PORT" biçiminde ya da Access Hash alanına "port=PORT" olarak yazın (Gelişmiş modda Port alanı da kullanılabilir).', [
+            $this->port, $this->host,
+        ]);
+    }
+
+    /** HTTP durumu -> eyleme donuk hata metni (yonetici diline cevrilir). Panel mesaji CEVRILMEZ, aynen eklenir. */
     public static function hataMesaji(int $durum, string $panel, string $kod, string $izinGrubu): string
     {
         $ek = $panel !== '' ? ' Panel: ' . $panel : '';
         switch (true) {
             case $durum === 400 || $durum === 422:
-                return 'Panel isteği doğrulamadı:' . ($panel !== '' ? ' ' . $panel : ' geçersiz istek.');
+                return Ceviri::t('Panel isteği doğrulamadı:') . ' ' . ($panel !== '' ? $panel : Ceviri::t('geçersiz istek.'));
             case $durum === 401:
-                return 'API anahtarı geçersiz (ya da sunucu ayarındaki kullanıcı adı anahtarın sahibiyle eşleşmiyor).' . $ek;
+                return Ceviri::t('API anahtarı geçersiz (ya da sunucu ayarındaki kullanıcı adı anahtarın sahibiyle eşleşmiyor).') . $ek;
             case $durum === 403:
                 if ($kod === 'hesap_askida' || $kod === 'bayi_askida') {
-                    return 'Hesap/bayi askıda olduğu için işlem reddedildi.' . $ek;
+                    return Ceviri::t('Hesap/bayi askıda olduğu için işlem reddedildi.') . $ek;
                 }
                 if ($izinGrubu !== '') {
-                    return "API anahtarında '" . $izinGrubu . "' izni eksik ya da bu uç anahtara kapalı." . $ek;
+                    return Ceviri::t("API anahtarında '{0}' izni eksik ya da bu uç anahtara kapalı.", [$izinGrubu]) . $ek;
                 }
-                return 'Erişim reddedildi (yetki ya da kapsam yetersiz).' . $ek;
+                return Ceviri::t('Erişim reddedildi (yetki ya da kapsam yetersiz).') . $ek;
             case $durum === 404:
-                return 'Panelde kayıt bulunamadı.' . $ek;
+                return Ceviri::t('Panelde kayıt bulunamadı.') . $ek;
             case $durum === 409:
-                return 'İşlem mevcut durumla çakışıyor (örn. hesap/bayi askıda ya da kayıt zaten var).' . $ek;
+                return Ceviri::t('İşlem mevcut durumla çakışıyor (örn. hesap/bayi askıda ya da kayıt zaten var).') . $ek;
             case $durum === 429:
-                return 'Panel istek hız sınırına takıldı; biraz sonra yeniden deneyin.' . $ek;
+                return Ceviri::t('Panel istek hız sınırına takıldı; biraz sonra yeniden deneyin.') . $ek;
             case $durum >= 500:
-                return 'Panel sunucu hatası (HTTP ' . $durum . ').' . $ek;
+                return Ceviri::t('Panel sunucu hatası (HTTP {0}).', [$durum]) . $ek;
             default:
-                return 'Beklenmeyen panel yanıtı (HTTP ' . $durum . ').' . $ek;
+                return Ceviri::t('Beklenmeyen panel yanıtı (HTTP {0}).', [$durum]) . $ek;
         }
     }
 
@@ -353,7 +377,7 @@ final class ApiIstemci
     public static function curlTasiyici(array $istek): array
     {
         if (!function_exists('curl_init')) {
-            return ['durum' => 0, 'govde' => '', 'hata' => 'PHP curl eklentisi yok'];
+            return ['durum' => 0, 'govde' => '', 'hata' => Ceviri::t('PHP curl eklentisi yok')];
         }
         $ch = curl_init($istek['url']);
         $opt = [

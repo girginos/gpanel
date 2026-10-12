@@ -227,6 +227,30 @@ func TestAnahtarGecersizler(t *testing.T) {
 	}
 }
 
+func TestAnahtarIPListesi_YerelIstekSunucuIPsi(t *testing.T) {
+	s, h := akKur(t)
+	eski := apianahtar.SunucuIPleri
+	apianahtar.SunucuIPleri = func() []string { return []string{"198.51.100.7"} }
+	defer func() { apianahtar.SunucuIPleri = eski }()
+	kendi := s.akEkle(t, apianahtar.RolKok, 1, []string{"hesap:oku"}, []string{"198.51.100.7/32"}, nil)
+	baska := s.akEkle(t, apianahtar.RolKok, 1, []string{"hesap:oku"}, []string{"203.0.113.9/32"}, nil)
+	for _, c := range []struct {
+		ad, ip, tok string
+		kod         int
+	}{
+		{"liste sunucunun IP'si, istek ::1", "::1", kendi, 200},
+		{"liste sunucunun IP'si, istek 127.0.0.1", "127.0.0.1", kendi, 200},
+		{"liste başka IP, istek ::1", "::1", baska, 403},
+		{"kanıtsız istek", "", kendi, 403},
+		{"yabancı IP", "192.0.2.50", kendi, 403},
+	} {
+		s.ip = c.ip
+		if w := akIstek(h, "GET", "/api/v1/domains", c.tok); w.Code != c.kod {
+			t.Errorf("%s: %d (beklenen %d) %s", c.ad, w.Code, c.kod, w.Body)
+		}
+	}
+}
+
 func TestAnahtarIPListesi(t *testing.T) {
 	s, h := akKur(t)
 	kok := s.akEkle(t, apianahtar.RolKok, 1, []string{"hesap:oku"}, []string{"198.51.100.7/32", "2001:db8::/32"}, nil)

@@ -3,6 +3,7 @@ package apianahtar
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strings"
 	"testing"
@@ -125,6 +126,40 @@ func TestIPListesiKanonik(t *testing.T) {
 	}
 	if _, err := IPListesiKanonik(cok, false); !errors.Is(err, ErrIPCok) {
 		t.Errorf("üst sınır: %v", err)
+	}
+}
+
+func TestIPIzinliYerel(t *testing.T) {
+	eski := SunucuIPleri
+	SunucuIPleri = func() []string { return []string{"203.0.113.180", "2a01:4f8::5"} }
+	defer func() { SunucuIPleri = eski }()
+	kendi := []string{"203.0.113.180/32"}
+	for _, c := range []struct {
+		liste []string
+		ip    string
+		bek   bool
+	}{
+		{kendi, "::1", true},              // aynı sunucudaki WHMCS (hosts → ::1)
+		{kendi, "127.0.0.1", true},        // IPv4 loopback
+		{kendi, "127.0.0.53", true},       // 127/8
+		{kendi, "::ffff:127.0.0.1", true}, // eşlenmiş
+		{kendi, "203.0.113.180", true},  // doğrudan (eski davranış)
+		{kendi, "203.0.113.5", false},     // yabancı IP
+		{kendi, "", false},                // kanıtsız istek
+		{[]string{"2a01:4f8::/64"}, "::1", true},
+		{[]string{"10.9.9.9/32"}, "::1", false}, // liste sunucunun IP'sini içermiyor
+		{[]string{"10.9.9.9/32"}, "127.0.0.1", false},
+		{nil, "::1", true}, // boş liste = her IP (bayi)
+	} {
+		if g := IPIzinliYerel(c.liste, c.ip); g != c.bek {
+			t.Errorf("IPIzinliYerel(%v, %q) = %v, beklenen %v", c.liste, c.ip, g, c.bek)
+		}
+	}
+	// gerçek arayüz listesi loopback/link-local içermez
+	for _, s := range sunucuIPleriOnbellekli() {
+		if a, err := netip.ParseAddr(s); err != nil || a.IsLoopback() || a.IsLinkLocalUnicast() {
+			t.Errorf("sunucu IP listesinde olmaması gereken adres: %q", s)
+		}
 	}
 }
 

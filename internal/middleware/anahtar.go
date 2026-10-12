@@ -254,7 +254,8 @@ func anahtarIstek(w http.ResponseWriter, r *http.Request, next http.Handler, kim
 		red(http.StatusForbidden, "bu IP'den erişim izni yok", "kök IP listesi boş")
 		return
 	}
-	if !apianahtar.IPIzinli(k.IPler, ip) {
+	// Yerel (loopback) istek: sunucunun kendi IP'si listedeyse kabul (aynı sunucudaki WHMCS).
+	if !apianahtar.IPIzinliYerel(k.IPler, ip) {
 		red(http.StatusForbidden, "bu IP'den erişim izni yok", "ip "+ip)
 		return
 	}

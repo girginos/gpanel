@@ -3,14 +3,16 @@ package plans_test
 // bayi_plan_http_test.go — bayinin KENDİ planları (bayi_plan.go), gerçek rota
 // zinciriyle (RequireAuth + AdminVeyaReseller) ve gerçek MariaDB'yle:
 //
-//   - Açılış uzlaştırması: planı olmayan bayiye "<bayi> Varsayılan" oluşur (değer
-//     kuralı: kök şablonu ⊓ hosting başına havuz payı ⊓ posta tavanı; kök iç ayarları
-//     şablondan sızmaz), planı olan ama varsayılanı olmayana en eskisi işaretlenir;
-//     idempotent; hostinglerin planına dokunmaz.
-//   - Bayi kendi planını oluşturur/düzenler/siler: paket havuzu + bağlı hostinglerin
-//     taahhüdü; kök alanları (IO/DB governor…) bayi isteğiyle değişmez; varsayılan
-//     işareti kaldırılamaz, VarsayilanYap ile değişir; son plan silinemez; silinen
-//     varsayılanın yerine en eski plan geçer; düzenleme bağlı hostinglere uygulanır.
+//   - 🔴 Bayiye plan OTOMATİK AÇILMAZ (kullanıcı bildirimi 2026-10-12): açılış
+//     uzlaştırması planı olmayan bayiye plan YAZMAZ; planı olan ama varsayılanı
+//     olmayana en eskisi işaretlenir; idempotent; hostinglerin planına dokunmaz.
+//   - Bayi kendi planını oluşturur/düzenler/siler: ilk planı varsayılan olur; paket
+//     havuzu + bağlı hostinglerin taahhüdü; kök alanları (IO/DB governor…) bayi
+//     isteğiyle değişmez; varsayılan işareti kaldırılamaz, VarsayilanYap ile değişir;
+//     silinen varsayılanın yerine en eski plan geçer; SON plan da silinebilir (yerine
+//     plan açılmaz); düzenleme bağlı hostinglere uygulanır.
+//   - Eski otomatik planların temizliği (OtomatikBayiPlanlariniTemizle): yalnız
+//     imzası birebir tutan, kullanılmayan, bitmemiş taşıması olmayan bayi planı.
 //   - IDOR: bayi A, bayi C'nin planını göremez/düzenleyemez/silemez/varsayılan
 //     yapamaz; müşteri hiçbir plan ucuna yazamaz; kökün paylaşılan planı bayiye salt
 //     okunur; yönetici her planı düzenler (varsayılan kapsamı planın sahibi).
@@ -185,48 +187,57 @@ func bp_uygulayici(t *testing.T) func(time.Duration, int) []int64 {
 	}
 }
 
-func bp_uzlastir(t *testing.T, db *sql.DB) (int, int) {
+func bp_uzlastir(t *testing.T, db *sql.DB) int {
 	t.Helper()
-	o, i, err := plans.BayiVarsayilanUzlastir(t.Context(), db)
+	i, err := plans.BayiVarsayilanUzlastir(t.Context(), db)
 	if err != nil {
 		t.Fatalf("uzlaştırma: %v", err)
 	}
-	return o, i
+	return i
 }
 
-func bp_cPlani(t *testing.T, db *sql.DB) int64 {
+// bp_cIlkPlan — bayi C'nin İLK kendi planı (C POST eder). Bayiye plan otomatik
+// açılmadığından C'nin planı yoktur; ilk planı varsayılanı olur.
+func bp_cIlkPlan(t *testing.T, h http.Handler, db *sql.DB) int64 {
 	t.Helper()
-	var id int64
-	if err := db.QueryRow(`SELECT id FROM service_plans WHERE reseller_id=4 AND varsayilan=1`).Scan(&id); err != nil {
-		t.Fatalf("bayi C varsayılan planı yok: %v", err)
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE reseller_id=4`); n != 0 {
+		t.Fatalf("kurgu: C'nin planı olmamalı (otomatik plan?): %d", n)
 	}
-	return id
+	y := bp_istek(t, h, "C", "POST", "/plans", map[string]any{"ad": "C Ilk", "disk_kota_mb": 1999,
+		"trafik_kota_mb": 9999, "max_email": 10, "nginx_ek_direktifler": ""})
+	if y.kod != http.StatusCreated {
+		t.Fatalf("C ilk plan → %d %s", y.kod, y.govde)
+	}
+	var p struct{ ID int64 }
+	_ = json.Unmarshal([]byte(y.govde), &p)
+	if v := bp_varsayilanlar(t, db, 4); len(v) != 1 || v[0] != p.ID {
+		t.Fatalf("C'nin ilk planı varsayılan olmadı: %v (beklenen [%d])", v, p.ID)
+	}
+	return p.ID
 }
 
 // ── Açılış uzlaştırması ─────────────────────────────────────────────────────
 
-func TestBayiPlan_VarsayilanUzlastirma(t *testing.T) {
+// 🔴 Kullanıcı bildirimi 2026-10-12 ("100 bayi = 100 hosting planı"): açılış
+// uzlaştırması ve doğrudan işaretleme bayiye plan YAZMAZ; yalnız kendi planı olan
+// bayide varsayılan işaretini tamamlar.
+func TestBayiPlan_UzlastirmaPlanOlusturmaz(t *testing.T) {
 	db := bp_geciciDB(t)
 	planOnce := bp_sayi(t, db, `SELECT COALESCE(SUM(plan_id*id),0) FROM domains`)
+	toplam := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`)
 
-	olusan, isaretlenen := bp_uzlastir(t, db)
-	if olusan != 1 || isaretlenen != 2 {
-		t.Fatalf("uzlaştırma: %d oluştu / %d işaretlendi (beklenen 1 / 2: C oluşur, A ve B işaretlenir)", olusan, isaretlenen)
+	if i := bp_uzlastir(t, db); i != 2 {
+		t.Fatalf("uzlaştırma: %d işaretlendi (beklenen 2: A ve B)", i)
 	}
-	// Bayi C: yeni "<bayi> Varsayılan" planı — değer kuralı.
-	cid := bp_cPlani(t, db)
-	p := bp_oku(t, db, cid)
-	if p.ad != "bayic Varsayılan" || p.sahip != 4 || p.varsayilan != 1 {
-		t.Errorf("C varsayılan planı: %+v", p)
+	// Kendi planı olmayan C'ye plan AÇILMADI (eskiden "bayic Varsayılan" oluşurdu).
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE reseller_id=4`); n != 0 {
+		t.Errorf("uzlaştırma bayi C'ye %d plan açtı", n)
 	}
-	// Şablon = kökün varsayılan global planı "Standart" (10240/51200); hosting başına
-	// pay = (havuz-1)/hak → disk 9999/5=1999, trafik 49999/5=9999; posta tavanı 10.
-	if p.disk != 1999 || p.trafik != 9999 || p.maxEmail != 10 || p.cpu != 100 {
-		t.Errorf("değer kuralı: disk=%d trafik=%d max_email=%d cpu=%d (beklenen 1999/9999/10/100)", p.disk, p.trafik, p.maxEmail, p.cpu)
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`); n != toplam {
+		t.Errorf("uzlaştırma plan sayısını değiştirdi: %d → %d", toplam, n)
 	}
-	// Kökün iç ayarları (IO 40 MB/s, KILL 30 sn, açıklama, nginx, WAF) sızmaz.
-	if p.ioRead != 0 || p.dbSn != 0 || p.proc != 50 || strings.Contains(p.aciklama, "KOK") || p.nginx != "" || p.waf != 0 {
-		t.Errorf("GL-06: kök şablonunun iç ayarı bayi planına sızdı: %+v", p)
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.varsayilan_olustur'`); n != 0 {
+		t.Errorf("plan.varsayilan_olustur denetimi yazıldı: %d", n)
 	}
 	// A: en eski kendi katalog planı (200) varsayılan; B: 300. Kökün varsayılanı (1) yerinde.
 	if v := bp_varsayilanlar(t, db, 2); len(v) != 1 || v[0] != 200 {
@@ -238,38 +249,34 @@ func TestBayiPlan_VarsayilanUzlastirma(t *testing.T) {
 	if v := bp_varsayilanlar(t, db, 0); len(v) != 1 || v[0] != 1 {
 		t.Errorf("kökün varsayılanı değişti: %v", v)
 	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.varsayilan' AND reseller_id IN (2,3)`); n != 2 {
+		t.Errorf("plan.varsayilan denetimi (A, B): %d", n)
+	}
 	// Hostinglerin planına dokunulmadı.
 	if s := bp_sayi(t, db, `SELECT COALESCE(SUM(plan_id*id),0) FROM domains`); s != planOnce {
 		t.Errorf("uzlaştırma hosting planlarını değiştirdi")
 	}
-	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.varsayilan_olustur' AND reseller_id=4`); n != 1 {
-		t.Errorf("denetim kaydı (plan.varsayilan_olustur, kapsam C): %d", n)
-	}
 	// İdempotent.
-	toplam := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`)
-	if o, i := bp_uzlastir(t, db); o != 0 || i != 0 || bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`) != toplam {
-		t.Errorf("ikinci uzlaştırma iş yaptı: %d/%d", o, i)
+	if i := bp_uzlastir(t, db); i != 0 || bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`) != toplam {
+		t.Errorf("ikinci uzlaştırma iş yaptı: %d", i)
 	}
-	// Ad çakışması: kökün "bayid Varsayılan" adlı planı varken yeni bayi D yine planını alır.
-	pk_exec(t, db, `INSERT INTO service_plans (id, ad, disk_kota_mb, trafik_kota_mb, reseller_id) VALUES (900, 'bayid Varsayılan', 1, 1, 0)`)
+	// Doğrudan işaretleme: planı olmayan yeni bayi → "yok", plan YOK.
 	pk_exec(t, db, `INSERT INTO users (id, role, username, max_disk_mb, max_trafik_mb) VALUES (5, 'reseller', 'bayid', 0, 0)`)
-	id, durum, err := plans.BayiVarsayilanSagla(t.Context(), db, 5, 1, "root")
-	if err != nil || durum != plans.VarsayilanOlusturuldu {
-		t.Fatalf("D sağlama: %v %s", err, durum)
+	id, durum, err := plans.BayiVarsayilanIsaretle(t.Context(), db, 5, 1, "root")
+	if err != nil || durum != plans.VarsayilanYok || id != 0 {
+		t.Errorf("planı olmayan bayi: id=%d durum=%q err=%v (beklenen 0/yok/nil)", id, durum, err)
 	}
-	if d := bp_oku(t, db, id); d.ad != "bayid Varsayılan #5" || d.sahip != 5 || d.disk <= 0 || d.trafik <= 0 {
-		t.Errorf("D (çakışma + sınırsız havuz → şablon değeri): %+v", d)
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE reseller_id=5`); n != 0 {
+		t.Errorf("işaretleme bayi D'ye %d plan açtı", n)
 	}
-	// Oluşan varsayılan plan bayinin kendi doğrulamasından geçer (aynı değerle PUT).
-	h := bp_router(db)
-	bp_uygulayici(t)
-	if y := bp_istek(t, h, "C", "PUT", fmt.Sprintf("/plans/%d", cid), map[string]any{"ad": p.ad, "disk_kota_mb": p.disk,
-		"trafik_kota_mb": p.trafik, "max_email": p.maxEmail, "nginx_ek_direktifler": ""}); y.kod != http.StatusOK {
-		t.Errorf("C kendi varsayılan planını aynen kaydedemedi → %d %s", y.kod, y.govde)
+	if id, durum, err := plans.BayiVarsayilanIsaretle(t.Context(), db, 2, 1, "root"); err != nil || durum != plans.VarsayilanVardi || id != 200 {
+		t.Errorf("varsayılanı olan bayi: id=%d durum=%q err=%v", id, durum, err)
 	}
 	// Bayi olmayan kimlik.
-	if _, _, err := plans.BayiVarsayilanSagla(t.Context(), db, 1, 0, "sistem"); err != plans.ErrBayiYok {
-		t.Errorf("yönetici kimliği için sağlama: %v", err)
+	for _, rid := range []int64{1, 0, 99} {
+		if _, _, err := plans.BayiVarsayilanIsaretle(t.Context(), db, rid, 0, "sistem"); err != plans.ErrBayiYok {
+			t.Errorf("bayi olmayan kimlik %d için işaretleme: %v", rid, err)
+		}
 	}
 }
 
@@ -280,7 +287,7 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 	bp_uzlastir(t, db)
 	h := bp_router(db)
 	uygulanan := bp_uygulayici(t)
-	varsayilanID := bp_cPlani(t, db)
+	varsayilanID := bp_cIlkPlan(t, h, db)
 	govde := func(ad string, disk, trafik int, ek map[string]any) map[string]any {
 		g := map[string]any{"ad": ad, "disk_kota_mb": disk, "trafik_kota_mb": trafik, "max_email": 10, "nginx_ek_direktifler": ""}
 		for k, v := range ek {
@@ -329,8 +336,8 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 	if x.ioRead != 0 || x.dbSn != 0 || x.proc != 50 || x.cpu != 200 || x.sahip != 4 || x.varsayilan != 0 {
 		t.Errorf("C yeni plan: kök alanı yazıldı ya da özet alanı düşmedi: %+v", x)
 	}
-	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.olustur' AND reseller_id=4`); n != 1 {
-		t.Errorf("plan.olustur denetimi: %d", n)
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.olustur' AND reseller_id=4`); n != 2 {
+		t.Errorf("plan.olustur denetimi: %d (beklenen 2: C Ilk + C Ikinci)", n)
 	}
 
 	// Plana iki hosting bağla: taahhüt 2×3000 = 6000 / havuz 10000.
@@ -387,7 +394,7 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 	}
 
 	// Varsayılan: kaldırılamaz; VarsayilanYap ile değişir (kapsam yalnız C).
-	if y := bp_istek(t, h, "C", "PUT", fmt.Sprintf("/plans/%d", varsayilanID), map[string]any{"ad": "bayic Varsayılan",
+	if y := bp_istek(t, h, "C", "PUT", fmt.Sprintf("/plans/%d", varsayilanID), map[string]any{"ad": "C Ilk",
 		"disk_kota_mb": 1999, "trafik_kota_mb": 9999, "max_email": 10, "varsayilan": false, "nginx_ek_direktifler": ""}); y.kod != http.StatusOK {
 		t.Fatalf("C varsayılan planını kaydedemedi → %d %s", y.kod, y.govde)
 	}
@@ -407,8 +414,8 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 		t.Errorf("plan.varsayilan denetimi: %d", n)
 	}
 
-	// Silme: kullanılan plan silinemez; kullanılmayan silinir; son plan silinemez;
-	// silinen varsayılanın yerine en eski plan geçer.
+	// Silme: kullanılan plan silinemez; kullanılmayan silinir; silinen varsayılanın
+	// yerine en eski plan geçer; SON plan da silinir ve yerine plan AÇILMAZ.
 	if y := bp_istek(t, h, "C", "DELETE", yol, nil); y.kod != http.StatusConflict {
 		t.Errorf("kullanılan plan silindi → %d %s", y.kod, y.govde)
 	}
@@ -416,12 +423,6 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 		t.Fatalf("C kullanılmayan planını silemedi → %d %s", y.kod, y.govde)
 	}
 	pk_exec(t, db, `DELETE FROM domains WHERE id IN (40,41)`)
-	if y := bp_istek(t, h, "C", "DELETE", yol, nil); y.kod != http.StatusConflict || !strings.Contains(y.govde, "son plan") {
-		t.Errorf("C son planını sildi → %d %s", y.kod, y.govde)
-	}
-	if y := pk_istek(t, h, "admin", "DELETE", yol, nil); y.kod != http.StatusConflict || !strings.Contains(y.govde, "son plan") {
-		t.Errorf("yönetici bayinin son planını sildi → %d %s", y.kod, y.govde)
-	}
 	y = bp_istek(t, h, "C", "POST", "/plans", govde("C Ucuncu", 1000, 1000, nil))
 	var ucuncu struct{ ID int64 }
 	_ = json.Unmarshal([]byte(y.govde), &ucuncu)
@@ -434,8 +435,32 @@ func TestBayiPlan_KendiPlaniniYonetir(t *testing.T) {
 	if v := bp_varsayilanlar(t, db, 4); len(v) != 1 || v[0] != ucuncu.ID {
 		t.Errorf("silinen varsayılanın yerine geçen: %v (beklenen [%d])", v, ucuncu.ID)
 	}
-	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.sil' AND reseller_id=4`); n != 2 {
-		t.Errorf("plan.sil denetimi: %d", n)
+	// 🔴 Son plan: eskiden "son planınız silinemez" (409) — bayinin her zaman otomatik
+	// bir planı olsun diye. Artık silinir; kökün paylaşılan katalogu bayiye açık kalır.
+	if y := bp_istek(t, h, "C", "DELETE", fmt.Sprintf("/plans/%d", ucuncu.ID), nil); y.kod != http.StatusOK {
+		t.Fatalf("C son planını silemedi → %d %s", y.kod, y.govde)
+	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE reseller_id=4`); n != 0 {
+		t.Errorf("C'nin son planı silinince yerine %d plan açıldı", n)
+	}
+	if p := pk_planlar(t, bp_istek(t, h, "C", "GET", "/plans", nil)); p[1] == nil || len(p) != 1 {
+		t.Errorf("planı kalmayan C kökün paylaşılan planını (1) seçebilmeli: %v", p)
+	}
+	// Yönetici de bayinin son planını siler; yeni ilk plan yine varsayılan olur.
+	y = bp_istek(t, h, "C", "POST", "/plans", govde("C Dorduncu", 1000, 1000, nil))
+	var dorduncu struct{ ID int64 }
+	_ = json.Unmarshal([]byte(y.govde), &dorduncu)
+	if y.kod != http.StatusCreated {
+		t.Fatalf("C dördüncü plan → %d %s", y.kod, y.govde)
+	}
+	if v := bp_varsayilanlar(t, db, 4); len(v) != 1 || v[0] != dorduncu.ID {
+		t.Errorf("planı kalmayan bayinin yeni planı varsayılan olmadı: %v", v)
+	}
+	if y := pk_istek(t, h, "admin", "DELETE", fmt.Sprintf("/plans/%d", dorduncu.ID), nil); y.kod != http.StatusOK {
+		t.Errorf("yönetici bayinin son planını silemedi → %d %s", y.kod, y.govde)
+	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.sil' AND reseller_id=4`); n != 4 {
+		t.Errorf("plan.sil denetimi: %d (beklenen 4)", n)
 	}
 
 	// Paket ipuçları.
@@ -458,7 +483,7 @@ func TestBayiPlan_KapsamIDOR(t *testing.T) {
 	bp_uzlastir(t, db)
 	h := bp_router(db)
 	bp_uygulayici(t)
-	cid := bp_cPlani(t, db)
+	cid := bp_cIlkPlan(t, h, db)
 	cYol := fmt.Sprintf("/plans/%d", cid)
 	once := bp_oku(t, db, cid)
 	kokOnce := bp_oku(t, db, 1)
@@ -470,6 +495,14 @@ func TestBayiPlan_KapsamIDOR(t *testing.T) {
 	}
 	if p := pk_planlar(t, pk_istek(t, h, "A", "GET", "/plans", nil)); p[cid] != nil {
 		t.Errorf("IDOR: A listesinde C planı")
+	}
+	// ?bayi= yalnız yöneticinin süzgecidir: bayi A başka bayinin kimliğini verse de
+	// KENDİ kapsamını alır (C'nin ve B'nin planı yok).
+	for _, q := range []string{"/plans?bayi=4", "/plans?bayi=3", "/plans?bayi=abc"} {
+		y := pk_istek(t, h, "A", "GET", q, nil)
+		if p := pk_planlar(t, y); p[cid] != nil || p[300] != nil || p[200] == nil || strings.Contains(y.govde, "bayic") {
+			t.Errorf("IDOR: A GET %s → %d %s", q, y.kod, y.govde)
+		}
 	}
 	for _, c := range []struct{ yontem, yol string }{{"PUT", cYol}, {"DELETE", cYol}, {"POST", cYol + "/varsayilan"}} {
 		if y := pk_istek(t, h, "A", c.yontem, c.yol, g); y.kod != http.StatusForbidden || strings.Contains(y.govde, "bayic") {
@@ -505,7 +538,7 @@ func TestBayiPlan_KapsamIDOR(t *testing.T) {
 		t.Errorf("C varsayılanı bozuldu: %v", v)
 	}
 	// Yönetici her planı düzenler; bayi planını varsayılan yapınca kapsam planın SAHİBİ.
-	if y := pk_istek(t, h, "admin", "PUT", cYol, map[string]any{"ad": "bayic Varsayılan", "disk_kota_mb": 1500,
+	if y := pk_istek(t, h, "admin", "PUT", cYol, map[string]any{"ad": "C Ilk", "disk_kota_mb": 1500,
 		"trafik_kota_mb": 9999, "varsayilan": true, "nginx_ek_direktifler": ""}); y.kod != http.StatusOK {
 		t.Fatalf("yönetici C planını düzenleyemedi → %d %s", y.kod, y.govde)
 	}
@@ -527,6 +560,99 @@ func TestBayiPlan_KapsamIDOR(t *testing.T) {
 	// Hostinge özel (eski kopya) plan varsayılan yapılamaz.
 	if y := pk_istek(t, h, "admin", "POST", "/plans/210/varsayilan", nil); y.kod != http.StatusBadRequest {
 		t.Errorf("özel plan varsayılan → %d %s", y.kod, y.govde)
+	}
+}
+
+// ── Eski otomatik bayi planlarının temizliği (göç tasarımı; açılışa bağlı DEĞİL) ──
+
+// OtomatikBayiPlanlariniTemizle yalnız imzası BİREBİR tutan (otomatik açıklama +
+// bayinin kullanıcı adından üretilen ad), hiçbir hostingde kullanılmayan ve bayinin
+// bitmemiş taşıma işi olmayan planı siler; silinen varsayılanın yerine en eski kendi
+// planı geçer; idempotenttir.
+func TestOtomatikBayiPlanlariniTemizle(t *testing.T) {
+	db := bp_geciciDB(t)
+	const oto = "Otomatik oluşturulan varsayılan plan"
+	for _, q := range []string{
+		`CREATE TABLE tasima_isleri (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+			sahip_rid BIGINT UNSIGNED NOT NULL DEFAULT 0, durum VARCHAR(16) NOT NULL DEFAULT 'bekliyor') ENGINE=InnoDB`,
+		`INSERT INTO users (id, role, username) VALUES (5,'reseller','bayid'), (6,'reseller','bayie'), (7,'reseller','bayif'), (8,'user','musteri8')`,
+		`INSERT INTO tasima_isleri (sahip_rid, durum) VALUES (7,'kuyrukta'), (3,'tamam'), (3,'hata'), (3,'iptal')`,
+		`INSERT INTO domains (id, alan_adi, sistem_kullanici, plan_id, reseller_id) VALUES (60,'e-site.test','c_e1',520,6)`,
+	} {
+		pk_exec(t, db, q)
+	}
+	pk_exec(t, db, `INSERT INTO service_plans (id, ad, aciklama, disk_kota_mb, trafik_kota_mb, varsayilan, reseller_id, domain_id) VALUES
+		(500, 'bayic Varsayılan',     ?, 1999, 9999, 1, 4, NULL),
+		(501, 'C Elle',               '', 500, 500, 0, 4, NULL),
+		(510, 'bayid Varsayılan #5',  ?, 1024, 5120, 1, 5, NULL),
+		(520, 'bayie Varsayılan',     ?, 1024, 5120, 1, 6, NULL),
+		(530, 'bayif Varsayılan',     ?, 1024, 5120, 1, 7, NULL),
+		(540, 'A Yeniden Adlandirdi', ?, 1024, 5120, 0, 2, NULL),
+		(541, 'bayiA Varsayılan',     'Benim planım', 1024, 5120, 0, 2, NULL),
+		(550, 'bayiB Varsayılan',     ?, 1024, 5120, 0, 0, NULL),
+		(560, 'bayiB Varsayılan #3',  ?, 1024, 5120, 1, 3, NULL),
+		(570, 'musteri8 Varsayılan',  ?, 1024, 5120, 0, 8, NULL),
+		(580, 'bayic Varsayılan #4',  ?, 1024, 5120, 0, 4, 40)`, oto, oto, oto, oto, oto, oto, oto, oto, oto)
+	toplam := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`)
+
+	silinen, err := plans.OtomatikBayiPlanlariniTemizle(t.Context(), db)
+	if err != nil {
+		t.Fatalf("temizlik: %v", err)
+	}
+	if silinen != 3 {
+		t.Errorf("silinen %d (beklenen 3: 500, 510, 560)", silinen)
+	}
+	for _, id := range []int64{500, 510, 560} {
+		if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE id=?`, id); n != 0 {
+			t.Errorf("kullanılmayan otomatik plan %d silinmedi", id)
+		}
+	}
+	// Dokunulmayanlar: hostingde kullanılan (520), bitmemiş taşıması olan bayinin (530),
+	// adı/açıklaması değişmiş (540/541), kökün (550), bayi olmayanın (570), hostinge özel
+	// (580) ve bayinin elle açtığı (501) planı; kökün ve A/B'nin diğer planları.
+	for _, id := range []int64{1, 100, 200, 201, 202, 210, 300, 501, 520, 530, 540, 541, 550, 570, 580} {
+		if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE id=?`, id); n != 1 {
+			t.Errorf("plan %d silinmemeliydi", id)
+		}
+	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans`); n != toplam-3 {
+		t.Errorf("plan sayısı %d → %d (beklenen yalnız 3 eksik)", toplam, n)
+	}
+	// Silinen varsayılanın yerine en eski kendi planı; planı kalmayan bayide varsayılan yok.
+	if v := bp_varsayilanlar(t, db, 4); len(v) != 1 || v[0] != 501 {
+		t.Errorf("C varsayılanları %v (beklenen [501])", v)
+	}
+	if v := bp_varsayilanlar(t, db, 3); len(v) != 1 || v[0] != 300 {
+		t.Errorf("B varsayılanları %v (beklenen [300])", v)
+	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE reseller_id=5`); n != 0 {
+		t.Errorf("D'nin planı silinince yerine plan açıldı: %d", n)
+	}
+	if v := bp_varsayilanlar(t, db, 0); len(v) != 1 || v[0] != 1 {
+		t.Errorf("kökün varsayılanı değişti: %v", v)
+	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM audit_log WHERE action='plan.sil' AND actor_username='sistem' AND reseller_id IN (3,4,5)`); n != 3 {
+		t.Errorf("temizlik denetimi: %d (beklenen 3)", n)
+	}
+	// İdempotent.
+	if silinen, err := plans.OtomatikBayiPlanlariniTemizle(t.Context(), db); err != nil || silinen != 0 {
+		t.Errorf("ikinci temizlik: %d %v (beklenen 0)", silinen, err)
+	}
+	// Taşıma işi bitince (ve hosting planını bırakınca) kalanlar da temizlenir.
+	pk_exec(t, db, `UPDATE tasima_isleri SET durum='tamam' WHERE sahip_rid=7`)
+	pk_exec(t, db, `UPDATE domains SET plan_id=1 WHERE id=60`)
+	if silinen, err := plans.OtomatikBayiPlanlariniTemizle(t.Context(), db); err != nil || silinen != 2 {
+		t.Errorf("koşullar kalkınca temizlik: %d %v (beklenen 2: 520, 530)", silinen, err)
+	}
+	// Taşıma tablosu okunamazsa (şema eksik) KAPALI: silinmez, hata döner.
+	pk_exec(t, db, `INSERT INTO users (id, role, username) VALUES (9,'reseller','bayig')`)
+	pk_exec(t, db, `INSERT INTO service_plans (id, ad, aciklama, reseller_id) VALUES (590, 'bayig Varsayılan', ?, 9)`, oto)
+	pk_exec(t, db, `DROP TABLE tasima_isleri`)
+	if silinen, err := plans.OtomatikBayiPlanlariniTemizle(t.Context(), db); err == nil || silinen != 0 {
+		t.Errorf("taşıma tablosu yokken: %d %v (beklenen 0 + hata)", silinen, err)
+	}
+	if n := bp_sayi(t, db, `SELECT COUNT(*) FROM service_plans WHERE id=590`); n != 1 {
+		t.Errorf("taşıma durumu bilinmeden plan silindi")
 	}
 }
 

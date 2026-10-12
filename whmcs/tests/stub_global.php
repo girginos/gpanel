@@ -7,6 +7,10 @@ if (!defined('WHMCS')) {
 
 $GLOBALS['T'] = ['log' => [], 'localapi' => [], 'activity' => [], 'check_token' => 0];
 
+// Sistem varsayilan dili (WHMCS $CONFIG['Language']). Mevcut testler Turkce metin arar;
+// Ingilizce yollar tests/cases/08_dil.php'de oturum/yonetici diliyle denenir.
+$GLOBALS['CONFIG']['Language'] = 'turkish';
+
 function logModuleCall($module, $action, $request, $response, $processed = '', $replace = [])
 {
     $GLOBALS['T']['log'][] = compact('module', 'action', 'request', 'response', 'processed', 'replace');

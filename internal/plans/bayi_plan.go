@@ -2,10 +2,10 @@ package plans
 
 // bayi_plan.go — bayinin KENDİ hosting planları (reseller_id = bayi):
 //
-//   - Varsayılan plan güvencesi: her bayinin en az bir katalog planı ve tam bir
-//     "varsayılan" işaretli planı olur (yeni hosting formunda ön seçili; site
-//     taşımada plansız hesaplara uygulanır). Bayi oluşturulunca ve açılışta
-//     idempotent uzlaştırmayla (BayiVarsayilanSagla / BayiVarsayilanUzlastir).
+//   - Varsayılan işareti: bayinin kendi planı VARSA tam bir "varsayılan" işaretli
+//     planı olur (yeni hosting formunda ön seçili; site taşımada plansız hesaplara
+//     uygulanır) — BayiVarsayilanIsaretle / BayiVarsayilanUzlastir. 🔴 Bayiye plan
+//     OTOMATİK AÇILMAZ: kendi planı olmayan bayi kökün paylaşılan katalogunu kullanır.
 //   - Paket sınırı: bayinin yazdığı plan değerleri bayi paketinin havuz ve fazla
 //     satış kurallarına uyar (bayiPaketKontrol).
 //   - Kök alanları: efektiflimit.Alanlar'da Ozette=false olan iç ayarlar (inode,
@@ -231,91 +231,127 @@ func (h *Handlers) bayiPaketKontrol(ctx context.Context, rid, planID int64, p *P
 }
 
 // ── Varsayılan bayi planı ───────────────────────────────────────────────────
+//
+// 🔴 Bayiye hosting planı OTOMATİK AÇILMAZ (kullanıcı bildirimi 2026-10-12: "100 bayi
+// = 100 hosting planı"). Eski BayiVarsayilanSagla, kendi planı olmayan HER bayiye
+// "<bayi> Varsayılan" planı yazıyordu: bayi oluşturmada (UI, WHMCS ve API anahtarı —
+// hepsi POST /resellers), HER açılışta tüm bayiler için ve site taşımada.
+//
+// Bayinin kotası planda DEĞİL bayi kaydındadır: users.max_domain / max_disk_mb /
+// max_trafik_mb (paket anlık görüntüsü, 0045) + reseller_plans posta tavanları; hosting
+// açılışında domains.resellerKotaKontrol, plan yazımında bayiPaketKontrol uygular.
+// Kendi planı olmayan bayi kökün paylaşılan (global) katalogunu kullanır: yeni hostingde
+// kökün varsayılanı seçilir (domains.Create); paket kapısı da bunu varsayar
+// (reseller.enKucukTaahhut). Bayinin İLK kendi planı varsayılanı olur (Create); burada
+// yalnız varsayılan İŞARETİ tutarlı tutulur.
 
 // ErrBayiYok — kimlik bir bayiye ait değil.
 var ErrBayiYok = errors.New("bayi bulunamadı")
 
-// Sağlama sonucu.
+// İşaretleme sonucu.
 const (
 	VarsayilanVardi       = "vardi"
 	VarsayilanIsaretlendi = "isaretlendi"
-	VarsayilanOlusturuldu = "olusturuldu"
+	VarsayilanYok         = "yok" // bayinin kendi planı yok — plan OLUŞTURULMAZ
 )
 
-// bayiHavuz — varsayılan plan değer kuralının girdisi.
-type bayiHavuz struct {
-	MaxDomain               int
-	MaxDiskMB, MaxTrafikMB  int64
-	FazlaSatis              bool
-	MailMaxEmail            int // 0 = tavan yok
-	MailSaatlik, MailKutuMB int
+// BayiVarsayilanIsaretle — bayinin (rid) kendi katalog planları arasında TEK bir
+// varsayılan olmasını sağlar (idempotent). Plan OLUŞTURMAZ:
+//
+//	kendi katalog planı + varsayılan işareti var → dokunmaz                (vardi)
+//	kendi planı var, hiçbiri varsayılan değil  → en eskisini işaretler      (isaretlendi)
+//	kendi planı yok                             → hiçbir şey yapmaz, id 0   (yok)
+//
+// Planın satır kilidi altında (eşzamanlı iki işaretleme tek varsayılan bırakır).
+// Hostinglerin planına/limitine DOKUNMAZ. uid/kul: denetim kaydının aktörü
+// (açılışta 0/"sistem").
+func BayiVarsayilanIsaretle(ctx context.Context, db *sql.DB, rid, uid int64, kul string) (int64, string, error) {
+	if rid <= 0 {
+		return 0, "", ErrBayiYok
+	}
+	var bayi int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id=? AND role='reseller'`, rid).Scan(&bayi); err != nil {
+		return 0, "", err
+	}
+	if bayi == 0 {
+		return 0, "", ErrBayiYok
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var mevcut int64
+	var vars int
+	err = tx.QueryRowContext(ctx,
+		`SELECT id, varsayilan FROM service_plans WHERE reseller_id=? AND domain_id IS NULL
+		  ORDER BY varsayilan DESC, id ASC LIMIT 1 FOR UPDATE`, rid).Scan(&mevcut, &vars)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return 0, VarsayilanYok, nil
+	case err != nil:
+		return 0, "", err
+	case vars == 1:
+		return mevcut, VarsayilanVardi, tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE service_plans SET varsayilan=IF(id=?,1,0) WHERE reseller_id=?`, mevcut, rid); err != nil {
+		return 0, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, "", err
+	}
+	var pad string
+	_ = db.QueryRowContext(ctx, `SELECT ad FROM service_plans WHERE id=?`, mevcut).Scan(&pad)
+	httpx.DenetimSistem(db, uid, kul, "plan.varsayilan", pad, "otomatik: bayinin varsayılan planı yoktu", rid, true)
+	return mevcut, VarsayilanIsaretlendi, nil
 }
 
-const intUst = 1<<31 - 1
-
-// havuzPayi — varsayılan plandaki disk/trafik değeri (MB):
-//
-//	havuz sınırsız (0): şablon değeri; şablon da sınırsızsa tohum ("Başlangıç") değeri
-//	  (bayi planı 0 olamaz);
-//	havuz > 0: hosting başına PAY = ⌊(havuz−1) / hak⌋ (hak = bayinin hosting hakkı,
-//	  sınırsızsa 1) — hakkın TAMAMI bu planla açılsa toplam taahhüt havuzun ALTINDA
-//	  kalır (domains kapısı "sınıra ulaşmak doludur"); şablon sınırsızsa pay; fazla
-//	  satış kapalıyken şablon paydan büyükse pay; aksi halde şablon.
-func havuzPayi(sablon int, havuz int64, hak int, fazla bool, yedek int) int {
-	if havuz <= 0 {
-		if sablon > 0 {
-			return sablon
+// BayiVarsayilanUzlastir — açılışta, kendi planı olup hiçbiri varsayılan olmayan
+// bayiler için BayiVarsayilanIsaretle (idempotent). 🔴 Plan OLUŞTURMAZ: kendi planı
+// olmayan bayi listeye hiç girmez. Bir bayinin hatası diğerlerini durdurmaz; ilk hata döner.
+func BayiVarsayilanUzlastir(ctx context.Context, db *sql.DB) (isaretlenen int, err error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT p.reseller_id FROM service_plans p
+		   JOIN users u ON u.id=p.reseller_id AND u.role='reseller'
+		  WHERE p.domain_id IS NULL
+		  GROUP BY p.reseller_id HAVING MAX(p.varsayilan)=0 ORDER BY p.reseller_id`)
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
 		}
-		return yedek
 	}
-	if hak < 1 {
-		hak = 1
+	rows.Close()
+	var ilk error
+	for _, rid := range ids {
+		_, durum, e := BayiVarsayilanIsaretle(ctx, db, rid, 0, "sistem")
+		switch {
+		case e != nil:
+			log.Printf("bayi varsayılan plan: bayi %d işaretlenemedi: %v", rid, e)
+			if ilk == nil {
+				ilk = e
+			}
+		case durum == VarsayilanIsaretlendi:
+			isaretlenen++
+		}
 	}
-	pay := (havuz - 1) / int64(hak)
-	if pay < 1 {
-		pay = 1
-	}
-	if pay > intUst {
-		pay = intUst
-	}
-	if sablon <= 0 || (!fazla && int64(sablon) > pay) {
-		return int(pay)
-	}
-	return sablon
+	return isaretlenen, ilk
 }
 
-// tavanaSigdir — posta değeri bayi paketinin tavanını aşamaz (0 = sınırsız da aşım).
-func tavanaSigdir(v, tavan int) int {
-	if tavan > 0 && (v <= 0 || v > tavan) {
-		return tavan
-	}
-	return v
-}
+// ── Eski otomatik bayi planlarının temizliği (göç tasarımı) ─────────────────
 
-// bayiVarsayilanDegerler — varsayılan bayi planının DEĞER KURALI (saf, testli):
-//
-//	ŞABLON = kökün varsayılan global katalog planı (yoksa en küçük diskli global plan,
-//	o da yoksa tohum "Başlangıç") — kök şablonu kendi varsayılan planıyla ayarlar.
-//	Şablondan yalnız bayiye zaten GÖRÜNEN özet alanlar alınır (CPU, RAM, PHP, domain/
-//	DB/FTP sayısı, posta); kök iç ayarları (IO/DB governor/process/inode/FPM, nginx,
-//	WAF) panel varsayılanında kalır (GL-06: bayi kökün iç değerini görmez).
-//	Disk/trafik: havuzPayi. Posta: paket tavanına kırpılır.
-func bayiVarsayilanDegerler(sablon Plan, hv bayiHavuz) Plan {
-	p := panelVarsayilanPlan()
-	p.CPUYuzde, p.RAMMB, p.PHPSurum = sablon.CPUYuzde, sablon.RAMMB, sablon.PHPSurum
-	p.MaxDomain, p.MaxDB, p.MaxFTP = sablon.MaxDomain, sablon.MaxDB, sablon.MaxFTP
-	varsayilanDoldur(&p) // şablonda 0/boş olan CPU/RAM/PHP panel varsayılanına
-	tohum := seedPlanlari()[0]
-	p.DiskKotaMB = havuzPayi(sablon.DiskKotaMB, hv.MaxDiskMB, hv.MaxDomain, hv.FazlaSatis, tohum.Disk)
-	p.TrafikKotaMB = havuzPayi(sablon.TrafikKotaMB, hv.MaxTrafikMB, hv.MaxDomain, hv.FazlaSatis, tohum.Trafik)
-	p.MaxEmail = tavanaSigdir(sablon.MaxEmail, hv.MailMaxEmail)
-	p.SaatlikMailLimiti = tavanaSigdir(sablon.SaatlikMailLimiti, hv.MailSaatlik)
-	p.MailKutuKotaMB = tavanaSigdir(sablon.MailKutuKotaMB, hv.MailKutuMB)
-	return p
-}
+// otomatikPlanAciklama — eski BayiVarsayilanSagla'nın yazdığı açıklama: otomatik
+// planın imzasının yarısı (öteki yarısı ad: varsayilanPlanAdi).
+const otomatikPlanAciklama = "Otomatik oluşturulan varsayılan plan"
 
-// varsayilanPlanAdi — "<bayi> Varsayılan"; service_plans.ad sunucu genelinde UNIQUE
-// olduğundan çakışmada bayi kimliği eklenir. 64 rune sınırı korunur.
+// varsayilanPlanAdi — eski otomatik planın adı: "<bayi> Varsayılan"; service_plans.ad
+// sunucu genelinde UNIQUE olduğundan çakışmada bayi kimliği eklenirdi (deneme 1..3).
+// 64 rune sınırı korunur. Yalnız temizlik imzası olarak kalır — yeni plan ÜRETMEZ.
 func varsayilanPlanAdi(kul string, rid int64, deneme int) string {
 	k := strings.TrimSpace(kul)
 	if k == "" {
@@ -335,150 +371,136 @@ func varsayilanPlanAdi(kul string, rid int64, deneme int) string {
 	return string(r) + ek
 }
 
-// varsayilanSablon — kökün şablon planı (bkz. bayiVarsayilanDegerler).
-func varsayilanSablon(ctx context.Context, q sorgulayici) (Plan, string) {
-	p, err := scan(q.QueryRowContext(ctx, selectAll+
-		` WHERE reseller_id=0 AND domain_id IS NULL ORDER BY varsayilan DESC, (disk_kota_mb=0) ASC, disk_kota_mb ASC, id ASC LIMIT 1`))
-	if err == nil {
-		return p, p.Ad
+// otomatikAdMi — ad, bayinin (kul, rid) eski otomatik plan adlarından biri mi?
+// (eski kod en çok 4 deneme yapıyordu: 0..3)
+func otomatikAdMi(ad, kul string, rid int64) bool {
+	for d := 0; d < 4; d++ {
+		if ad == varsayilanPlanAdi(kul, rid, d) {
+			return true
+		}
 	}
-	t := seedPlanlari()[0]
-	return Plan{DiskKotaMB: t.Disk, TrafikKotaMB: t.Trafik, MaxDomain: t.MaxDom, MaxDB: t.MaxDB,
-		MaxEmail: t.MaxMail, MaxFTP: t.MaxFTP, CPUYuzde: t.CPU, RAMMB: t.RAM}, t.Ad + " (tohum)"
+	return false
 }
 
-// BayiVarsayilanSagla — bayinin (rid) varsayılan planını GARANTİ eder (idempotent):
+// OtomatikBayiPlanlariniTemizle — 2026-10-03..2026-10-12 sürümlerinin bayilere
+// otomatik açtığı ve HİÇ KULLANILMAYAN "<bayi> Varsayılan" planlarını siler.
 //
-//	kendi katalog planı + varsayılan işareti var → dokunmaz            (vardi)
-//	kendi planı var, hiçbiri varsayılan değil  → en eskisini işaretler  (isaretlendi)
-//	kendi planı yok                             → "<bayi> Varsayılan" oluşturur (olusturuldu)
+// 🔴 AÇILIŞA BAĞLI DEĞİL: mevcut sunuculardaki planların silinmesi kullanıcı kararı
+// bekliyor. Bağlanacaksa açılışta, HTTP sunucusu dinlemeye başlamadan ÖNCE (eşzamanlı
+// hosting oluşturma/plan değişimi yokken) ve BayiVarsayilanUzlastir'dan ÖNCE çağrılmalı.
 //
-// Bayi satırı FOR UPDATE ile kilitlenir (eşzamanlı iki sağlama tek plan üretir).
-// Hostinglerin planına/limitine DOKUNMAZ. uid/kul: denetim kaydının aktörü
-// (açılışta 0/"sistem").
-func BayiVarsayilanSagla(ctx context.Context, db *sql.DB, rid, uid int64, kul string) (int64, string, error) {
-	if rid <= 0 {
-		return 0, "", ErrBayiYok
-	}
-	tx, err := db.BeginTx(ctx, nil)
+//	SİLİNİR    reseller_id>0, katalog planı (domain_id NULL), açıklama otomatik imzayla
+//	           BİREBİR, ad bayinin kullanıcı adından üretilen otomatik adla BİREBİR
+//	           (bayi adı ya da açıklamayı değiştirdiyse plan benimsenmiştir), hiçbir
+//	           hosting bağlı değil (domains.plan_id) ve bayinin bitmemiş taşıma işi yok
+//	           (iş ayarlarında plan kimliği tutulur; kesilen iş sürdürülebilir)
+//	DOKUNULMAZ kullanılan ya da benimsenmiş planlar, kökün planları, bayinin elle
+//	           açtığı planlar, sahibi bayi olmayan satırlar
+//
+// Silinen plan bayinin varsayılanıysa en eski kalan kendi planı varsayılan olur
+// (planSil ile aynı kural); kalmadıysa bayi kökün paylaşılan varsayılanını kullanır.
+// İdempotent (ikinci çağrı 0 döner). Her plan AYRI işlemde, sahibin planları
+// kilitlenip koşullar yeniden doğrulanarak silinir. Denetim: plan.sil (aktör sistem).
+// Bir planın hatası diğerlerini durdurmaz; ilk hata döner.
+func OtomatikBayiPlanlariniTemizle(ctx context.Context, db *sql.DB) (int, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT p.id, p.reseller_id, p.ad, u.username FROM service_plans p
+		   JOIN users u ON u.id=p.reseller_id AND u.role='reseller'
+		  WHERE p.reseller_id>0 AND p.domain_id IS NULL AND p.aciklama=?
+		  ORDER BY p.id`, otomatikPlanAciklama)
 	if err != nil {
-		return 0, "", err
+		return 0, err
 	}
-	defer func() { _ = tx.Rollback() }()
-	var ad string
-	var hv bayiHavuz
-	var fazla int
-	var paketID int64
-	err = tx.QueryRowContext(ctx,
-		`SELECT username, max_domain, max_disk_mb, max_trafik_mb, fazla_satis, reseller_plan_id
-		   FROM users WHERE id=? AND role='reseller' FOR UPDATE`, rid).
-		Scan(&ad, &hv.MaxDomain, &hv.MaxDiskMB, &hv.MaxTrafikMB, &fazla, &paketID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, "", ErrBayiYok
+	type aday struct {
+		id, rid int64
+		ad, kul string
 	}
-	if err != nil {
-		return 0, "", err
-	}
-	hv.FazlaSatis = fazla == 1
-	var mevcut int64
-	var vars int
-	err = tx.QueryRowContext(ctx,
-		`SELECT id, varsayilan FROM service_plans WHERE reseller_id=? AND domain_id IS NULL
-		  ORDER BY varsayilan DESC, id ASC LIMIT 1 FOR UPDATE`, rid).Scan(&mevcut, &vars)
-	switch {
-	case err == nil && vars == 1:
-		return mevcut, VarsayilanVardi, tx.Commit()
-	case err == nil:
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE service_plans SET varsayilan=IF(id=?,1,0) WHERE reseller_id=?`, mevcut, rid); err != nil {
-			return 0, "", err
-		}
-		if err := tx.Commit(); err != nil {
-			return 0, "", err
-		}
-		var pad string
-		_ = db.QueryRowContext(ctx, `SELECT ad FROM service_plans WHERE id=?`, mevcut).Scan(&pad)
-		httpx.DenetimSistem(db, uid, kul, "plan.varsayilan", pad, "otomatik: bayinin varsayılan planı yoktu", rid, true)
-		return mevcut, VarsayilanIsaretlendi, nil
-	case !errors.Is(err, sql.ErrNoRows):
-		return 0, "", err
-	}
-	// Posta tavanı: bağlı bayi paketi (bayiTavanKontrol ile aynı kaynak). Paket
-	// yoksa tavan yok.
-	if paketID > 0 {
-		_ = tx.QueryRowContext(ctx,
-			`SELECT COALESCE(mail_max_email,0), COALESCE(mail_saatlik_limit,0), COALESCE(mail_kutu_kota_mb,0)
-			   FROM reseller_plans WHERE id=?`, paketID).Scan(&hv.MailMaxEmail, &hv.MailSaatlik, &hv.MailKutuMB)
-	}
-	sablon, sablonAd := varsayilanSablon(ctx, tx)
-	p := bayiVarsayilanDegerler(sablon, hv)
-	p.Aciklama = "Otomatik oluşturulan varsayılan plan"
-	var id int64
-	for deneme := 0; deneme < 4; deneme++ {
-		p.Ad = varsayilanPlanAdi(ad, rid, deneme)
-		res, err := tx.ExecContext(ctx,
-			`INSERT INTO service_plans(ad, aciklama, disk_kota_mb, trafik_kota_mb,
-			   max_domain, max_db, max_email, saatlik_mail_limiti, mail_kutu_kota_mb, max_ftp,
-			   cpu_yuzde, ram_mb, max_process, inode_kota, io_agirlik, mysql_max_baglanti,
-			   pm_max_children, php_surum, fastcgi_cache, client_max_body_mb, nginx_ek_direktifler,
-			   waf_enabled, waf_mode, waf_paranoia, varsayilan, reseller_id)
-			 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',0,?,?,1,?)`,
-			p.Ad, p.Aciklama, p.DiskKotaMB, p.TrafikKotaMB,
-			p.MaxDomain, p.MaxDB, p.MaxEmail, p.SaatlikMailLimiti, p.MailKutuKotaMB, p.MaxFTP,
-			p.CPUYuzde, p.RAMMB, p.MaxProcess, p.InodeKota, p.IOAgirlik, p.MySQLMaxBaglanti,
-			p.PMMaxChildren, p.PHPSurum, b01(p.FastCgiCache), p.ClientMaxBodyMB,
-			p.WafMode, p.WafParanoia, rid)
-		if err != nil {
-			if tekrarAnahtar(err) {
-				continue
-			}
-			return 0, "", err
-		}
-		id, _ = res.LastInsertId()
-		break
-	}
-	if id == 0 {
-		return 0, "", fmt.Errorf("varsayılan plan adı üretilemedi (bayi %d)", rid)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, "", err
-	}
-	httpx.DenetimSistem(db, uid, kul, "plan.varsayilan_olustur", p.Ad,
-		fmt.Sprintf("disk=%dMB trafik=%dMB (şablon: %s)", p.DiskKotaMB, p.TrafikKotaMB, sablonAd), rid, true)
-	return id, VarsayilanOlusturuldu, nil
-}
-
-// BayiVarsayilanUzlastir — açılışta TÜM bayiler için BayiVarsayilanSagla (idempotent).
-// Bir bayinin hatası diğerlerini durdurmaz; ilk hata döner.
-func BayiVarsayilanUzlastir(ctx context.Context, db *sql.DB) (olusan, isaretlenen int, err error) {
-	rows, err := db.QueryContext(ctx, `SELECT id FROM users WHERE role='reseller' ORDER BY id`)
-	if err != nil {
-		return 0, 0, err
-	}
-	var ids []int64
+	var adaylar []aday
 	for rows.Next() {
-		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		var a aday
+		if rows.Scan(&a.id, &a.rid, &a.ad, &a.kul) == nil && otomatikAdMi(a.ad, a.kul, a.rid) {
+			adaylar = append(adaylar, a)
 		}
 	}
 	rows.Close()
+	silinen := 0
 	var ilk error
-	for _, rid := range ids {
-		_, durum, e := BayiVarsayilanSagla(ctx, db, rid, 0, "sistem")
-		switch {
-		case e != nil:
-			log.Printf("bayi varsayılan plan: bayi %d sağlanamadı: %v", rid, e)
+	for _, a := range adaylar {
+		sil, err := otomatikPlanSil(ctx, db, a.id, a.rid, a.ad, a.kul)
+		if err != nil {
+			log.Printf("otomatik bayi planı temizliği: plan %d (bayi %d): %v", a.id, a.rid, err)
 			if ilk == nil {
-				ilk = e
+				ilk = err
 			}
-		case durum == VarsayilanOlusturuldu:
-			olusan++
-		case durum == VarsayilanIsaretlendi:
-			isaretlenen++
+			continue
+		}
+		if sil {
+			silinen++
 		}
 	}
-	return olusan, isaretlenen, ilk
+	return silinen, ilk
+}
+
+// otomatikPlanSil — tek adayı, sahibinin planları kilitliyken koşulları YENİDEN
+// doğrulayarak siler. false,nil = koşul artık tutmuyor (dokunulmadı).
+func otomatikPlanSil(ctx context.Context, db *sql.DB, id, rid int64, ad, kul string) (bool, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, ad, aciklama, varsayilan FROM service_plans
+		  WHERE reseller_id=? AND domain_id IS NULL ORDER BY id FOR UPDATE`, rid)
+	if err != nil {
+		return false, err
+	}
+	var digerleri []int64
+	bulundu, vars := false, 0
+	for rows.Next() {
+		var x int64
+		var xad, xac string
+		var xv int
+		if err := rows.Scan(&x, &xad, &xac, &xv); err != nil {
+			rows.Close()
+			return false, err
+		}
+		if x != id {
+			digerleri = append(digerleri, x)
+			continue
+		}
+		bulundu = xad == ad && xac == otomatikPlanAciklama && otomatikAdMi(xad, kul, rid)
+		vars = xv
+	}
+	rows.Close()
+	if !bulundu {
+		return false, nil
+	}
+	var kullanim, tasima int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM domains WHERE plan_id=?`, id).Scan(&kullanim); err != nil {
+		return false, err
+	}
+	// Bitmemiş taşıma işi (kuyrukta/çalışıyor/kesildi …) planı ayarlarında taşır.
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasima_isleri WHERE sahip_rid=? AND durum NOT IN ('tamam','hata','iptal')`, rid).Scan(&tasima); err != nil {
+		return false, err
+	}
+	if kullanim > 0 || tasima > 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM service_plans WHERE id=? AND reseller_id=? AND domain_id IS NULL`, id, rid); err != nil {
+		return false, err
+	}
+	if vars == 1 && len(digerleri) > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE service_plans SET varsayilan=IF(id=?,1,0) WHERE reseller_id=?`, digerleri[0], rid); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	httpx.DenetimSistem(db, 0, "sistem", "plan.sil", ad, "otomatik bayi planı temizliği: hiçbir hostingde kullanılmıyordu", rid, true)
+	return true, nil
 }
 
 // ── Uçlar ───────────────────────────────────────────────────────────────────

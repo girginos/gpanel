@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -507,5 +508,59 @@ func TestAPIAnahtarUctanUca(t *testing.T) {
 	}
 	if sonKullanim.String != "192.0.2.10" {
 		t.Fatalf("son kullanım IP'si yazılmadı: %q", sonKullanim.String)
+	}
+}
+
+func TestAPIAnahtarSuresiz(t *testing.T) {
+	db := ucGeciciDB(t)
+	h := ucRouter(db)
+	jA, jK := jwtBayi(t, 7, "bayi_a"), jwtKok(t)
+	bitisNull := func(id int64) bool {
+		var v sql.NullString
+		if err := db.QueryRow(`SELECT son_kullanma_at FROM api_anahtarlari WHERE id=?`, id).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return !v.Valid
+	}
+	if s := ucIstek(t, h, "GET", "/api/v1/api-anahtarlari/izin-gruplari", jK, nil); s.kod != 200 || !strings.Contains(s.govde, `"suresiz_destek":true`) {
+		t.Fatalf("katalog süresiz desteğini bildirmeli: %d %s", s.kod, s.govde)
+	}
+	// bayi: süresiz + IP yok → 400 (her yerden çalışan, hiç dolmayan anahtar olmasın)
+	if s := ucIstek(t, h, "POST", "/api/v1/api-anahtarlari", jA, map[string]any{"ad": "s", "izinler": []string{"hesap:oku"}, "suresiz": true, "parola": "dogru-parola-a"}); s.kod != 400 || !strings.Contains(s.govde, "IP") {
+		t.Fatalf("süresizde IP zorunlu: %d %s", s.kod, s.govde)
+	}
+	a := olustur(t, h, jA, map[string]any{"ad": "WHMCS-S", "izinler": []string{"hesap:oku"}, "izinli_ipler": []string{"192.0.2.10"}, "suresiz": true, "parola": "dogru-parola-a"})
+	if a.Kayit.SonKullanma != 0 || a.Kayit.Durum != apianahtar.DurumEtkin || !bitisNull(a.Kayit.ID) {
+		t.Fatalf("süresiz anahtar: bitiş=%d durum=%s null=%v", a.Kayit.SonKullanma, a.Kayit.Durum, bitisNull(a.Kayit.ID))
+	}
+	if s := ucIstek(t, h, "GET", "/api/v1/api-anahtari/ben", a.Anahtar, nil); s.kod != 200 {
+		t.Fatalf("süresiz anahtar çalışmalı: %d %s", s.kod, s.govde)
+	}
+	var detay string
+	_ = db.QueryRow(`SELECT detail FROM audit_log WHERE action='api_anahtar.olustur' ORDER BY id DESC LIMIT 1`).Scan(&detay)
+	if !strings.Contains(detay, "gün=süresiz") {
+		t.Fatalf("denetim: %q", detay)
+	}
+	// yenileme süresizi korur (eskiden 365 güne düşerdi)
+	s := ucIstek(t, h, "POST", "/api/v1/api-anahtarlari/"+strconv.FormatInt(a.Kayit.ID, 10)+"/yenile", jA, map[string]any{"gecis_saat": 0, "parola": "dogru-parola-a"})
+	var y olusturYanit
+	if (s.kod != 200 && s.kod != 201) || json.Unmarshal([]byte(s.govde), &y) != nil || y.Kayit.ID == 0 {
+		t.Fatalf("yenile: %d %s", s.kod, s.govde)
+	}
+	if y.Kayit.SonKullanma != 0 || !bitisNull(y.Kayit.ID) {
+		t.Fatalf("yenilenen süresiz anahtar süreli oldu: %d", y.Kayit.SonKullanma)
+	}
+	// süreli varsayılan değişmedi (365 gün), kök süresiz de olur
+	k := olustur(t, h, jK, map[string]any{"ad": "K", "izinler": []string{"hesap:oku"}, "izinli_ipler": []string{"192.0.2.0/24"}, "parola": "kok-parola"})
+	if d := k.Kayit.SonKullanma - k.Kayit.Olusturma; d < 365*86400-60 || d > 365*86400+60 {
+		t.Fatalf("varsayılan süre 365 gün olmalı: %d sn", d)
+	}
+	ks := olustur(t, h, jK, map[string]any{"ad": "KS", "izinler": []string{"hesap:oku"}, "izinli_ipler": []string{"192.0.2.0/24"}, "suresiz": true, "parola": "kok-parola"})
+	if ks.Kayit.SonKullanma != 0 || !bitisNull(ks.Kayit.ID) {
+		t.Fatalf("kök süresiz: %d", ks.Kayit.SonKullanma)
+	}
+	// süresiz + geçersiz gün birlikte gelirse gün YOK SAYILIR (süresiz kazanır)
+	if s := ucIstek(t, h, "POST", "/api/v1/api-anahtarlari", jK, map[string]any{"ad": "KS2", "izinler": []string{"hesap:oku"}, "izinli_ipler": []string{"192.0.2.0/24"}, "suresiz": true, "son_kullanma_gun": 99999, "parola": "kok-parola"}); s.kod != 201 {
+		t.Fatalf("süresiz + gün: %d %s", s.kod, s.govde)
 	}
 }

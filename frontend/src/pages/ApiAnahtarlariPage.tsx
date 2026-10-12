@@ -222,7 +222,7 @@ export default function ApiAnahtarlariPage() {
                     <td className="px-4 py-3 align-top text-xs text-slate-600 dark:text-dark-200">
                       {k.son_kullanim_at ? <>{tarih(k.son_kullanim_at)}<div className="font-mono text-slate-400">{k.son_kullanim_ip}</div></> : cevir('hiç')}
                     </td>
-                    <td className="px-4 py-3 align-top text-xs text-slate-600 dark:text-dark-200">{tarih(k.son_kullanma_at)}</td>
+                    <td className="px-4 py-3 align-top text-xs text-slate-600 dark:text-dark-200">{k.son_kullanma_at ? tarih(k.son_kullanma_at) : cevir('Süresiz')}</td>
                     <td className="px-4 py-3 align-top"><DurumRozeti k={k} /></td>
                     <td className="px-4 py-3 align-top">{eylemler(k)}</td>
                   </tr>
@@ -248,7 +248,7 @@ export default function ApiAnahtarlariPage() {
                   <dt className="text-slate-500">{cevir('Son kullanım')}</dt>
                   <dd className="text-slate-700 dark:text-dark-100">{k.son_kullanim_at ? `${tarih(k.son_kullanim_at)} · ${k.son_kullanim_ip}` : cevir('hiç')}</dd>
                   <dt className="text-slate-500">{cevir('Bitiş')}</dt>
-                  <dd className="text-slate-700 dark:text-dark-100">{tarih(k.son_kullanma_at)}</dd>
+                  <dd className="text-slate-700 dark:text-dark-100">{k.son_kullanma_at ? tarih(k.son_kullanma_at) : cevir('Süresiz')}</dd>
                 </dl>
                 <div className="mt-3">{eylemler(k)}</div>
               </div>

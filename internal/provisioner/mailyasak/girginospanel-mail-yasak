@@ -1,0 +1,26 @@
+#!/bin/sh
+# GirginOSPanel — kafesli (per-tenant PHP-FPM) hesaplarda PHP mail() / sendmail KAPALI.
+# Panel yönetir (provisioner.MailYasakKur); elle değişiklik her panel açılışında geri alınır.
+#
+# NEDEN: kafeste (NoNewPrivileges + RestrictSUIDSGID) postfix'in setgid `postdrop`'u etkisizdir.
+# SELinux Permissive/kapalı sunucuda gerçek sendmail postdrop'ta "Permission denied" alır ve SONSUZA DEK,
+# 10 sn'de bir journal'a uyarı yazarak yeniden dener; PHP işçisi pclose()'da takılır (pm.max_children
+# yuvası), işçi ölse bile sendmail+postdrop çifti yetim kalıp yazmayı sürdürür. Düz mail çıkışı
+# (virüs/ele geçirilmiş site → spam) zaten istenmiyor: bu betik aynı sonucu HIZLI ve SESSİZ verir —
+# işçi serbest kalır, mail() false döner, tek satır tenant.log'a düşer.
+#
+# Çağrı biçimleri:
+#   PHP mail():  girginospanel-mail-yasak -t -i [-f...]   mesaj stdin'den gelir, EOF'ta biter
+#   SMTP-stdio:  ... -bs   istemci önce selam (220) bekler; sessiz kalırsak iki taraf da bekleyip
+#                          takılırdı → 554 ile açıkça reddedilir.
+# Çıkış kodu 69 = EX_UNAVAILABLE (sysexits.h): 0 ve 75 (EX_TEMPFAIL, PHP bunu "kuyruğa alındı" sayar) DEĞİL.
+for a in "$@"; do
+    if [ "$a" = "-bs" ]; then
+        echo "554 5.3.2 girginospanel: bu sunucuda mail() kapali - SMTP kullanin"
+        exit 69
+    fi
+done
+echo "girginospanel: PHP mail() bu sunucuda kapali - SMTP kullanin (WordPress: SMTP eklentisi, XenForo: E-posta secenekleri > SMTP)" >&2
+# Yazan taraf (PHP) mesajı boru hattına yazıp kapatır; tüketmeden çıkarsak EPIPE alır.
+cat >/dev/null 2>&1
+exit 69

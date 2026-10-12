@@ -30,6 +30,7 @@ require $MODUL . '/gpanel.php';
 
 use GirginOSPanel\WHMCS\ApiHatasi;
 use GirginOSPanel\WHMCS\ApiIstemci;
+use GirginOSPanel\WHMCS\Ceviri;
 use GirginOSPanel\WHMCS\Kayit;
 use GirginOSPanel\WHMCS\Yardimci;
 use WHMCS\Database\Capsule;
@@ -78,6 +79,9 @@ function yeni(): FakePanel
     Kayit::sifirla();
     $GLOBALS['T'] = ['log' => [], 'localapi' => [], 'activity' => [], 'check_token' => 0];
     $_POST = [];
+    $_SESSION = [];
+    $GLOBALS['CONFIG']['Language'] = 'turkish';
+    Ceviri::sifirla();
     $_SERVER['REQUEST_METHOD'] = 'GET';
     $p = new FakePanel();
     ApiIstemci::$varsayilanTasiyici = $p->tasiyici();

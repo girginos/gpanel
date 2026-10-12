@@ -96,7 +96,7 @@ final class Modul
         } catch (\Throwable $e) {
             // Beklenmeyen: ayrinti gunluge (maskeli), kullaniciya kisa metin.
             self::gunluge($eylem, 'istisna', Yardimci::maskeleJson((string) json_encode(['hata' => get_class($e) . ': ' . $e->getMessage()])), ['http' => 0], []);
-            return 'Modül hatası: ' . get_class($e) . ' (ayrıntı Modül Günlüğü’nde).';
+            return Ceviri::t('Modül hatası: {0} (ayrıntı Modül Günlüğü’nde).', [get_class($e)]);
         }
     }
 
@@ -107,7 +107,7 @@ final class Modul
     {
         $deger = trim($deger);
         if ($deger === '') {
-            throw new ModulHatasi("Ürün ayarında '" . $secenekAdi . "' seçilmemiş.");
+            throw new ModulHatasi(Ceviri::t("Ürün ayarında '{0}' seçilmemiş.", [$secenekAdi]));
         }
         if (ctype_digit($deger)) {
             foreach ($liste as $x) {
@@ -115,7 +115,7 @@ final class Modul
                     return (int) $deger;
                 }
             }
-            throw new ModulHatasi($nesne . ' bulunamadı (id ' . $deger . "). Ürün ayarındaki '" . $secenekAdi . "' alanını kontrol edin.");
+            throw new ModulHatasi(Ceviri::t("{0} bulunamadı (id {1}). Ürün ayarındaki '{2}' alanını kontrol edin.", [$nesne, $deger, $secenekAdi]));
         }
         $es = [];
         foreach ($liste as $x) {
@@ -127,19 +127,19 @@ final class Modul
             return $es[0];
         }
         if (count($es) > 1) {
-            throw new ModulHatasi($nesne . " adı birden çok kayıtla eşleşiyor ('" . $deger . "'); id kullanın.");
+            throw new ModulHatasi(Ceviri::t("{0} adı birden çok kayıtla eşleşiyor ('{1}'); id kullanın.", [$nesne, $deger]));
         }
         $adlar = [];
         foreach ($liste as $x) {
             $adlar[] = (string) ($x['ad'] ?? '');
         }
-        throw new ModulHatasi($nesne . " bulunamadı ('" . $deger . "'). Mevcut: " . implode(', ', array_slice($adlar, 0, 15)));
+        throw new ModulHatasi(Ceviri::t("{0} bulunamadı ('{1}'). Mevcut: {2}", [$nesne, $deger, implode(', ', array_slice($adlar, 0, 15))]));
     }
 
     /** @param array<string,mixed> $o */
     private static function planId(ApiIstemci $c, array $o): int
     {
-        return self::adIdCoz($c->planlar(), $o['plan'], 'Panel planı', 'Panel planı');
+        return self::adIdCoz($c->planlar(), $o['plan'], Ceviri::t('Panel planı'), Ceviri::t('Panel planı'));
     }
 
     // ── Hesap kimligi ────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ final class Modul
         $o = self::secenekler($p);
         $niyet = $k !== null && $k['tur'] === $tur && $k['panel_id'] === 0;
         if (!$niyet && !$o['mevcutBagla']) {
-            throw new ModulHatasi("Bu hizmet bir panel hesabına bağlı değil. Yönetici > Hizmet > 'Panel hesap kimliği' alanıyla bağlayın ya da ürün ayarında 'Mevcut hesabı bağla'yı açın.");
+            throw new ModulHatasi(Ceviri::t("Bu hizmet bir panel hesabına bağlı değil. Yönetici > Hizmet > 'Panel hesap kimliği' alanıyla bağlayın ya da ürün ayarında 'Mevcut hesabı bağla'yı açın."));
         }
         if ($tur === Kayit::TUR_HOSTING) {
             $ad = strtolower(trim((string) ($p['domain'] ?? '')));
@@ -198,10 +198,10 @@ final class Modul
             $pid = $h ? (int) $h['id'] : 0;
         }
         if ($pid <= 0) {
-            throw new ModulHatasi("Panelde '" . $ad . "' hesabı bulunamadı.");
+            throw new ModulHatasi(Ceviri::t("Panelde '{0}' hesabı bulunamadı.", [$ad]));
         }
         if (Kayit::baskaHizmetteMi($pid, $tur, $sid)) {
-            throw new ModulHatasi("Panel hesabı '" . $ad . "' başka bir WHMCS hizmetine bağlı.");
+            throw new ModulHatasi(Ceviri::t("Panel hesabı '{0}' başka bir WHMCS hizmetine bağlı.", [$ad]));
         }
         Kayit::yaz($sid, $pid, $tur, $ad);
         return $pid;
@@ -263,7 +263,7 @@ final class Modul
         $sid = (int) $p['serviceid'];
         $alan = strtolower(trim((string) ($p['domain'] ?? '')));
         if ($alan === '') {
-            throw new ModulHatasi('Hizmette alan adı (domain) boş; hesap oluşturulamaz.');
+            throw new ModulHatasi(Ceviri::t('Hizmette alan adı (domain) boş; hesap oluşturulamaz.'));
         }
         $k = Kayit::oku($sid);
         if ($k !== null && $k['tur'] === Kayit::TUR_HOSTING && $k['panel_id'] > 0) {
@@ -309,7 +309,7 @@ final class Modul
         }
         $id = (int) ($y['id'] ?? 0);
         if ($id <= 0) {
-            throw new ModulHatasi('Panel hesap oluşturdu ama kimlik döndürmedi.');
+            throw new ModulHatasi(Ceviri::t('Panel hesap oluşturdu ama kimlik döndürmedi.'));
         }
         Kayit::yaz($sid, $id, Kayit::TUR_HOSTING, $alan);
         $uretilen = (string) ($y['olusturulan_parolalar']['ftp'] ?? '');
@@ -326,11 +326,11 @@ final class Modul
     {
         $sid = (int) $p['serviceid'];
         if (!$niyet && !$o['mevcutBagla']) {
-            throw new ModulHatasi("'" . ($mevcut['alan_adi'] ?? '') . "' alan adı panelde zaten var. Başka bir müşterinin hesabına bağlanmamak için otomatik bağlanmadı; ürün ayarında 'Mevcut hesabı bağla'yı açın ya da hizmette 'Panel hesap kimliği'ni elle girin.");
+            throw new ModulHatasi(Ceviri::t("'{0}' alan adı panelde zaten var. Başka bir müşterinin hesabına bağlanmamak için otomatik bağlanmadı; ürün ayarında 'Mevcut hesabı bağla'yı açın ya da hizmette 'Panel hesap kimliği'ni elle girin.", [$mevcut['alan_adi'] ?? '']));
         }
         $id = (int) $mevcut['id'];
         if (Kayit::baskaHizmetteMi($id, Kayit::TUR_HOSTING, $sid)) {
-            throw new ModulHatasi("Panelde '" . ($mevcut['alan_adi'] ?? '') . "' hesabı zaten başka bir WHMCS hizmetine bağlı.");
+            throw new ModulHatasi(Ceviri::t("Panelde '{0}' hesabı zaten başka bir WHMCS hizmetine bağlı.", [$mevcut['alan_adi'] ?? '']));
         }
         Kayit::yaz($sid, $id, Kayit::TUR_HOSTING, (string) $mevcut['alan_adi']);
         self::hizmetiBaglaVeEsitle($p, $c, $id, $mevcut);
@@ -393,11 +393,11 @@ final class Modul
         $sid = (int) $p['serviceid'];
         $kullanici = strtolower(trim((string) ($p['username'] ?? '')));
         if (!preg_match('/^[a-z0-9][a-z0-9._-]{2,31}$/', $kullanici) || $kullanici === 'root') {
-            throw new ModulHatasi("Bayi kullanıcı adı geçersiz ('" . $kullanici . "'): 3-32 karakter, küçük harf/rakam/._- olmalı (Hizmet > Kullanıcı adı).");
+            throw new ModulHatasi(Ceviri::t("Bayi kullanıcı adı geçersiz ('{0}'): 3-32 karakter, küçük harf/rakam/._- olmalı (Hizmet > Kullanıcı adı).", [$kullanici]));
         }
         $pw = (string) ($p['password'] ?? '');
         if (strlen($pw) < 8 || strlen($pw) > 128) {
-            throw new ModulHatasi('Bayi parolası 8-128 karakter olmalı.');
+            throw new ModulHatasi(Ceviri::t('Bayi parolası 8-128 karakter olmalı.'));
         }
         $k = Kayit::oku($sid);
         if ($k !== null && $k['tur'] === Kayit::TUR_BAYI && $k['panel_id'] > 0) {
@@ -407,15 +407,15 @@ final class Modul
         $mevcut = self::bayiBul($c, $kullanici);
         if ($mevcut !== null) {
             if (!$niyet && !$o['mevcutBagla']) {
-                throw new ModulHatasi("'" . $kullanici . "' bayisi panelde zaten var; otomatik bağlanmadı ('Mevcut hesabı bağla' seçeneği kapalı).");
+                throw new ModulHatasi(Ceviri::t("'{0}' bayisi panelde zaten var; otomatik bağlanmadı ('Mevcut hesabı bağla' seçeneği kapalı).", [$kullanici]));
             }
             if (Kayit::baskaHizmetteMi((int) $mevcut['id'], Kayit::TUR_BAYI, $sid)) {
-                throw new ModulHatasi("Bayi '" . $kullanici . "' başka bir WHMCS hizmetine bağlı.");
+                throw new ModulHatasi(Ceviri::t("Bayi '{0}' başka bir WHMCS hizmetine bağlı.", [$kullanici]));
             }
             Kayit::yaz($sid, (int) $mevcut['id'], Kayit::TUR_BAYI, $kullanici);
             return;
         }
-        $paketId = self::adIdCoz($c->bayiPaketleri(), $o['paket'], 'Bayi paketi', 'Bayi paketi');
+        $paketId = self::adIdCoz($c->bayiPaketleri(), $o['paket'], Ceviri::t('Bayi paketi'), Ceviri::t('Bayi paketi'));
         $ad = trim((string) ($p['clientsdetails']['fullname'] ?? ''));
         if ($ad === '') {
             $ad = trim(((string) ($p['clientsdetails']['firstname'] ?? '')) . ' ' . ((string) ($p['clientsdetails']['lastname'] ?? '')));
@@ -431,7 +431,7 @@ final class Modul
         }
         $id = (int) ($y['id'] ?? 0);
         if ($id <= 0) {
-            throw new ModulHatasi('Panel bayiyi oluşturdu ama kimlik döndürmedi.');
+            throw new ModulHatasi(Ceviri::t('Panel bayiyi oluşturdu ama kimlik döndürmedi.'));
         }
         Kayit::yaz($sid, $id, Kayit::TUR_BAYI, $kullanici);
     }
@@ -504,7 +504,7 @@ final class Modul
             $c = self::istemci($p, 'ChangePackage');
             $id = self::hesapId($p, $c, $o['tip']);
             if ($o['tip'] === Kayit::TUR_BAYI) {
-                $paket = self::adIdCoz($c->bayiPaketleri(), $o['paket'], 'Bayi paketi', 'Bayi paketi');
+                $paket = self::adIdCoz($c->bayiPaketleri(), $o['paket'], Ceviri::t('Bayi paketi'), Ceviri::t('Bayi paketi'));
                 $c->bayiGuncelle($id, ['paket_id' => $paket]);
             } else {
                 // plan_id null panelde "plani kaldir" demek: bos secimde ASLA gonderme.
@@ -519,7 +519,7 @@ final class Modul
         return self::calistir('ChangePassword', $p, static function () use ($p) {
             $o = self::secenekler($p);
             if ($o['tip'] === Kayit::TUR_BAYI) {
-                throw new ModulHatasi('Bayi hesabının parolası panel API anahtarıyla değiştirilemez (panel kısıtı). Bayi parolayı panelden değiştirmeli.');
+                throw new ModulHatasi(Ceviri::t('Bayi hesabının parolası panel API anahtarıyla değiştirilemez (panel kısıtı). Bayi parolayı panelden değiştirmeli.'));
             }
             $pw = (string) ($p['password'] ?? '');
             $h = Yardimci::parolaHatasi($pw);
@@ -551,13 +551,26 @@ final class Modul
                 $eksik[] = 'plan:oku';
             }
             if ($eksik) {
-                return ['success' => false, 'error' => 'Bağlantı kuruldu ama API anahtarında izin eksik: ' . implode(', ', $eksik) . ' (isteğe bağlı: ftp.parola:yaz, sso, bayi).'];
+                return ['success' => false, 'error' => Ceviri::t('Bağlantı kuruldu ama API anahtarında izin eksik: {0} (isteğe bağlı: ftp.parola:yaz, sso, bayi).', [implode(', ', $eksik)])];
+            }
+            // Eski kapı tespiti: panel kapı portlarını değiştirdiyse geçiş döneminde eski
+            // port da çalışır ama sonra KAPANIR. /kapi/adres (her anahtara açık) yalnız eski
+            // kapıda yeni adresi döner; yeni kapıda ya da eski panelde boş/404 → sessizce geç.
+            try {
+                $k = $c->istek('GET', '/kapi/adres');
+                $yeni = is_string($k['adres'] ?? null) ? (string) $k['adres'] : '';
+                $yp = $yeni !== '' ? (int) parse_url($yeni, PHP_URL_PORT) : 0;
+                if ($yp > 0 && $yp !== $c->port()) {
+                    return ['success' => false, 'error' => Ceviri::t("Bağlantı kuruldu ama bu port gPanel'in ESKİ (geçiş dönemi) kapısı; yeni yönetici kapısı portu: {0}. Eski kapı kapanınca bağlantı kesilir — sunucu ayarındaki portu {0} yapın.", [$yp])];
+                }
+            } catch (ApiHatasi $e) {
+                // uç yok (eski panel) ya da geçici hata: bağlantı testi yine başarılı
             }
             return ['success' => true, 'error' => ''];
         } catch (ApiHatasi $e) {
             return ['success' => false, 'error' => $e->getMessage()];
         } catch (\Throwable $e) {
-            return ['success' => false, 'error' => 'Modül hatası: ' . get_class($e)];
+            return ['success' => false, 'error' => Ceviri::t('Modül hatası: {0}', [get_class($e)])];
         }
     }
 
@@ -587,7 +600,7 @@ final class Modul
             $c = self::istemci($p, $eylem);
             if ($o['tip'] === Kayit::TUR_BAYI) {
                 // Bayi icin SSO ucu yok: duz panel baglantisi.
-                return self::duzBaglanti($p, $o, $musteri, 'Bayi hesabı için tek tıkla giriş ucu yok.');
+                return self::duzBaglanti($p, $o, $musteri, Ceviri::t('Bayi hesabı için tek tıkla giriş ucu yok.'));
             }
             $id = self::hesapId($p, $c, Kayit::TUR_HOSTING);
             try {
@@ -600,8 +613,8 @@ final class Modul
                 }
                 return ['success' => false, 'errorMsg' => $e->getMessage()];
             }
-            $url = (string) ($y['url'] ?? '');
-            $hata = self::ssoUrlHatasi($url, $p, $o);
+            $hata = null;
+            $url = self::ssoAdresi((string) ($y['url'] ?? ''), $p, $o, $hata);
             if ($hata !== null) {
                 return ['success' => false, 'errorMsg' => $hata];
             }
@@ -611,24 +624,48 @@ final class Modul
         } catch (ModulHatasi $e) {
             return ['success' => false, 'errorMsg' => $e->getMessage()];
         } catch (\Throwable $e) {
-            return ['success' => false, 'errorMsg' => 'Modül hatası: ' . get_class($e)];
+            return ['success' => false, 'errorMsg' => Ceviri::t('Modül hatası: {0}', [get_class($e)])];
         }
     }
 
     /**
-     * SSO adresi: https, kullanici bilgisi yok, ana bilgisayar sunucu ya da paneli adresiyle ayni.
+     * SSO yonlendirme adresi. Panelin dondurdugu adres https olmali, kullanici
+     * bilgisi tasimamali ve #kod icermeli.
+     *  - Urunde "Panel adresi" (musteri kapisi) girilmisse musteri HER ZAMAN o
+     *    KOKENE (sema+host+port) gider; panelin yolu ve parcasi (/adina#kod=...)
+     *    aynen korunur. Yonetici acikca girdigi icin guvenilir; panelin bildirdigi
+     *    ana bilgisayar adi kullanilmaz.
+     *    NEDEN: ana bilgisayar adi ayarlanmamis panel (nginx server_name "_")
+     *    0.3.0-20261009'da adresi https://_:PORT/ olarak donduruyordu (gercek
+     *    VPS'te olculdu, 2026-10-12); IP ile tanimli WHMCS sunucusunda da panel
+     *    kendi ana bilgisayar adini dondurur -> eslesme kontrolu reddederdi.
+     *  - Girilmemisse panelin adresi kullanilir; ana bilgisayari sunucu
+     *    ayarindaki hostname/IP ile ayni olmali (kod baska yere sizdirilmaz).
      *
      * @param array<string,mixed> $p
      * @param array<string,mixed> $o
      */
-    private static function ssoUrlHatasi(string $url, array $p, array $o): ?string
+    private static function ssoAdresi(string $url, array $p, array $o, ?string &$hata): string
     {
+        $hata = null;
         $u = parse_url($url);
-        if ($url === '' || $u === false || ($u['scheme'] ?? '') !== 'https' || isset($u['user']) || isset($u['pass']) || empty($u['host'])) {
-            return 'Panel geçerli bir giriş adresi döndürmedi.';
+        if ($url === '' || $u === false || ($u['scheme'] ?? '') !== 'https' || isset($u['user']) || isset($u['pass']) || empty($u['host'])
+            || (string) ($u['fragment'] ?? '') === '') {
+            $hata = Ceviri::t('Panel geçerli bir giriş adresi döndürmedi.');
+            return '';
+        }
+        if ($o['panelUrl'] !== '') {
+            $taban = self::panelUrl($p, $o);
+            $t = $taban !== '' ? parse_url($taban) : false;
+            if ($t === false || empty($t['host'])) {
+                $hata = Ceviri::t("Ürün ayarındaki 'Panel adresi' geçersiz (https://alan:PORT/ biçiminde olmalı).");
+                return '';
+            }
+            $koken = 'https://' . $t['host'] . (isset($t['port']) ? ':' . $t['port'] : '');
+            return $koken . ($u['path'] ?? '/') . (isset($u['query']) ? '?' . $u['query'] : '') . '#' . $u['fragment'];
         }
         $izinli = [];
-        foreach ([(string) ($p['serverhostname'] ?? ''), (string) ($p['serverip'] ?? '')] as $h) {
+        foreach ([Yardimci::sunucuAdresi($p)['host'], Yardimci::hostPortAyir((string) ($p['serverip'] ?? ''))[0]] as $h) {
             if ($h !== '') {
                 $izinli[] = strtolower(trim($h, '[]'));
             }
@@ -640,9 +677,10 @@ final class Modul
             }
         }
         if (!in_array(strtolower(trim($u['host'], '[]')), $izinli, true)) {
-            return 'Panelin döndürdüğü giriş adresi beklenen ana bilgisayara ait değil (güvenlik nedeniyle reddedildi).';
+            $hata = Ceviri::t("Panelin döndürdüğü giriş adresi beklenen ana bilgisayara ait değil (güvenlik nedeniyle reddedildi). Ürün ayarlarında 'Panel adresi' alanına müşteri kapısını (https://alan:PORT/) girin.");
+            return '';
         }
-        return null;
+        return $url;
     }
 
     /**
@@ -672,9 +710,8 @@ final class Modul
         if ($o['tip'] === Kayit::TUR_BAYI) {
             return ''; // bayi kapisi ayri port: adres elle girilmeli
         }
-        $host = trim((string) ($p['serverhostname'] ?? '')) ?: trim((string) ($p['serverip'] ?? ''));
-        $port = (int) ($p['serverport'] ?? 0);
-        return Yardimci::hostGecerli($host) && $port > 0 ? Yardimci::tabanUrl($host, $port) . '/' : '';
+        $a = Yardimci::sunucuAdresi($p);
+        return Yardimci::hostGecerli($a['host']) && $a['port'] > 0 ? Yardimci::tabanUrl($a['host'], $a['port']) . '/' : '';
     }
 
     // ── Kullanim guncelleme ──────────────────────────────────────────────
@@ -768,13 +805,13 @@ final class Modul
                 }
             }
             if ($basarisiz > 0) {
-                return $basarisiz . ' hizmetin kullanımı veritabanına yazılamadı.';
+                return Ceviri::t('{0} hizmetin kullanımı veritabanına yazılamadı.', [$basarisiz]);
             }
-            return $hata === '' ? 'success' : 'Hosting kullanımı güncellendi; bayi kullanımı alınamadı: ' . $hata;
+            return $hata === '' ? 'success' : Ceviri::t('Hosting kullanımı güncellendi; bayi kullanımı alınamadı: {0}', [$hata]);
         } catch (ApiHatasi $e) {
             return $e->getMessage();
         } catch (\Throwable $e) {
-            return 'Modül hatası: ' . get_class($e);
+            return Ceviri::t('Modül hatası: {0}', [get_class($e)]);
         }
     }
 
@@ -805,11 +842,18 @@ final class Modul
     {
         $k = Kayit::oku((int) $p['serviceid']);
         $deger = $k !== null && $k['panel_id'] > 0 ? (string) $k['panel_id'] : '';
-        $durum = $k === null ? 'bağlı değil' : ($k['panel_id'] > 0 ? ($k['tur'] === Kayit::TUR_BAYI ? 'bayi' : 'hosting') . ' hesabı' : 'oluşturma bekliyor/yarım');
+        if ($k === null) {
+            $durum = Ceviri::t('bağlı değil');
+        } elseif ($k['panel_id'] > 0) {
+            $durum = $k['tur'] === Kayit::TUR_BAYI ? Ceviri::t('bayi hesabı') : Ceviri::t('hosting hesabı');
+        } else {
+            $durum = Ceviri::t('oluşturma bekliyor/yarım');
+        }
+        // Etiketler (dizi anahtarlari) ve aciklama yonetici dilinde; WHMCS anahtari etiket olarak basar.
         return [
-            'Panel hesap kimliği' => '<input type="text" name="gpanel_panel_id" value="' . Yardimci::esc($deger) . '" size="10" pattern="[0-9]*" />'
-                . ' <small>Boş bırakmak bağı değiştirmez. Panelde var olan hesabı elle bağlamak için kimliği girin (doğrulanır).</small>',
-            'Panel bağlantı durumu' => Yardimci::esc($durum),
+            Ceviri::t('Panel hesap kimliği') => '<input type="text" name="gpanel_panel_id" value="' . Yardimci::esc($deger) . '" size="10" pattern="[0-9]*" />'
+                . ' <small>' . Yardimci::esc(Ceviri::t('Boş bırakmak bağı değiştirmez. Panelde var olan hesabı elle bağlamak için kimliği girin (doğrulanır).')) . '</small>',
+            Ceviri::t('Panel bağlantı durumu') => Yardimci::esc($durum),
         ];
     }
 
@@ -829,11 +873,11 @@ final class Modul
         }
         $etkinlik = static function (string $m) use ($sid): void {
             if (function_exists('logActivity')) {
-                \logActivity('GirginOSPanel: hizmet #' . $sid . ' bağlanamadı: ' . $m);
+                \logActivity(Ceviri::t('GirginOSPanel: hizmet #{0} bağlanamadı: {1}', [$sid, $m]));
             }
         };
         if (!ctype_digit($yeni) || (int) $yeni <= 0) {
-            $etkinlik('panel hesap kimliği sayı olmalı');
+            $etkinlik(Ceviri::t('panel hesap kimliği sayı olmalı'));
             return;
         }
         try {
@@ -849,19 +893,19 @@ final class Modul
                     }
                 }
                 if ($bulundu === null || strtolower((string) $bulundu['kullanici']) !== $ad) {
-                    $etkinlik('bayi kimliği/kullanıcı adı panelle uyuşmuyor');
+                    $etkinlik(Ceviri::t('bayi kimliği/kullanıcı adı panelle uyuşmuyor'));
                     return;
                 }
             } else {
                 $ad = strtolower(trim((string) ($p['domain'] ?? '')));
                 $h = $c->hesap($id);
                 if (strtolower((string) ($h['alan_adi'] ?? '')) !== $ad) {
-                    $etkinlik('panel hesabının alan adı hizmetteki alan adıyla uyuşmuyor');
+                    $etkinlik(Ceviri::t('panel hesabının alan adı hizmetteki alan adıyla uyuşmuyor'));
                     return;
                 }
             }
             if (Kayit::baskaHizmetteMi($id, $o['tip'], $sid)) {
-                $etkinlik('panel hesabı başka bir hizmete bağlı');
+                $etkinlik(Ceviri::t('panel hesabı başka bir hizmete bağlı'));
                 return;
             }
             Kayit::yaz($sid, $id, $o['tip'], $ad);
@@ -888,6 +932,7 @@ final class Modul
             'disk' => null,
             'trafik' => null,
             'cubuklar' => [],
+            'olcerler' => [],
             'serviceid' => (int) ($p['serviceid'] ?? 0),
             'panel_url' => self::panelUrl($p, $o),
             'token' => function_exists('generate_token') ? (string) \generate_token('plain') : '',
@@ -899,7 +944,9 @@ final class Modul
                 foreach ($c->bayiler() as $b) {
                     if ((int) ($b['id'] ?? 0) === $id) {
                         $vars['hesap'] = [
-                            'ad' => (string) $b['kullanici'], 'durum' => (string) ($b['durum'] ?? ''),
+                            'ad' => (string) $b['kullanici'],
+                            // panel users.status: active | suspended (eski: askida/pasif) -> sablonun dili
+                            'durum' => in_array(strtolower((string) ($b['durum'] ?? '')), ['suspended', 'askida', 'pasif'], true) ? 'askida' : 'aktif',
                             'plan' => (string) ($b['paket_ad'] ?? ''),
                             'alan_sayisi' => (int) ($b['domain_sayisi'] ?? 0), 'max_domain' => (int) ($b['max_domain'] ?? 0),
                         ];
@@ -914,6 +961,8 @@ final class Modul
                     'plan' => (string) ($h['plan_ad'] ?? ''), 'php' => (string) ($h['php_surum'] ?? ''),
                     'ftp_host' => (string) ($h['ftp_host'] ?? ''), 'ftp_user' => (string) ($h['ftp_user'] ?? ''),
                     'ipv4' => (string) ($h['ipv4'] ?? ''),
+                    'ssl' => !empty($h['ssl']),
+                    'ssl_bitis' => preg_match('/^\d{4}-\d{2}-\d{2}/', (string) ($h['ssl_bitis'] ?? '')) ? substr((string) $h['ssl_bitis'], 0, 10) : '',
                 ];
                 $vars['disk'] = self::cubuk(Yardimci::kbToMb($h['boyut_kb'] ?? 0), (int) ($h['disk_kota_mb'] ?? 0));
                 $vars['trafik'] = self::cubuk(Yardimci::kbToMb($h['trafik_kb'] ?? 0), (int) ($h['trafik_kota_mb'] ?? 0));
@@ -923,15 +972,54 @@ final class Modul
         } catch (ModulHatasi $e) {
             $vars['hata'] = $e->getMessage();
         } catch (\Throwable $e) {
-            $vars['hata'] = 'Hesap bilgisi alınamadı.';
+            $vars['hata'] = Ceviri::t('Hesap bilgisi alınamadı.');
         }
         $vars['cubuklar'] = [];
         foreach (['disk', 'trafik'] as $ad) {
             if (is_array($vars[$ad])) {
                 $vars['cubuklar'][] = ['ad' => $ad] + $vars[$ad];
+                // Panel bayi trafiğini ÖLÇMEZ (her zaman 0): yanıltıcı ölçer gösterilmez.
+                if (!($o['tip'] === Kayit::TUR_BAYI && $ad === 'trafik')) {
+                    $vars['olcerler'][] = self::olcer($ad, $vars[$ad]);
+                }
             }
         }
+        if ($o['tip'] === Kayit::TUR_BAYI && is_array($vars['hesap'])) {
+            $n = (int) $vars['hesap']['alan_sayisi'];
+            $m = (int) $vars['hesap']['max_domain'];
+            $y = $m > 0 ? (int) min(100, round($n * 100 / $m)) : 0;
+            $vars['olcerler'][] = [
+                'ad' => 'alan_sayisi', 'kullanim_metin' => (string) $n, 'limit_metin' => $m > 0 ? (string) $m : '',
+                'yuzde' => $y, 'limitli' => $m > 0, 'sinif' => self::esikSinifi($m > 0, $y),
+            ];
+        }
         return ['templatefile' => 'templates/clientarea', 'vars' => $vars];
+    }
+
+    /**
+     * Müşteri alanı ölçeri: okunaklı boyut metni + eşik sınıfı (≥90 kritik, ≥75 uyarı).
+     *
+     * @param array{kullanim:int,limit:int,yuzde:int} $c
+     * @return array{ad:string,kullanim_metin:string,limit_metin:string,yuzde:int,limitli:bool,sinif:string}
+     */
+    public static function olcer(string $ad, array $c): array
+    {
+        $limitli = $c['limit'] > 0;
+        $sinif = self::esikSinifi($limitli, $c['yuzde']);
+        return [
+            'ad' => $ad, 'kullanim_metin' => Yardimci::boyutMetin($c['kullanim']),
+            'limit_metin' => $limitli ? Yardimci::boyutMetin($c['limit']) : '',
+            'yuzde' => $c['yuzde'], 'limitli' => $limitli, 'sinif' => $sinif,
+        ];
+    }
+
+    /** Ölçer eşik sınıfı: ≥90 kritik, ≥75 uyarı; limitsizde yok. */
+    public static function esikSinifi(bool $limitli, int $yuzde): string
+    {
+        if (!$limitli) {
+            return '';
+        }
+        return $yuzde >= 90 ? 'kritik' : ($yuzde >= 75 ? 'uyari' : '');
     }
 
     /** @return array{kullanim:int,limit:int,yuzde:int} */
@@ -949,7 +1037,7 @@ final class Modul
     public static function musteriParolaDegistir(array $p): string
     {
         if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-            return 'Geçersiz istek.';
+            return Ceviri::t('Geçersiz istek.');
         }
         if (function_exists('check_token')) {
             \check_token('WHMCS.default'); // CSRF: WHMCS jetonu (basarisizsa WHMCS keser)
@@ -957,7 +1045,7 @@ final class Modul
         $a = (string) ($_POST['yeni_parola'] ?? '');
         $b = (string) ($_POST['yeni_parola2'] ?? '');
         if ($a !== $b) {
-            return 'Parolalar eşleşmiyor.';
+            return Ceviri::t('Parolalar eşleşmiyor.');
         }
         $p['password'] = $a;
         $s = self::parolaDegistir($p);
@@ -977,7 +1065,7 @@ final class Modul
         return self::calistir('ClientAreaUsage', $p, static function () use ($p) {
             $o = self::secenekler($p);
             if ($o['tip'] !== Kayit::TUR_HOSTING) {
-                throw new ModulHatasi('Bu ürün tipi için kullanım yenileme yok.');
+                throw new ModulHatasi(Ceviri::t('Bu ürün tipi için kullanım yenileme yok.'));
             }
             $c = self::istemci($p, 'ClientAreaUsage');
             $h = $c->hesap(self::hesapId($p, $c, Kayit::TUR_HOSTING));

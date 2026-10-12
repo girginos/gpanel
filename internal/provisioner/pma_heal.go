@@ -67,6 +67,29 @@ if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
 session_start();
 
 if (empty($_GET['t'])) {
+    // phpMyAdmin kimlik dogrulamasi BASARISIZ olunca SignonURL'e (buraya) TOKENSIZ
+    // doner ve nedenini bu oturuma PMA_single_signon_error_message olarak yazar.
+    // Eskiden burada her durumda "Token eksik" yaziyordu: gercek neden (or. "MySQL
+    // sunucusuna oturum acilamiyor" = panel kaydindaki parola MariaDB'dekiyle
+    // uyusmuyor) kullaniciya hic ulasmiyordu (2026-10-12, .180).
+    $pmaHata = isset($_SESSION['PMA_single_signon_error_message'])
+        ? trim((string)$_SESSION['PMA_single_signon_error_message']) : '';
+    if ($pmaHata !== '') {
+        // Basarisiz kimlik bilgileri (parola dahil) oturumda BEKLETILMEZ.
+        $_SESSION = [];
+        session_destroy();
+        http_response_code(401);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo '<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>phpMyAdmin</title></head><body>'
+            . '<h3>phpMyAdmin veritaban&#305;na giri&#351; yapamad&#305;</h3>'
+            . '<p>Sunucu yan&#305;t&#305;: <b>' . htmlspecialchars($pmaHata, ENT_QUOTES, 'UTF-8') . '</b></p>'
+            . '<p>Panelde kay&#305;tl&#305; veritaban&#305; parolas&#305; MySQL\'deki parolayla uyu&#351;muyor olabilir '
+            . '(parola panel d&#305;&#351;&#305;ndan de&#287;i&#351;tirilmi&#351;). Panelde veritaban&#305; sayfas&#305;na d&#246;n&#252;p '
+            . 'phpMyAdmin\'i yeniden a&#231;&#305;n: panel nedeni ve &#231;&#246;z&#252;m&#252; g&#246;sterir.</p>'
+            . '</body></html>';
+        exit;
+    }
     http_response_code(400);
     die('Token eksik. Panel uzerinden gecis yapin.');
 }
@@ -171,11 +194,12 @@ func dirVar(p string) bool   { fi, e := os.Stat(p); return e == nil && fi.IsDir(
 func ensurePMASignon() {
 	_ = os.MkdirAll(pmaSignonDir, 0755)
 	cur, err := os.ReadFile(pmaSignonPath)
-	// 🔴 iki kosul birden: host=localhost fix'i VE session sertlestirmesi
-	// (use_strict_mode/regenerate_id). Yalniz ilkine bakmak, sertlestirme oncesi
-	// yazilmis kopyalarin SONSUZA DEK eski kalmasina yol acti (drift dersi).
-	if err == nil && strings.Contains(string(cur), "PMA_single_signon_host'] = 'localhost'") &&
-		strings.Contains(string(cur), "session.use_strict_mode") {
+	// 🔴 TAM ESITLIK. Eskiden yalniz isaret dizgelerine (host=localhost,
+	// use_strict_mode) bakiliyordu: her yeni duzeltme yeni bir isaret eklemeyi
+	// gerektiriyor, unutulunca mevcut kurulumlar SONSUZA DEK eski kopyada kaliyordu
+	// (drift dersi; 2026-10-12 signon hata-mesaji duzeltmesi de bu yuzden .180'e
+	// ulasamazdi). Dosya panelin malidir: kanonikten farkliysa kanonik yazilir.
+	if err == nil && signonGuncel(cur) {
 		return // zaten doğru
 	}
 	if err := os.WriteFile(pmaSignonPath, []byte(pmaSignonPHP), 0644); err != nil {
@@ -185,6 +209,9 @@ func ensurePMASignon() {
 	_, _ = exec.Command("restorecon", pmaSignonPath).CombinedOutput()
 	log.Printf("pma heal: pma-signon.php kanonik (host=localhost) içerikle yazıldı")
 }
+
+// signonGuncel: diskteki pma-signon.php kanonik içerikle BİREBİR aynı mı.
+func signonGuncel(cur []byte) bool { return string(cur) == pmaSignonPHP }
 
 // ensurePMAToken: internal auth token'ı yoksa üretir (root:apache 0640) — pma-signon.php ile
 // panel API'si aynı dosyayı okur → rastgele değer eşleşir. Var olan token'a DOKUNMAZ.

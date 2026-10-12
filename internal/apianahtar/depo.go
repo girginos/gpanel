@@ -22,7 +22,7 @@ type Kayit struct {
 	Izinler       []string
 	IPler         []string
 	HizDk         int
-	SonKullanma   int64 // unix; 0 = yok (v1'de her anahtarın bitişi vardır)
+	SonKullanma   int64 // unix; 0 = süresiz (DB'de NULL; yalnız iptalle geçersizleşir)
 	Olusturma     int64
 	SonKullanim   int64
 	SonKullanimIP string

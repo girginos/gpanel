@@ -180,7 +180,7 @@ func (h *Handlers) Katalog(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"gruplar":        gruplar,
 		"ip_zorunlu":     c.Role == apianahtar.RolKok,
-		"varsayilan_gun": VarsayilanGun, "maks_gun": MaksGun,
+		"varsayilan_gun": VarsayilanGun, "maks_gun": MaksGun, "suresiz_destek": true,
 		"varsayilan_hiz": VarsayilanHiz, "min_hiz": MinHiz, "maks_hiz": MaksHiz,
 		"maks_ip": apianahtar.MaksIP,
 		// Authorization: gosp <kullanici_adi>:<anahtar> — anahtar yalnız bu adla geçer.
@@ -195,9 +195,11 @@ type olusturIstek struct {
 	Izinler []string `json:"izinler"`
 	IPler   []string `json:"izinli_ipler"`
 	Gun     int      `json:"son_kullanma_gun"`
-	HizDk   int      `json:"hiz_dk"`
-	Parola  string   `json:"parola"`
-	Kod     string   `json:"kod"`
+	// Suresiz: bitiş YOK (son_kullanma_at NULL); anahtar yalnız iptalle geçersizleşir.
+	Suresiz bool   `json:"suresiz"`
+	HizDk   int    `json:"hiz_dk"`
+	Parola  string `json:"parola"`
+	Kod     string `json:"kod"`
 }
 
 // adDogrula: 1-64 karakter, kontrol karakteri yok.
@@ -244,12 +246,22 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	gun := req.Gun
-	if gun == 0 {
-		gun = VarsayilanGun
-	}
-	if gun < 1 || gun > MaksGun {
-		httpx.WriteError(w, http.StatusBadRequest, fmt.Sprintf("geçerlilik süresi 1-%d gün olmalı", MaksGun))
-		return
+	if req.Suresiz {
+		// Hiç dolmayan VE her yerden çalışan anahtar olmasın: süresizde IP listesi
+		// ZORUNLU (kökte zaten zorunlu; bayide de). Kullanıcı isteği 2026-10-12.
+		if len(ipler) == 0 {
+			httpx.WriteError(w, http.StatusBadRequest, "süresiz anahtarda en az bir izinli IP zorunludur")
+			return
+		}
+		gun = 0
+	} else {
+		if gun == 0 {
+			gun = VarsayilanGun
+		}
+		if gun < 1 || gun > MaksGun {
+			httpx.WriteError(w, http.StatusBadRequest, fmt.Sprintf("geçerlilik süresi 1-%d gün olmalı", MaksGun))
+			return
+		}
 	}
 	hiz := req.HizDk
 	if hiz == 0 {
@@ -270,9 +282,15 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusConflict, fmt.Sprintf("en çok %d etkin API anahtarı olabilir; önce kullanılmayanları iptal edin", MaksEtkinAnahtar))
 		return
 	}
+	var bitis int64 // 0 = süresiz (DB'de NULL)
+	gunMetin := "süresiz"
+	if !req.Suresiz {
+		bitis = simdi.Add(time.Duration(gun) * 24 * time.Hour).Unix()
+		gunMetin = strconv.Itoa(gun)
+	}
 	k := &apianahtar.Kayit{
 		SahipID: c.UserID, SahipRol: c.Role, Ad: ad, Izinler: izinler, IPler: ipler,
-		HizDk: hiz, SonKullanma: simdi.Add(time.Duration(gun) * 24 * time.Hour).Unix(),
+		HizDk: hiz, SonKullanma: bitis,
 	}
 	tam, err := h.ekle(r, k)
 	if err != nil {
@@ -281,7 +299,7 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, kul := middleware.Aktor(r)
 	httpx.Denetim(h.DB, r, uid, kul, "api_anahtar.olustur", apianahtar.Gosterim(k.Onek, k.Son4),
-		fmt.Sprintf("ad=%s izinler=%s ip=%d gün=%d", ad, strings.Join(izinler, ","), len(ipler), gun), kapsamOf(c), true)
+		fmt.Sprintf("ad=%s izinler=%s ip=%d gün=%s", ad, strings.Join(izinler, ","), len(ipler), gunMetin), kapsamOf(c), true)
 	k.Olusturma = simdi.Unix()
 	h.tekKezYanit(w, k, tam, simdi.Unix())
 }
@@ -460,13 +478,18 @@ func (h *Handlers) Yenile(w http.ResponseWriter, r *http.Request) {
 	if !h.yenidenDogrula(w, r, c, req.Parola, req.Kod) {
 		return
 	}
-	sure := eski.SonKullanma - eski.Olusturma
-	if sure <= 0 || sure > int64(MaksGun)*86400 {
-		sure = int64(VarsayilanGun) * 86400
+	// Süresiz anahtar süresiz döner (eskiden 365 güne düşerdi); süreli olan aynı süreyle.
+	var bitis int64
+	if eski.SonKullanma > 0 {
+		sure := eski.SonKullanma - eski.Olusturma
+		if sure <= 0 || sure > int64(MaksGun)*86400 {
+			sure = int64(VarsayilanGun) * 86400
+		}
+		bitis = simdi.Unix() + sure
 	}
 	yeni := &apianahtar.Kayit{
 		SahipID: c.UserID, SahipRol: c.Role, Ad: eski.Ad, Izinler: izinler, IPler: ipler,
-		HizDk: eski.HizDk, SonKullanma: simdi.Unix() + sure,
+		HizDk: eski.HizDk, SonKullanma: bitis,
 	}
 	tam, err := h.ekle(r, yeni)
 	if err != nil {

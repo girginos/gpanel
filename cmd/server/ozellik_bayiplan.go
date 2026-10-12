@@ -1,8 +1,8 @@
 package main
 
-// ozellik_bayiplan.go — bayinin kendi hosting planları: varsayılan plan uzlaştırması
-// (açılış), plan düzenlemesinde bağlı hostinglere yeniden uygulama bağlantısı ve
-// ek /plans uçları. main.go yalnız bu iki fonksiyonu çağırır.
+// ozellik_bayiplan.go — bayinin kendi hosting planları: varsayılan İŞARET uzlaştırması
+// (açılış; plan OLUŞTURMAZ), plan düzenlemesinde bağlı hostinglere yeniden uygulama
+// bağlantısı ve ek /plans uçları. main.go yalnız bu iki fonksiyonu çağırır.
 
 import (
 	"context"
@@ -26,18 +26,19 @@ func bayiPlanRotalari(r chi.Router, ph *plans.Handlers) {
 
 // bayiPlanAcilis — plan düzenlemesi bağlı hostinglere "Yeniden Uygula" yoluyla
 // uygulanır (domains → plans içe aktarımı döngü olmasın diye burada bağlanır) ve
-// varsayılan planı olmayan her bayiye plan sağlanır (idempotent). SeedSync ve
-// ozelPlanAcilis'ten SONRA (şablon = kökün varsayılan global planı). Hata açılışı
-// düşürmez; eksik kalan bayi bir sonraki açılışta / plansız taşımada yeniden denenir.
+// kendi planı olup hiçbiri varsayılan olmayan bayide en eski plan varsayılan
+// işaretlenir (idempotent). 🔴 Bayiye plan OLUŞTURULMAZ: eskiden her açılışta planı
+// olmayan TÜM bayilere "<bayi> Varsayılan" yazılıyordu (kullanıcı bildirimi
+// 2026-10-12). Hata açılışı düşürmez; eksik kalan bayi bir sonraki açılışta denenir.
 func bayiPlanAcilis(d *sql.DB) {
 	plans.HostingUygula = domains.PlanSonrasiUygula
 	ctx, iptal := context.WithTimeout(context.Background(), time.Minute)
 	defer iptal()
-	olusan, isaretlenen, err := plans.BayiVarsayilanUzlastir(ctx, d)
+	isaretlenen, err := plans.BayiVarsayilanUzlastir(ctx, d)
 	if err != nil {
 		log.Printf("🔴 bayi varsayılan plan uzlaştırması eksik kaldı: %v", err)
 	}
-	if olusan+isaretlenen > 0 {
-		log.Printf("bayi varsayılan plan: %d plan oluşturuldu, %d plan varsayılan işaretlendi", olusan, isaretlenen)
+	if isaretlenen > 0 {
+		log.Printf("bayi varsayılan plan: %d plan varsayılan işaretlendi", isaretlenen)
 	}
 }

@@ -31,7 +31,8 @@ func (h *Handlers) NavSayac(w http.ResponseWriter, r *http.Request) {
 	say("domainler", `SELECT COUNT(*) FROM domains`)
 	say("subdomainler", `SELECT COUNT(*) FROM subdomanlar`)
 	say("bayiler", `SELECT COUNT(*) FROM users WHERE role='reseller'`)
-	say("hizmet_planlari", `SELECT COUNT(*) FROM service_plans WHERE domain_id IS NULL`)
+	// Kök listesi (GET /plans) yalnız kökün planlarıdır — sayaç da aynı kapsam.
+	say("hizmet_planlari", `SELECT COUNT(*) FROM service_plans WHERE domain_id IS NULL AND reseller_id=0`)
 	say("bayi_planlari", `SELECT COUNT(*) FROM reseller_plans`)
 	say("musteriler", `SELECT COUNT(*) FROM customers`)
 	httpx.WriteJSON(w, http.StatusOK, out)
