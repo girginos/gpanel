@@ -37,6 +37,9 @@ func TestBenzersizKullanici_SayacSiniriVeGecerlilik(t *testing.T) {
 	}
 	// Sınır: 9999 da doluysa boş döner (sonsuz döngü yok).
 	skKullanimda = func(string) bool { return true }
+	eskiKurulu := phpKuruluMu
+	phpKuruluMu = func(string) bool { return true } // sunucudaki PHP kurulumundan bağımsız
+	defer func() { phpKuruluMu = eskiKurulu }()
 	if u := BenzersizKullanici("ornek.com"); u != "" {
 		t.Fatalf("adlar tükenince boş beklenir: %q", u)
 	}

@@ -127,6 +127,11 @@ func (h *Handlers) ParolaDegistir(w http.ResponseWriter, r *http.Request) {
 	}
 	// 🔴 BAYI: sistem root parolasina DOKUNMAZ — kendi bcrypt parolasini degistirir.
 	if c.Role != "admin" {
+		// bcrypt yalnız 72 bayt alır; daha uzunu 500 "parola işlenemedi" verirdi.
+		if len(b.Yeni) > 72 {
+			httpx.WriteError(w, http.StatusBadRequest, "parola en çok 72 bayt olabilir (Türkçe karakterler 2 bayt sayılır)")
+			return
+		}
 		var mevcutHash string
 		if err := h.DB.QueryRow(`SELECT password_hash FROM users WHERE id=? AND role='reseller'`, c.UserID).
 			Scan(&mevcutHash); err != nil {

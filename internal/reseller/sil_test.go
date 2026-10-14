@@ -112,9 +112,14 @@ func silSay(t *testing.T, db *sql.DB, q string) int {
 
 func TestBayiSil_HostingVeMusterilerleBirlikteGider(t *testing.T) {
 	db := silGeciciDB(t)
+	havuzKancaSifirla()
 	w := silIstek(db, 7)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("hostingli bayi silme işi başlamadı → %d %s", w.Code, w.Body.String())
+	}
+	// Silinen bayinin havuz kalıntıları (dilim, proje sınırı, kullanım serisi) temizlendi — TAM bir kez, doğru bayi için.
+	if _, tem := havuzKancaOku(); len(tem) != 1 || tem[0] != 7 {
+		t.Errorf("havuz temizliği çağrıları: %v (beklenen [7])", tem)
 	}
 	var durum string
 	var toplam, tamam, basari int
@@ -173,6 +178,7 @@ func TestBayiSil_MesgulkenReddedilir(t *testing.T) {
 // müşteri kayıtları KALIR, iş 'kismi' biter — sorun giderilince silme tekrarlanabilir.
 func TestBayiSil_HostingSilinemezseBayiKalir(t *testing.T) {
 	db := silGeciciDB(t)
+	havuzKancaSifirla()
 	if _, err := db.Exec(`CREATE TRIGGER engel BEFORE DELETE ON domains FOR EACH ROW
 		BEGIN IF OLD.id = 2 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'engel'; END IF; END`); err != nil {
 		t.Fatal(err)
@@ -196,6 +202,10 @@ func TestBayiSil_HostingSilinemezseBayiKalir(t *testing.T) {
 	}
 	if n := silSay(t, db, `SELECT COUNT(*) FROM users WHERE id IN (7,70,71)`); n != 3 {
 		t.Errorf("hata varken bayi/müşteri kaydı silindi: kalan %d (beklenen 3)", n)
+	}
+	// Bayi kaydı kaldığı için havuzu da KALIR (yarım temizlik yok).
+	if _, tem := havuzKancaOku(); len(tem) != 0 {
+		t.Errorf("bayi kaydı kalırken havuz temizlendi: %v", tem)
 	}
 }
 

@@ -21,11 +21,14 @@ import (
 	"girginospanel/internal/auth"
 	"girginospanel/internal/avayar"
 	"girginospanel/internal/backups"
+	"girginospanel/internal/bayikaynak"
+	"girginospanel/internal/bayisso"
 	"girginospanel/internal/bildirim"
 	"girginospanel/internal/composer"
 	"girginospanel/internal/config"
 	"girginospanel/internal/cron"
 	"girginospanel/internal/db"
+	"girginospanel/internal/dbgovernor"
 	"girginospanel/internal/denetim"
 	"girginospanel/internal/dns"
 	"girginospanel/internal/domainip"
@@ -119,6 +122,11 @@ func main() {
 	// DB olmadan yalnız .age dosyası + anahtar dosyasıyla çalışır. Bkz. yedek_cli.go.
 	if len(os.Args) > 1 && os.Args[1] == "yedek-coz" {
 		os.Exit(yedekCozCLI(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	// Bayi disk kotası CLI'ı da config.Load()'dan ÖNCE: yalnız dosya sistemi/kernel komut satırı
+	// okur (grubby); panel sırlarına/DB'ye gerek yok. Bkz. bayi_disk.go.
+	if len(os.Args) > 1 && os.Args[1] == "bayi-disk-kotasi" {
+		os.Exit(bayiDiskKotasiCLI(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	if len(os.Args) > 1 && os.Args[1] == cron.CLIKomutu {
 		os.Exit(cron.CalistirCLI(os.Args[2:]))
@@ -231,10 +239,19 @@ func main() {
 	// Batch5A: MySQL Governor yavaş-sorgu watchdog (plan db_max_query_seconds>0 olan tenant
 	// DB-kullanıcılarının eşik-aşan sorgularını KILL eder). Panel ömrü boyunca bg çalışır.
 	go kaynaklimit.SlowQueryWatchdog(context.Background(), d)
+	// MariaDB CPU kısıcısı (internal/dbgovernor): DB kullanıcısı başına CPU süresi (userstat) →
+	// hosting/bayi eşiği aşılırsa kademeli kısma. Açılışta önceki çalışmadan kalan kısıtları geri
+	// alır; plan yeniden uygulaması kısıtı ezmesin diye kancası kaynaklimit'e bağlanır.
+	kaynaklimit.DBBaglantiKancasi = dbgovernor.BaglantiKancasi
+	go dbgovernor.Calistir(context.Background(), d)
 	// Disk kotası (XFS user quota — CloudLinux paritesi): fs'te kota AKTİF ise TÜM tenant'lara
 	// efektif kotayı (domain override > plan > varsayılan) idempotent uygula; noquota ise
 	// (tek seferlik reboot bekliyor) sessizce atla. Boot'u bloklamaz (bg goroutine).
 	go kaynaklimit.HealKotaOnStartup(context.Background(), d)
+	// Bayi kaynak havuzu: açılışta (FPM iyileştirmesinden sonra) tam uzlaştırma, sonra 5 dk'da bir
+	// kullanım örneği + 30 dk'da bir uzlaştırma. İdempotent; çalışan siteleri yeniden BAŞLATMAZ;
+	// değer verilmemiş (0) bayilere dokunmaz. Boot'u bloklamaz (bg goroutine, panik güvenli).
+	go bayikaynak.Calistir(context.Background(), d)
 	// Cross-tenant GRANT-joker onarimi (pentest 2026-09-13): eski KACISSIZ
 	// grant'lerde db adindaki _ / % LIKE-joker gibi davranip komsu tenant
 	// DB'lerine erisim aciyordu. GrantDBKac YENI grant'leri kacisliyor; bu
@@ -248,6 +265,8 @@ func main() {
 	// Müşteri ADINA panele giriş (bayi/yönetici "panele gir"): bkz. internal/adina.
 	adinaH := &adina.Handlers{DB: d, Secret: cfg.JWTSecret, MusteriAdresi: musteriKapiAdresi, SSOAdresi: ssoMusteriAdresi}
 	authH := &auth.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime}
+	// Bayi paneline tek tık giriş (WHMCS bayi ürünü, kök API anahtarı): bkz. internal/bayisso.
+	bayiSSOH := &bayisso.Handlers{DB: d, Secret: cfg.JWTSecret, LifetimeSec: cfg.JWTLifetime, BayiAdresi: ssoBayiAdresi}
 	usersH := &users.Handlers{DB: d}
 	domainsH := &domains.Handlers{DB: d, IPv4: ipv4}
 	domains.KokDB = d // sahip kolonunda kok adini cozmek icin (onbellekli)
@@ -432,6 +451,7 @@ func main() {
 	subH := &subdomain.Handlers{DB: d, IPv4: ipv4}
 	resellerH := &reseller.Handlers{DB: d}
 	denetimH := &denetim.Handlers{DB: d}
+	dbgovH := &dbgovernor.Handlers{DB: d}
 	sshaccess.EnsureInfra()
 	provisioner.HealNginxLogPerms() // nginx log dizinini kiraciya kapat (cross-tenant log okuma)
 	// 🔴 SIRA ONEMLI: yeniden-acma kurtarmasi izin duzeltmesinden SONRA kosmali.
@@ -629,6 +649,8 @@ func main() {
 		r.With(middleware.GirisLimiti).Post("/musteri/login", musteriH.Login)
 		// Müşteri adına giriş kodu → kısa ömürlü token (kimliksiz; tek kullanımlık kod).
 		r.With(middleware.GirisLimiti).Post("/musteri/adina-giris", adinaH.Giris)
+		// Bayi tek tık giriş kodu → bayi oturumu (kimliksiz; yalnız bayi kapısı).
+		r.With(middleware.GirisLimiti).Post("/auth/sso-giris", bayiSSOH.Giris)
 		// Panel kapısı tipi (kimliksiz): arayüzün giriş formu seçimi + açılış ölçümü.
 		r.Get("/kapi", kapi.TipHandler)
 
@@ -636,29 +658,51 @@ func main() {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Get("/me", usersH.Me)
 			r.Get("/kapi/adres", kapiAdres) // eski kapıdaki kullanıcıya kendi yeni adresi
-			apiAnahtarRotalari(r, d)        // D4: API anahtarı yönetimi (cmd/server/api_anahtar.go)
+			// Otomasyon (WHMCS): ürün tipine göre müşteri/bayi panel adresi (yönetici portu dönmez).
+			r.With(middleware.AdminVeyaReseller).Get("/kapi/portlar", kapiPortlar)
+			apiAnahtarRotalari(r, d) // D4: API anahtarı yönetimi (cmd/server/api_anahtar.go)
 			r.Post("/musteri/adina-cikis", adinaH.Cikis)
 			r.With(middleware.AdminVeyaReseller).Put("/me", authH.ProfilGuncelle)
 			r.With(middleware.AdminOnly).Get("/dashboard-duzen", authH.DashboardDuzenGetir)
 			r.With(middleware.AdminOnly).Put("/dashboard-duzen", authH.DashboardDuzenKaydet)
 			r.With(middleware.AdminVeyaReseller).Post("/me/parola", authH.ParolaDegistir)
-			r.With(middleware.AdminVeyaReseller).Get("/me/2fa/setup", authH.TwoFASetup)
-			r.With(middleware.AdminVeyaReseller).Post("/me/2fa/enable", authH.TwoFAEnable)
-			r.With(middleware.AdminVeyaReseller).Post("/me/2fa/disable", authH.TwoFADisable)
+			// 2FA: tek tıkla (API anahtarıyla) açılan bayi oturumunda yok (YalnizOturum).
+			r.With(middleware.AdminVeyaReseller, middleware.YalnizOturum).Get("/me/2fa/setup", authH.TwoFASetup)
+			r.With(middleware.AdminVeyaReseller, middleware.YalnizOturum).Post("/me/2fa/enable", authH.TwoFAEnable)
+			r.With(middleware.AdminVeyaReseller, middleware.YalnizOturum).Post("/me/2fa/disable", authH.TwoFADisable)
 			r.With(middleware.AdminVeyaReseller).Get("/domains", domainsH.List)
 			r.With(middleware.AdminVeyaReseller).Get("/subdomains", subH.TumListe)
 			r.With(middleware.AdminVeyaReseller).Get("/reseller/ozet", resellerH.Ozet)
 			r.With(middleware.AdminVeyaReseller).Get("/denetim", denetimH.Liste)
+			// MariaDB CPU kısıcısı görünürlüğü: kök hepsi, bayi YALNIZ kendi hostingleri (kapsamı
+			// handler zorlar: internal/dbgovernor/api.go). /durum yalnız kök.
+			r.With(middleware.AdminVeyaReseller).Get("/db-cpu/en-cok", dbgovH.EnCok)
+			r.With(middleware.AdminVeyaReseller).Get("/db-cpu/kisitlar", dbgovH.Kisitlar)
+			r.With(middleware.AdminOnly).Get("/db-cpu/durum", dbgovH.DurumUcu)
+			r.With(middleware.AdminOnly).Put("/db-cpu/durum", dbgovH.ModAyarla)
 			r.With(middleware.AdminVeyaReseller).Get("/nav-sayaclar", domainsH.NavSayac)
 			r.With(middleware.AdminOnly).Get("/resellers", resellerH.Liste)
 			r.With(middleware.AdminOnly).Post("/resellers", resellerH.Olustur)
 			r.With(middleware.AdminOnly).Put("/resellers/{id}", resellerH.Guncelle)
 			r.With(middleware.AdminOnly).Delete("/resellers/{id}", resellerH.Sil)
+			// WHMCS bayi tek tık girişi: yalnız kök API anahtarı (JWT 403); 60 sn tek kullanımlık kod.
+			r.With(middleware.AdminOnly).Post("/resellers/{id}/sso", bayiSSOH.Uret)
+			// WHMCS bayi ChangePassword: bayi panel parolası sıfırlama (anahtarda AYRI bayi.parola izni).
+			r.With(middleware.AdminOnly).Put("/resellers/{id}/password", resellerH.ParolaSifirla)
 			r.With(middleware.AdminOnly).Get("/reseller-plans", resellerH.PaketListe)
 			r.With(middleware.AdminOnly).Get("/reseller-plans/{id}", resellerH.PaketDetay)
 			r.With(middleware.AdminOnly).Post("/reseller-plans", resellerH.PaketOlustur)
 			r.With(middleware.AdminOnly).Put("/reseller-plans/{id}", resellerH.PaketGuncelle)
 			r.With(middleware.AdminOnly).Delete("/reseller-plans/{id}", resellerH.PaketSil)
+			// Bayi kaynak havuzu (CPU/RAM/disk/G-Ç). Statik "disk-kotasi" yolları {id}'den önce eşleşir.
+			r.With(middleware.AdminOnly).Get("/bayi-kaynak", resellerH.KaynakListe)
+			r.With(middleware.AdminOnly).Get("/bayi-kaynak/disk-kotasi", resellerH.DiskKotasiDurum)
+			r.With(middleware.AdminOnly).Post("/bayi-kaynak/disk-kotasi/etkinlestir", resellerH.DiskKotasiEtkinlestir)
+			r.With(middleware.AdminOnly).Get("/bayi-kaynak/{id}", resellerH.KaynakDetay)
+			r.With(middleware.AdminOnly).Get("/bayi-kaynak/{id}/kullanim", resellerH.KaynakKullanim)
+			r.With(middleware.AdminOnly).Post("/bayi-kaynak/{id}/uygula", resellerH.KaynakUygula)
+			r.With(middleware.AdminVeyaReseller).Get("/reseller/kaynak", resellerH.KaynakBen)
+			r.With(middleware.AdminVeyaReseller).Get("/reseller/kaynak/kullanim", resellerH.KaynakBenKullanim)
 			// Yasaklı alan adları (phishing koruması, admin only).
 			r.With(middleware.AdminOnly).Get("/banned-domains", domainyasakH.List)
 			r.With(middleware.AdminOnly).Post("/banned-domains", domainyasakH.Create)
@@ -1226,6 +1270,10 @@ func main() {
 		avayar.IzleyiciSenkron(avAyar)
 		avayar.SurecSenkron(avAyar) // FAZ1: boot.ta süreç izleyiciyi de senkronla
 	}
+	// ClamAV imza dizini başka kullanıcıya geçmişse freshclam yazamaz, imzalar sessizce eskir: onar.
+	if _, err := antivirus.ImzaDiziniOnar(); err != nil {
+		log.Printf("antivirus imza dizini: %v", err)
+	}
 	guvenlikduvari.FirewalldDevral() // AlmaLinux varsayılan firewalld'yi devral (çakışma önleme)
 	if err := guvenlikduvari.Reapply(d); err != nil {
 		log.Printf("firewall reapply warn: %v", err)
@@ -1554,6 +1602,16 @@ func semaDogrula(d *sql.DB) {
 		{"backups", "eski_domain_id"},
 		{"backups", "iz_id"},
 		{"backup_yetim_hedefler", "iz_id"},
+		// 0219: bayi kaynak havuzu (CPU/RAM/G-Ç; disk havuzu = users.max_disk_mb) + kullanım serisi — yoksa
+		// havuz okuması hata verir (uzlaştırma HİÇBİR ŞEY değiştirmez), bayi/paket formları kaydedemez.
+		{"users", "kaynak_cpu_cekirdek"},
+		{"users", "kaynak_ram_mb"},
+		{"users", "kaynak_io_agirlik"},
+		{"reseller_plans", "kaynak_cpu_cekirdek"},
+		{"reseller_plans", "kaynak_ram_mb"},
+		{"reseller_plans", "kaynak_io_agirlik"},
+		{"bayi_kaynak_kullanim", "bayi_id"},
+		{"bayi_kaynak_kullanim", "cpu_milli"},
 	}
 	var eksik []string
 	for _, b := range beklenen {

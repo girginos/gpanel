@@ -35,13 +35,45 @@ WORK_DIR=/var/cache/nginx/modsec
 LOADLINE="load_module $MODULE;"
 MARK="# girginospanel-waf: ModSecurity modulu (main-context, per-domain opt-in)"
 
+set -uo pipefail
+
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-waf-setup [--force | --status]
+
+Installs ModSecurity v3 + the OWASP Core Rule Set for nginx. Idempotent: only
+what is missing is installed, and it exits quickly if everything is in place.
+Run as root.
+
+What it does (only the missing parts):
+  1. Builds libmodsecurity v3 from source into /usr/local/modsecurity
+  2. Builds the ModSecurity-nginx connector against the EXACT running nginx
+     version as a dynamic module (.so)
+  3. Installs OWASP CRS and the configs in /etc/nginx/modsec
+  4. Adds load_module to the main context of nginx.conf, behind an nginx -t
+     gate: if nginx -t fails, nginx.conf is rolled back. Loading the module is
+     harmless: nothing changes until a vhost says "modsecurity on", so the WAF
+     is opt-in per domain (managed from the panel).
+  5. Turns on the SELinux boolean httpd_execmem (only if the WAF was installed)
+Existing vhosts, sites and custom CRS rules are left alone.
+
+Options:
+  --force        Rebuild the connector (use after the nginx ABI changed)
+  --status       Only print a status report, change nothing
+  -h, --help     Show this help
+
+Exit codes: 0 success / nothing to do, 1 failure (nginx.conf is rolled back if
+nginx -t failed), 2 unknown option
+USAGE
+}
+
 FORCE=0; STATUS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --force) FORCE=1 ;;
     --status) STATUS=1 ;;
-    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "bilinmeyen arg: $1" >&2; exit 2 ;;
+    -h|--help) kullanim; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
@@ -63,29 +95,29 @@ waf_selinux_execmem() {
   command -v getenforce >/dev/null 2>&1 || return 0
   case "$(getenforce 2>/dev/null)" in Enforcing|Permissive) ;; *) return 0 ;; esac
   if ! command -v getsebool >/dev/null 2>&1 || ! command -v setsebool >/dev/null 2>&1; then
-    warn "getsebool/setsebool yok (policycoreutils) — httpd_execmem denetlenemedi (WAF JIT'siz calisir + nginx baslatmada execmem AVC)"
+    warn "getsebool/setsebool not found (policycoreutils) — httpd_execmem could not be checked (the WAF runs without JIT + execmem AVC at nginx start)"
     return 0
   fi
   local cur; cur=$(getsebool httpd_execmem 2>/dev/null)
   case "$cur" in
-    *"--> on") ok "SELinux httpd_execmem zaten acik" ;;
+    *"--> on") ok "SELinux httpd_execmem is already on" ;;
     *"--> off")
       if setsebool -P httpd_execmem 1 >/dev/null 2>&1; then
-        ok "SELinux httpd_execmem=on (kalici) — WAF PCRE2 JIT + nginx baslatmada execmem AVC yok"
+        ok "SELinux httpd_execmem=on (persistent) — WAF PCRE2 JIT, no execmem AVC at nginx start"
       else
-        warn "setsebool -P httpd_execmem 1 BASARISIZ — WAF JIT'siz calisir + her nginx baslatmada execmem AVC (elle: setsebool -P httpd_execmem 1)"
+        warn "setsebool -P httpd_execmem 1 FAILED — the WAF runs without JIT + an execmem AVC at every nginx start (manually: setsebool -P httpd_execmem 1)"
       fi ;;
-    *) warn "httpd_execmem boolean'i politikada yok / okunamadi — atlandi" ;;
+    *) warn "boolean httpd_execmem is not in the policy / could not be read — skipped" ;;
   esac
   return 0
 }
 # Test kancasi: GOSP_WAF_KUTUPHANE=1 ile `source` edilince yalniz fonksiyonlar yuklenir.
 if [ "${GOSP_WAF_KUTUPHANE:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 
-[ "$(id -u)" = 0 ] || die "root gerekli"
-command -v nginx >/dev/null || die "nginx bulunamadi"
+[ "$(id -u)" = 0 ] || die "must be run as root"
+command -v nginx >/dev/null || die "nginx not found"
 NGVER=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-[ -n "$NGVER" ] || die "nginx surumu okunamadi"
+[ -n "$NGVER" ] || die "could not read the nginx version"
 
 # Dizinleri erken olustur (ABI stamp connector adiminda buraya yazilir).
 mkdir -p "$MODSEC_DIR" "$DOMAINS_DIR" "$WORK_DIR" "$MODULE_DIR"
@@ -98,41 +130,41 @@ have_crs() { [ -f "$CRS_DIR/crs-setup.conf" ] && [ -d "$CRS_DIR/rules" ]; }
 module_loaded() { grep -qF "ngx_http_modsecurity_module.so" "$NGINX_CONF" 2>/dev/null; }
 
 if [ "$STATUS" = 1 ]; then
-  step "WAF durum (nginx $NGVER)"
-  have_lib     && ok "libmodsecurity: kurulu" || warn "libmodsecurity: YOK"
-  have_module  && ok "connector .so: kurulu ($(abi_ok && echo "ABI=$NGVER uyumlu" || echo "ABI stamp farkli/yok"))" || warn "connector .so: YOK"
-  have_crs     && ok "OWASP CRS: kurulu" || warn "OWASP CRS: YOK"
-  module_loaded && ok "nginx.conf load_module: VAR" || warn "nginx.conf load_module: YOK"
+  step "WAF status (nginx $NGVER)"
+  have_lib     && ok "libmodsecurity: installed" || warn "libmodsecurity: MISSING"
+  have_module  && ok "connector .so: installed ($(abi_ok && echo "ABI=$NGVER compatible" || echo "ABI stamp differs/missing"))" || warn "connector .so: MISSING"
+  have_crs     && ok "OWASP CRS: installed" || warn "OWASP CRS: MISSING"
+  module_loaded && ok "nginx.conf load_module: PRESENT" || warn "nginx.conf load_module: MISSING"
   exit 0
 fi
 
-step "GirginOSPanel WAF kurulum (ModSecurity $MODSEC_VER + CRS $CRS_VER, nginx $NGVER)"
+step "GirginOSPanel WAF setup (ModSecurity $MODSEC_VER + CRS $CRS_VER, nginx $NGVER)"
 
 # Her sey hazir + ABI uyumlu + zorlanmiyorsa → hizli cik (agir derleme atlanir).
 if have_lib && have_module && abi_ok && have_crs && module_loaded && [ "$FORCE" = 0 ]; then
-  ok "her sey hazir + nginx ABI ($NGVER) uyumlu — yapilacak bir sey yok (--force ile yeniden derle)"
+  ok "everything is in place + nginx ABI ($NGVER) compatible — nothing to do (rebuild with --force)"
   waf_selinux_execmem   # eski kurulum: boolean sonradan kapanmis/hic acilmamis olabilir (idempotent)
   exit 0
 fi
 
 # ---- 1) libmodsecurity (yoksa derle — AGIR) ----
 if ! have_lib; then
-  step "libmodsecurity $MODSEC_VER derleniyor (agir, birkac dakika)"
+  step "building libmodsecurity $MODSEC_VER (heavy, a few minutes)"
   dnf install -y gcc-c++ make automake libtool pkgconf-pkg-config flex bison wget git \
     libxml2-devel pcre2-devel libcurl-devel lmdb-devel openssl-devel >/dev/null 2>&1 || \
-    warn "bazi bagimliliklar kurulamadi — derleme yine denenecek"
+    warn "some dependencies could not be installed — the build will be attempted anyway"
   rm -rf "$SRC/ModSecurity"
   git clone -b "$MODSEC_VER" --depth 1 https://github.com/owasp-modsecurity/ModSecurity "$SRC/ModSecurity" \
-    || die "ModSecurity klonlanamadi"
+    || die "could not clone ModSecurity"
   cd "$SRC/ModSecurity"
-  git submodule update --init --recursive --depth 1 >/dev/null 2>&1 || warn "submodule uyarisi"
-  ./build.sh >/dev/null 2>&1 || die "build.sh basarisiz"
-  ./configure --prefix="$MODSEC_PREFIX" --with-pcre2 >/dev/null 2>&1 || die "configure basarisiz (PCRE2)"
-  make -j"$(nproc)" >/dev/null 2>&1 || die "libmodsecurity make basarisiz"
-  make install >/dev/null 2>&1 || die "libmodsecurity make install basarisiz"
-  ok "libmodsecurity kuruldu ($MODSEC_PREFIX)"
+  git submodule update --init --recursive --depth 1 >/dev/null 2>&1 || warn "submodule warning"
+  ./build.sh >/dev/null 2>&1 || die "build.sh failed"
+  ./configure --prefix="$MODSEC_PREFIX" --with-pcre2 >/dev/null 2>&1 || die "configure failed (PCRE2)"
+  make -j"$(nproc)" >/dev/null 2>&1 || die "libmodsecurity make failed"
+  make install >/dev/null 2>&1 || die "libmodsecurity make install failed"
+  ok "libmodsecurity installed ($MODSEC_PREFIX)"
 else
-  ok "libmodsecurity zaten kurulu ($MODSEC_PREFIX) — atlaniyor"
+  ok "libmodsecurity already installed ($MODSEC_PREFIX) — skipping"
 fi
 
 # runtime linker libmodsecurity.so.3'u bulabilsin (module dlopen + calisma zamani)
@@ -143,16 +175,16 @@ ldconfig
 
 # ---- 2) connector (.so) — CALISAN nginx surumuyle BIREBIR ----
 if ! have_module || ! abi_ok || [ "$FORCE" = 1 ]; then
-  step "ModSecurity-nginx connector derleniyor (nginx $NGVER ile birebir)"
+  step "building the ModSecurity-nginx connector (matching nginx $NGVER exactly)"
   dnf install -y gcc make wget git pcre2-devel zlib-devel openssl-devel >/dev/null 2>&1 || true
   [ -d "$SRC/ModSecurity-nginx" ] || \
     git clone -b "$CONNECTOR_VER" --depth 1 https://github.com/owasp-modsecurity/ModSecurity-nginx "$SRC/ModSecurity-nginx" \
-      || die "ModSecurity-nginx klonlanamadi"
+      || die "could not clone ModSecurity-nginx"
   cd "$SRC"
   if [ ! -d "$SRC/nginx-$NGVER" ]; then
     wget -qO "$SRC/nginx-$NGVER.tar.gz" "https://nginx.org/download/nginx-$NGVER.tar.gz" \
-      || die "nginx-$NGVER kaynagi indirilemedi"
-    tar xzf "$SRC/nginx-$NGVER.tar.gz" -C "$SRC" || die "nginx kaynak acilamadi"
+      || die "could not download the nginx-$NGVER source"
+    tar xzf "$SRC/nginx-$NGVER.tar.gz" -C "$SRC" || die "could not extract the nginx source"
   fi
   cd "$SRC/nginx-$NGVER"
   export MODSECURITY_INC="$MODSEC_PREFIX/include"
@@ -163,38 +195,38 @@ if ! have_module || ! abi_ok || [ "$FORCE" = 1 ]; then
   ./configure --with-compat \
     --with-cc-opt="-Wno-error=implicit-function-declaration" \
     --add-dynamic-module=../ModSecurity-nginx >/tmp/waf-configure.log 2>&1 \
-    || { tail -20 /tmp/waf-configure.log; die "connector configure basarisiz (bkz /tmp/waf-configure.log)"; }
+    || { tail -20 /tmp/waf-configure.log; die "connector configure failed (see /tmp/waf-configure.log)"; }
   make modules >/tmp/waf-make.log 2>&1 \
-    || { tail -20 /tmp/waf-make.log; die "make modules basarisiz (bkz /tmp/waf-make.log)"; }
-  [ -f objs/ngx_http_modsecurity_module.so ] || die "modul uretilmedi"
+    || { tail -20 /tmp/waf-make.log; die "make modules failed (see /tmp/waf-make.log)"; }
+  [ -f objs/ngx_http_modsecurity_module.so ] || die "module was not built"
   mkdir -p "$MODULE_DIR"
   install -m 0644 objs/ngx_http_modsecurity_module.so "$MODULE"
   strip "$MODULE" 2>/dev/null || true
   echo "$NGVER" > "$ABI_STAMP"
-  ok "connector kuruldu ($MODULE, $(du -h "$MODULE" | cut -f1), ABI=$NGVER)"
+  ok "connector installed ($MODULE, $(du -h "$MODULE" | cut -f1), ABI=$NGVER)"
 else
-  ok "connector zaten kurulu + ABI ($NGVER) uyumlu — atlaniyor"
+  ok "connector already installed + ABI ($NGVER) compatible — skipping"
 fi
 
 # ---- 3) /etc/nginx/modsec konfigleri + CRS ----
-step "OWASP CRS + konfigler"
+step "OWASP CRS + configs"
 mkdir -p "$MODSEC_DIR" "$DOMAINS_DIR" "$WORK_DIR"
 
 # CRS (yoksa klonla; VARSA ozel kurallari koru — dokunma)
 if ! have_crs; then
   rm -rf "$CRS_DIR"
   git clone -b "$CRS_VER" --depth 1 https://github.com/coreruleset/coreruleset "$CRS_DIR" \
-    || die "OWASP CRS klonlanamadi"
-  ok "CRS $CRS_VER klonlandi ($CRS_DIR)"
+    || die "could not clone OWASP CRS"
+  ok "CRS $CRS_VER cloned ($CRS_DIR)"
 else
-  ok "CRS zaten kurulu — korunuyor"
+  ok "CRS already installed — kept"
 fi
 # crs-setup.conf (yoksa ornek dosyadan; paranoia SecAction'i ornekte VARSAYILAN yorumlu →
 # per-domain conf id:900000 ile paranoia set eder, cakisma yok)
 if [ ! -f "$CRS_DIR/crs-setup.conf" ]; then
   [ -f "$CRS_DIR/crs-setup.conf.example" ] && cp "$CRS_DIR/crs-setup.conf.example" "$CRS_DIR/crs-setup.conf" \
-    || die "crs-setup.conf.example yok"
-  ok "crs-setup.conf olusturuldu"
+    || die "crs-setup.conf.example not found"
+  ok "crs-setup.conf created"
 fi
 
 # modsecurity.conf (temel yapilandirma — per-domain SecRuleEngine BUNU override eder)
@@ -234,7 +266,7 @@ Include $MODSEC_DIR/modsecurity.conf
 Include $CRS_DIR/crs-setup.conf
 Include $CRS_DIR/rules/*.conf
 MAINEOF
-ok "modsecurity.conf + main.conf yazildi"
+ok "modsecurity.conf + main.conf written"
 
 # audit log + work dir yazilabilir (nginx user) + SELinux context
 [ -f "$AUDIT_LOG" ] || : > "$AUDIT_LOG"
@@ -247,9 +279,9 @@ if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ]; t
 fi
 
 # ---- 4) modulu nginx.conf MAIN-context'ine yukle (nginx -t GATE + ROLLBACK) ----
-step "Modul yukleme (nginx -t gate + rollback)"
+step "Loading the module (nginx -t gate + rollback)"
 if module_loaded; then
-  ok "load_module zaten nginx.conf'ta — atlaniyor"
+  ok "load_module already in nginx.conf — skipping"
 else
   cp -a "$NGINX_CONF" "$NGINX_CONF.waf-bak"
   # include /usr/share/nginx/modules/*.conf; satirindan SONRA ekle; yoksa dosya basina.
@@ -264,29 +296,29 @@ else
   fi
   if ! grep -qF "ngx_http_modsecurity_module.so" "$NGINX_CONF.wafnew"; then
     rm -f "$NGINX_CONF.wafnew" "$NGINX_CONF.waf-bak"
-    die "load_module satiri eklenemedi (nginx.conf yapisi beklenmedik) — dokunulmadi"
+    die "could not add the load_module line (unexpected nginx.conf structure) — left untouched"
   fi
   mv -f "$NGINX_CONF.wafnew" "$NGINX_CONF"
   if nginx -t >/tmp/waf-nginx-t.log 2>&1; then
     rm -f "$NGINX_CONF.waf-bak"
     systemctl reload nginx >/dev/null 2>&1 || true
-    ok "modul yuklendi + nginx -t OK + reload"
+    ok "module loaded + nginx -t OK + reload"
   else
     # 🔴 ROLLBACK: -t patladi → nginx.conf geri al (TUM nginx cokmesin)
     mv -f "$NGINX_CONF.waf-bak" "$NGINX_CONF"
     echo "---- nginx -t ----"; tail -15 /tmp/waf-nginx-t.log
-    die "nginx -t BASARISIZ — nginx.conf GERI ALINDI (nginx saglam). Modul yuklenmedi."
+    die "nginx -t FAILED — nginx.conf ROLLED BACK (nginx is healthy). Module not loaded."
   fi
 fi
 
 # son kontrol: main nginx hala -t OK olmali
 if nginx -t >/dev/null 2>&1; then
-  ok "ana nginx -t OK — kurulum tamam"
+  ok "main nginx -t OK — setup complete"
   waf_selinux_execmem
 else
-  die "beklenmeyen: kurulum sonrasi nginx -t basarisiz (elle kontrol: nginx -t)"
+  die "unexpected: nginx -t failed after setup (check manually: nginx -t)"
 fi
 
-step "WAF altyapisi HAZIR"
-echo "  • Modul yuklu (per-domain opt-in) — mevcut siteler ETKILENMEDI."
-echo "  • Panel: domain > Guvenlik > WAF ile ac/kapa + mod + paranoya."
+step "WAF infrastructure READY"
+echo "  • Module loaded (per-domain opt-in) — existing sites were NOT affected."
+echo "  • Panel: domain > Security > WAF to switch on/off + mode + paranoia."

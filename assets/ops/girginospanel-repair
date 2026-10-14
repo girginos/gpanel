@@ -34,8 +34,41 @@ if [ "${1:-}" = "restore" ]; then
   command -v girginospanel-restore >/dev/null 2>&1 && exec girginospanel-restore "$@"
   _rd="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/girginospanel-restore"
   [ -x "$_rd" ] && exec "$_rd" "$@"
-  echo "girginospanel-restore bulunamadı (core içerik onarım aracı kurulu değil)" >&2; exit 127
+  echo "girginospanel-restore not found (the core content repair tool is not installed)" >&2; exit 127
 fi
+
+# Usage text (English). The Turkish header comment above is developer documentation.
+kullanim() {
+  cat <<'KULLANIM'
+girginospanel-repair — directory / ownership / permission / SELinux repair tool.
+Idempotent and non-destructive: it only runs chown/chmod/mkdir/restorecon/semanage. It never
+deletes anything, never calls fuser and never disturbs a running service. Safe to run repeatedly.
+
+Usage:
+  girginospanel-repair [--dry-run] [--deep] [--only <sections>] [--quiet]
+  girginospanel-repair restore [...]
+
+Options:
+  --dry-run          show what would be fixed WITHOUT applying any change
+  --deep             recursive ownership repair inside domain home directories
+                     (slow on large sites)
+  --only <sections>  comma-separated sections (default: all of them):
+                     env_izin, sir_izin, phpmyadmin, selinux_temel, docroot_selinux,
+                     migrations, domains, htpasswd, binary, clamav, frontend, signon,
+                     firewall, nginx_cache, backup_cron (also: eklenti_runtime, mail_sieve)
+  --quiet            print only the fixes, warnings and errors
+  -h, --help         show this help
+
+Subcommand:
+  restore            core FILE-CONTENT repair (0-byte frontend / corrupt binary / missing
+                     ops tools) by atomic, verified restore from the canonical release.
+                     Secrets and data are preserved. Hands over to girginospanel-restore
+                     (all arguments are passed through unchanged).
+
+Exit codes: 0 = no errors, 1 = at least one error, 2 = invalid argument,
+127 = the restore subcommand could not find girginospanel-restore.
+KULLANIM
+}
 
 DRY=0; DEEP=0; QUIET=0; ONLY="env_izin,sir_izin,phpmyadmin,selinux_temel,docroot_selinux,migrations,domains,htpasswd,binary,clamav,frontend,signon,firewall,nginx_cache,backup_cron"
 while [ $# -gt 0 ]; do
@@ -44,8 +77,8 @@ while [ $# -gt 0 ]; do
     --deep)    DEEP=1 ;;
     --quiet)   QUIET=1 ;;
     --only)    shift; ONLY="$1" ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
-    *) echo "bilinmeyen argüman: $1" >&2; exit 2 ;;
+    -h|--help) kullanim; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac; shift
 done
 
@@ -55,7 +88,7 @@ c_g="\033[32m"; c_y="\033[33m"; c_r="\033[31m"; c_b="\033[34m"; c_0="\033[0m"
 say()   { [ $QUIET -eq 1 ] || echo -e "$*"; }
 head_() { say "\n${c_b}== $* ==${c_0}"; }
 ok()    { CHK=$((CHK+1)); [ $QUIET -eq 1 ] || echo -e "  ${c_g}✓${c_0} $*"; }
-act()   { CHK=$((CHK+1)); FIXN=$((FIXN+1)); echo -e "  ${c_y}$([ $DRY -eq 1 ] && echo '→ (dry) ' || echo '✔ DÜZELTİLDİ ')${c_0}$*"; }
+act()   { CHK=$((CHK+1)); FIXN=$((FIXN+1)); echo -e "  ${c_y}$([ $DRY -eq 1 ] && echo '→ (dry) ' || echo '✔ FIXED ')${c_0}$*"; }
 warn()  { echo -e "  ${c_y}!${c_0} $*"; }
 err()   { ERRN=$((ERRN+1)); echo -e "  ${c_r}✗${c_0} $*"; }
 
@@ -67,10 +100,10 @@ ensure_owner() { # path  user:group  [recursive]
   local p=$1 o=$2 r=${3:-}; [ -e "$p" ] || return 0
   local cur; cur=$(stat -c '%U:%G' "$p" 2>/dev/null) || return 0
   if [ "$cur" != "$o" ]; then
-    act "chown ${r:+-R }$o  $p  (şu an: $cur)"
+    act "chown ${r:+-R }$o  $p  (now: $cur)"
     [ $DRY -eq 0 ] && chown $r "$o" "$p" 2>/dev/null || true
   else
-    ok "sahiplik $o  $p"
+    ok "owner $o  $p"
   fi
 }
 ensure_mode() { # path  mode
@@ -78,16 +111,16 @@ ensure_mode() { # path  mode
   local cur; cur=$(stat -c '%a' "$p" 2>/dev/null) || return 0
   # baştaki 0'ı normalize et
   if [ "$((8#$cur))" != "$((8#$m))" ]; then
-    act "chmod $m  $p  (şu an: $cur)"
+    act "chmod $m  $p  (now: $cur)"
     [ $DRY -eq 0 ] && chmod "$m" "$p" 2>/dev/null || true
   else
-    ok "izin $m  $p"
+    ok "mode $m  $p"
   fi
 }
 ensure_dir() { # path  mode  owner
   local p=$1 m=$2 o=$3
   if [ ! -d "$p" ]; then
-    act "mkdir -p $p (mod $m, sahip $o)"
+    act "mkdir -p $p (mode $m, owner $o)"
     [ $DRY -eq 0 ] && { mkdir -p "$p"; chmod "$m" "$p"; chown "$o" "$p"; }
   else
     ensure_mode "$p" "$m"; ensure_owner "$p" "$o"
@@ -102,22 +135,22 @@ ensure_context() { # path  type  [recursive]
     local spec="${p}(/.*)?" _lst
     _lst=$(semanage fcontext -l 2>/dev/null)          # önce yakala (pipefail+grep -q SIGPIPE tuzağından kaçın)
     if ! grep -qF "${spec}" <<<"$_lst"; then
-      act "semanage fcontext +$t  $spec  (kalıcı kural)"
+      act "semanage fcontext +$t  $spec  (persistent rule)"
       [ $DRY -eq 0 ] && semanage fcontext -a -t "$t" "$spec" 2>/dev/null || true
     fi
     if [ $DRY -eq 0 ]; then
       local n; n=$(restorecon -R${r:+} -v "$p" 2>/dev/null | wc -l)
-      [ "${n:-0}" -gt 0 ] && act "restorecon $p  ($n bağlam düzeltildi)" || ok "SELinux bağlam $t  $p"
+      [ "${n:-0}" -gt 0 ] && act "restorecon $p  ($n context(s) fixed)" || ok "SELinux context $t  $p"
     else
       say "  → (dry) restorecon -R $p"
     fi
   else
     local cur; cur=$(stat -c '%C' "$p" 2>/dev/null | cut -d: -f3)
     if [ "$cur" != "$t" ]; then
-      act "chcon -t $t  $p  (semanage yok — geçici)"
+      act "chcon -t $t  $p  (no semanage — temporary)"
       [ $DRY -eq 0 ] && chcon ${r:+-R} -t "$t" "$p" 2>/dev/null || true
     else
-      ok "SELinux bağlam $t  $p"
+      ok "SELinux context $t  $p"
     fi
   fi
 }
@@ -137,23 +170,23 @@ want() { echo ",$ONLY," | grep -q ",$1,"; }
 #      sonra symlink'le değiştirse bile chmod/chown sabitlenen inode'a gider.
 kiraci_dizin_onar() { # path  mode  [user:group]
   local p=$1 m=$2 o=${3:-}
-  if [ -L "$p" ]; then warn "symlink — kiracı ağacında izlenmez, atlandı: $p"; return 0; fi
+  if [ -L "$p" ]; then warn "symlink — not followed in the tenant tree, skipped: $p"; return 0; fi
   [ -d "$p" ] || return 0
   local ust ad beklenen cur curo degis=0
-  ust=$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P) || { err "üst dizin çözülemedi: $p"; return 0; }
+  ust=$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P) || { err "parent directory could not be resolved: $p"; return 0; }
   ad=$(basename -- "$p"); beklenen="$ust/$ad"
   cur=$(stat -c '%a' -- "$p" 2>/dev/null) || return 0      # stat -L'siz = lstat
   curo=$(stat -c '%U:%G' -- "$p" 2>/dev/null) || return 0
   [ "$((8#$cur & 07777))" != "$((8#$m))" ] && degis=1
   [ -n "$o" ] && [ "$curo" != "$o" ] && degis=1
-  if [ $degis -eq 0 ]; then ok "izin $m${o:+ sahip $o}  $p"; return 0; fi
-  act "kiracı dizini ${o:+chown $o + }chmod $m  $p  (şu an: $curo $cur)"
+  if [ $degis -eq 0 ]; then ok "mode $m${o:+ owner $o}  $p"; return 0; fi
+  act "tenant directory ${o:+chown $o + }chmod $m  $p  (now: $curo $cur)"
   [ $DRY -eq 1 ] && return 0
   if ! ( cd -P -- "$p" 2>/dev/null || exit 3
          [ "$(pwd -P)" = "$beklenen" ] || exit 4
          if [ -n "$o" ]; then chown -h -- "$o" . || exit 5; fi
          chmod -- "$m" . || exit 6 ); then
-    err "kiracı dizini onarılamadı (yer değişti/symlink ya da izin hatası): $p"
+    err "tenant directory could not be repaired (moved/symlink or permission error): $p"
   fi
 }
 
@@ -173,7 +206,7 @@ domain_evi_onar() { # home  sk
     # root:root 0700 dizin: kiracı .karantina'yı başka ada taşımış olabilir (aynı üst
     # dizinde rename serbest). Devredersek karantinadaki 0000 dosyalar kiracıya açılır.
     if [ -d "$child" ] && [ ! -L "$child" ] && [ "$(stat -c '%u %a' -- "$child" 2>/dev/null)" = "0 700" ]; then
-      warn "root:root 0700 dizin (taşınmış karantina olabilir) devredilmedi — elle inceleyin: $child"
+      warn "root:root 0700 directory (may be a relocated quarantine) not handed over — inspect manually: $child"
       continue
     fi
     ensure_owner "$child" "$sk:$sk" -hR
@@ -185,7 +218,7 @@ domain_evi_onar() { # home  sk
   if [ $DEEP -eq 1 ]; then
     local n; n=$(find -P "$home" \( -path "$home/.karantina" -o -type d -user 0 -perm 700 \) -prune -o ! -user "$sk" \( -type d -o -type l -o -links 1 \) -print 2>/dev/null | wc -l)
     if [ "${n:-0}" -gt 0 ]; then
-      act "DEEP chown -R $sk:$sk $home ($n yanlış-sahipli girdi; .karantina, root:root 0700 dizinler ve sabit bağlı dosyalar hariç)"
+      act "DEEP chown -R $sk:$sk $home ($n wrongly-owned entries; excluding .karantina, root:root 0700 directories and hard-linked files)"
       # -execdir: find dizinlere fts ile (symlink izlemeden) iner ve komutu o dizinde
       # ./ad ile koşar → ara dizin symlink'e çevrilse bile yol yeniden çözülmez.
       [ $DRY -eq 0 ] && find -P "$home" \( -path "$home/.karantina" -o -type d -user 0 -perm 700 \) -prune -o ! -user "$sk" \( -type d -o -type l -o -links 1 \) -execdir chown -h "$sk:$sk" {} + 2>/dev/null
@@ -199,7 +232,7 @@ sec_phpmyadmin() {
   want phpmyadmin || return 0
   head_ "phpMyAdmin"
   local PMA=/opt/phpmyadmin
-  [ -d "$PMA" ] || { warn "$PMA yok, atlanıyor"; return 0; }
+  [ -d "$PMA" ] || { warn "$PMA missing, skipping"; return 0; }
   local PG; PG=$(awk -F= '/^[[:space:]]*group/{gsub(/ /,"",$2);print $2}' /etc/php-fpm.d/phpmyadmin.conf 2>/dev/null); PG=${PG:-apache}
   ensure_context "$PMA" httpd_sys_content_t -R
   if [ -f "$PMA/config.inc.php" ]; then
@@ -207,12 +240,12 @@ sec_phpmyadmin() {
     ensure_owner "$PMA/config.inc.php" "root:$PG"
     ensure_mode  "$PMA/config.inc.php" 640
     if ! runuser -u "$PG" -- test -r "$PMA/config.inc.php" 2>/dev/null; then
-      err "config.inc.php $PG tarafından HÂLÂ okunamıyor!"
+      err "config.inc.php is STILL not readable by $PG!"
     else
-      ok "config.inc.php $PG tarafından okunabilir"
+      ok "config.inc.php is readable by $PG"
     fi
   else
-    warn "config.inc.php yok"
+    warn "config.inc.php missing"
   fi
   # TempDir + sessions: php-fpm (apache) yazabilmeli
   ensure_dir "/var/lib/phpmyadmin"          755 "$PG:$PG"
@@ -225,13 +258,13 @@ sec_signon() {
   want signon || return 0
   head_ "pma-signon"
   local S=/opt/girginospanel/pma-signon
-  [ -d "$S" ] || { warn "$S yok"; return 0; }
+  [ -d "$S" ] || { warn "$S missing"; return 0; }
   ensure_context "$S" httpd_sys_content_t -R
 }
 
 sec_firewall() {
   want firewall || return 0
-  head_ "firewall (firewalld → panel devralır)"
+  head_ "firewall (firewalld → the panel takes over)"
   # Panel firewall'ı kendi nftables tablosunu (girginos_fw) yönetir. AlmaLinux
   # varsayılan firewalld ile ÇAKIŞIR: nftables'ta bir tablonun base chain'inde
   # 'drop' KESİNDİR → firewalld panelin portlarını (8443/80/443/53/21) düşürür,
@@ -239,14 +272,14 @@ sec_firewall() {
   # Tek otorite panel olsun diye firewalld'yi durdur+kapat+mask ediyoruz.
   # firewalld durunca kendi nft tablosunu ANINDA temizler → reboot GEREKMEZ.
   if ! systemctl cat firewalld.service >/dev/null 2>&1; then
-    ok "firewalld kurulu değil — panel nftables zaten tek firewall"
+    ok "firewalld is not installed — panel nftables is already the only firewall"
     return 0
   fi
   if [ "$(systemctl is-enabled firewalld 2>/dev/null)" = "masked" ]; then
-    ok "firewalld zaten mask'li (panel devralmış)"
+    ok "firewalld is already masked (the panel has taken over)"
     return 0
   fi
-  act "firewalld aktif/etkin → durdur + mask (panel devralır)"
+  act "firewalld active/enabled → stop + mask (the panel takes over)"
   if [ $DRY -eq 0 ]; then
     systemctl disable --now firewalld >/dev/null 2>&1 || true
     systemctl mask firewalld >/dev/null 2>&1 || true
@@ -257,29 +290,29 @@ sec_frontend() {
   want frontend || return 0
   head_ "frontend-dist"
   local F=/opt/girginospanel/frontend-dist
-  [ -d "$F" ] || { warn "$F yok"; return 0; }
+  [ -d "$F" ] || { warn "$F missing"; return 0; }
   ensure_owner "$F" "root:root"
   ensure_context "$F" httpd_sys_content_t -R
 }
 
 sec_binary() {
   want binary || return 0
-  head_ "sunucu binary"
+  head_ "server binary"
   local B=/opt/girginospanel/bin/girginospanel-server
-  [ -f "$B" ] || { warn "$B yok"; return 0; }
+  [ -f "$B" ] || { warn "$B missing"; return 0; }
   ensure_mode "$B" 755
   # systemd exec bağlamı (203/EXEC hatası buradan) — restorecon varsayılana döndürür
   if [ $SEL -eq 1 ] && [ $DRY -eq 0 ]; then
     local n; n=$(restorecon -v "$B" 2>/dev/null | wc -l)
-    [ "${n:-0}" -gt 0 ] && act "restorecon $B (exec bağlamı düzeltildi)" || ok "SELinux exec bağlamı OK  $B"
+    [ "${n:-0}" -gt 0 ] && act "restorecon $B (exec context fixed)" || ok "SELinux exec context OK  $B"
   fi
 }
 
 sec_htpasswd() {
   want htpasswd || return 0
-  head_ "nginx htpasswd (şifre korumalı dizinler)"
+  head_ "nginx htpasswd (password-protected directories)"
   local D=/etc/nginx/htpasswd
-  [ -d "$D" ] || { ok "htpasswd dizini yok (koruma tanımlı değil)"; return 0; }
+  [ -d "$D" ] || { ok "htpasswd directory missing (no protection defined)"; return 0; }
   ensure_mode "$D" 755
   local f
   for f in "$D"/*; do
@@ -291,16 +324,16 @@ sec_htpasswd() {
 
 sec_clamav() {
   want clamav || return 0
-  head_ "ClamAV imza veritabanı"
+  head_ "ClamAV signature database"
   local C=${GOSP_CLAMAV_DIZIN:-/var/lib/clamav}   # (testler geçici dizin verir)
-  [ -d "$C" ] || { ok "clamav yok"; return 0; }
+  [ -d "$C" ] || { ok "clamav not present"; return 0; }
   # 🔴 Sahip ADLA bulunur, UID ile DEĞİL. Eskiden `getent passwd 992` vardı: UID'ler kurulumdan kuruluma
   # değişir; temiz AlmaLinux 10'da 992 = valkey çıktı → imza dizini valkey'e devredildi, freshclam
   # (clamupdate olarak çalışır) "Can't create temporary directory" ile her güncellemede düştü ve imzalar
   # bayatladı (2026-10-06, test sunucusu 144.76.189.3).
   local OWN
   for OWN in clamupdate clamav; do id -u "$OWN" >/dev/null 2>&1 && break; OWN=""; done
-  [ -n "$OWN" ] || { ok "clamav kullanıcısı yok (clamupdate/clamav) — sahiplik atlandı"; return 0; }
+  [ -n "$OWN" ] || { ok "no clamav user (clamupdate/clamav) — ownership skipped"; return 0; }
   local GRP; GRP=$(id -gn "$OWN" 2>/dev/null) || GRP=$OWN
   # freshclam bu dizine yazamazsa imza güncellenemez
   ensure_owner "$C" "$OWN:$GRP" -R
@@ -315,7 +348,7 @@ sec_clamav() {
 # Burada kaynak dizin ile calisan dizin karsilastirilir, eksikler kopyalanir.
 sec_migrations() {
   want migrations || return 0
-  head_ "veritabani gocleri (schema drift)"
+  head_ "database migrations (schema drift)"
 
   local RUN=/opt/girginospanel/src/migrations
   local SRC=""
@@ -325,7 +358,7 @@ sec_migrations() {
   done
 
   if [ ! -d "$RUN" ]; then
-    err "goc dizini yok: $RUN"
+    err "migration directory missing: $RUN"
     return 0
   fi
 
@@ -336,13 +369,13 @@ sec_migrations() {
       [ -e "$f" ] || continue
       if [ ! -f "$RUN/$(basename "$f")" ]; then
         eksik=$((eksik+1))
-        act "eksik goc kopyalaniyor: $(basename "$f")"
+        act "copying missing migration: $(basename "$f")"
         [ $DRY -eq 0 ] && cp -n "$f" "$RUN/"
       fi
     done
-    [ "$eksik" -eq 0 ] && ok "goc dosyalari guncel ($SRC -> $RUN)"
+    [ "$eksik" -eq 0 ] && ok "migration files up to date ($SRC -> $RUN)"
   else
-    ok "ayri kaynak goc dizini yok — yalniz $RUN kullaniliyor"
+    ok "no separate source migration directory — using only $RUN"
   fi
 
   # 2) Defterde olmayan (hic kosmamis) goc var mi?
@@ -352,14 +385,14 @@ sec_migrations() {
       ad=$(basename "$dosya")
       if ! mysql -N panel -e "SELECT 1 FROM schema_migrations WHERE dosya='$ad'" 2>/dev/null | grep -q 1; then
         bekleyen=$((bekleyen+1))
-        warn "defterde yok (acilista kosacak): $ad"
+        warn "not in the ledger (will run at startup): $ad"
       fi
     done < <(ls "$RUN"/*.sql 2>/dev/null)
     if [ "$bekleyen" -gt 0 ]; then
-      act "$bekleyen bekleyen goc var -> panel yeniden baslatiliyor (gocler acilista kosar)"
+      act "$bekleyen pending migration(s) -> restarting the panel (migrations run at startup)"
       [ $DRY -eq 0 ] && systemctl restart girginospanel && sleep 6
     else
-      ok "tum gocler defterde kayitli"
+      ok "all migrations are recorded in the ledger"
     fi
 
     # 3) Bilinen kritik kolonlar gercekten var mi? (goc kostu ama sessiz basarisiz olabilir)
@@ -371,22 +404,22 @@ sec_migrations() {
               "reseller_plans:mail_kutu_kota_mb" "cp_eklenti_lisans:uyari"; do
       local t="${ck%%:*}" k="${ck##*:}"
       mysql -N panel -e "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA='panel' AND TABLE_NAME='$t'" 2>/dev/null | grep -q 1 || continue
-      if kolon_var "$t" "$k"; then :; else kayip=$((kayip+1)); err "EKSIK KOLON: $t.$k — ilgili goc kosmamis"; fi
+      if kolon_var "$t" "$k"; then :; else kayip=$((kayip+1)); err "MISSING COLUMN: $t.$k — the related migration has not run"; fi
     done
-    [ "$kayip" -eq 0 ] && ok "kritik sema kolonlari yerinde"
+    [ "$kayip" -eq 0 ] && ok "critical schema columns in place"
   else
-    warn "mysql istemcisi yok — defter/kolon kontrolu atlandi"
+    warn "mysql client missing — ledger/column check skipped"
   fi
 }
 
 sec_domains() {
   want domains || return 0
-  head_ "domain ev dizinleri (/home/c_*)"
+  head_ "domain home directories (/home/c_*)"
   local home sk
   for home in /home/c_*; do
     [ -d "$home" ] || continue
     sk=$(basename "$home")
-    if ! getent passwd "$sk" >/dev/null; then warn "$sk: sistem kullanıcısı yok, atlanıyor"; continue; fi
+    if ! getent passwd "$sk" >/dev/null; then warn "$sk: system user missing, skipping"; continue; fi
     domain_evi_onar "$home" "$sk"
   done
 }
@@ -438,12 +471,12 @@ waf_kurulu() {
 
 sec_selinux_temel() {
   want selinux_temel || return 0
-  head_ "SELinux temel (booleanlar + fcontext + port + etiketler)"
-  if [ $SEL -ne 1 ]; then ok "SELinux kapalı — bu bölüm gereksiz"; return 0; fi
+  head_ "SELinux base (booleans + fcontext + port + labels)"
+  if [ $SEL -ne 1 ]; then ok "SELinux is off — this section is not needed"; return 0; fi
 
   # -- booleanlar (tek setsebool -P çağrısı) --
   if ! command -v getsebool >/dev/null 2>&1 || ! command -v setsebool >/dev/null 2>&1; then
-    warn "getsebool/setsebool yok (policycoreutils) — booleanlar denetlenemedi"
+    warn "getsebool/setsebool missing (policycoreutils) — booleans could not be checked"
   else
     local liste="$SELINUX_BOOLEANLAR" b cur eksik=""
     # FTP booleanları yalnız pure-ftpd kuruluysa (ftp-setup'ın yazdığı küme).
@@ -460,11 +493,11 @@ sec_selinux_temel() {
         *"--> on") ok "boolean $b=on" ;;
         *"--> off") eksik="$eksik $b=1"
           if [ "$b" = httpd_execmem ]; then
-            act "boolean $b kapalı → açılacak (kalıcı; WAF kurulu: libmodsecurity PCRE2 JIT)"
+            act "boolean $b is off → will be turned on (persistent; WAF installed: libmodsecurity PCRE2 JIT)"
           else
-            act "boolean $b kapalı → açılacak (kalıcı)"
+            act "boolean $b is off → will be turned on (persistent)"
           fi ;;
-        *) warn "boolean $b politikada yok / okunamadı — atlandı" ;;
+        *) warn "boolean $b not in the policy / could not be read — skipped" ;;
       esac
     done
     if [ -n "$eksik" ] && [ $DRY -eq 0 ]; then
@@ -472,14 +505,14 @@ sec_selinux_temel() {
       if setsebool -P $eksik >/dev/null 2>&1; then
         ok "setsebool -P$eksik"
       else
-        err "setsebool -P$eksik BAŞARISIZ — httpd ağ/home erişimi kırık olabilir"
+        err "setsebool -P$eksik FAILED — httpd network/home access may be broken"
       fi
     fi
   fi
 
   # -- fcontext kuralları --
   if [ $HAVE_SEMANAGE -ne 1 ]; then
-    warn "semanage yok (policycoreutils-python-utils) — kalıcı fcontext kuralları yazılamıyor (restorecon geçici etiketlere döner)"
+    warn "semanage missing (policycoreutils-python-utils) — persistent fcontext rules cannot be written (restorecon falls back to temporary labels)"
   else
     local lst spec tip satir
     lst=$(semanage fcontext -l 2>/dev/null)   # önce yakala (pipefail+grep -q SIGPIPE tuzağı)
@@ -488,11 +521,11 @@ sec_selinux_temel() {
       case "$lst" in
         *"$spec"*) ok "fcontext $tip  $spec" ;;
         *)
-          act "semanage fcontext +$tip  $spec  (kalıcı kural)"
+          act "semanage fcontext +$tip  $spec  (persistent rule)"
           if [ $DRY -eq 0 ]; then
             semanage fcontext -a -t "$tip" "$spec" 2>/dev/null \
               || semanage fcontext -m -t "$tip" "$spec" 2>/dev/null \
-              || err "fcontext yazılamadı: $spec"
+              || err "fcontext could not be written: $spec"
           fi ;;
       esac
     done <<<"$SELINUX_FCONTEXT"
@@ -511,7 +544,7 @@ sec_selinux_temel() {
         if [ $DRY -eq 0 ]; then
           semanage port -a -t http_port_t -p tcp 10080 2>/dev/null \
             || semanage port -m -t http_port_t -p tcp 10080 2>/dev/null \
-            || err "port 10080 http_port_t yazılamadı — Apache backend başlamaz"
+            || err "port 10080 http_port_t could not be written — the Apache backend will not start"
         fi
       fi
     fi
@@ -521,16 +554,16 @@ sec_selinux_temel() {
   local p n
   for p in /opt/phpmyadmin /var/lib/phpmyadmin /opt/girginospanel/frontend-dist /opt/girginospanel/pma-signon /opt/girginospanel/bin /var/named /etc/named; do
     [ -d "$p" ] || continue
-    [ -L "$p" ] && { warn "symlink — atlandı: $p"; continue; }
+    [ -L "$p" ] && { warn "symlink — skipped: $p"; continue; }
     n=$(etiket_duzelt "$p" N)
-    if [ "${n:-0}" -gt 0 ]; then act "restorecon $p  ($n bağlam)"; else ok "etiket $p"; fi
+    if [ "${n:-0}" -gt 0 ]; then act "restorecon $p  ($n context(s))"; else ok "label $p"; fi
   done
 }
 
 sec_docroot_selinux() {
   want docroot_selinux || return 0
-  head_ "kiracı belge kökü SELinux (WordPress/Laravel yazma)"
-  if [ $SEL -ne 1 ]; then ok "SELinux kapalı — bu bölüm gereksiz"; return 0; fi
+  head_ "tenant document root SELinux (WordPress/Laravel writes)"
+  if [ $SEL -ne 1 ]; then ok "SELinux is off — this section is not needed"; return 0; fi
 
   # 🔴 RHEL/AlmaLinux'un varsayılan kuralı:
   #     /home/*/public_html(/.+)?  →  httpd_user_content_t   (SALT-OKUNUR)
@@ -553,7 +586,7 @@ sec_docroot_selinux() {
   for d in "$evk"/c_*/public_html "$evk"/c_*/tmp; do
     # Kiracı bu adı symlink yapabilir: fcontext kuralı/restorecon hedefi olarak
     # kiracının gösterdiği yolu kullanma.
-    [ -L "$d" ] && { warn "symlink — atlandı: $d"; continue; }
+    [ -L "$d" ] && { warn "symlink — skipped: $d"; continue; }
     [ -d "$d" ] || continue
     n=$((n+1))
     local mevcut; mevcut=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
@@ -561,7 +594,7 @@ sec_docroot_selinux() {
     case "$mevcut" in *httpd_user_rw_content_t*) ustdogru=1 ;; esac
 
     if [ $ustdogru -eq 0 ]; then
-      act "SELinux yazılabilir etiket  $d  (şu an: ${mevcut##*:object_r:})"
+      act "SELinux writable label  $d  (now: ${mevcut##*:object_r:})"
       if [ $DRY -eq 0 ]; then
         # Politika bu yolu ZATEN yazılabilir tipe çözüyorsa (genel kural: selinux_temel /
         # wp-onkosul) kiracıya özel kural GEREKSİZ — her `semanage -a` ~12 sn politika derler.
@@ -574,7 +607,7 @@ sec_docroot_selinux() {
                 || semanage fcontext -m -t httpd_user_rw_content_t "${d}(/.*)?" 2>/dev/null || true
             else
               # semanage yok: kalıcı kural yazılamaz → geçici chcon (restorecon bunu geri alır).
-              warn "semanage yok — $d için GEÇİCİ chcon (policycoreutils-python-utils kurun)"
+              warn "semanage missing — TEMPORARY chcon for $d (install policycoreutils-python-utils)"
               chcon -R -t httpd_user_rw_content_t "$d" 2>/dev/null || true
             fi ;;
         esac
@@ -584,25 +617,25 @@ sec_docroot_selinux() {
     # değiştirmeyebiliyor (canlıda birebir yaşandı). Alt ağaç dahil, tek geçiş.
     local kac; kac=$(etiket_duzelt "$d")
     if [ "${kac:-0}" -gt 0 ]; then
-      [ $ustdogru -eq 1 ] && act "alt ağaçta $kac dosya yanlış etiketliydi  $d"
+      [ $ustdogru -eq 1 ] && act "$kac file(s) in the subtree were mislabeled  $d"
       sapma=$((sapma+kac))
     fi
     if [ $DRY -eq 0 ]; then
       local sonra; sonra=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
       case "$sonra" in
         *httpd_user_rw_content_t*) [ $ustdogru -eq 0 ] && duzeltilen=$((duzeltilen+1)) ;;
-        *) err "etiket değişmedi: $d (şu an ${sonra##*:object_r:})" ;;
+        *) err "label did not change: $d (now ${sonra##*:object_r:})" ;;
       esac
     fi
   done
-  if [ "$n" -eq 0 ]; then ok "kiracı dizini yok"
-  elif [ $DRY -eq 1 ]; then say "  → (dry) $n dizin tarandı; $sapma dosya düzeltilecek"
-  else ok "$n dizin: $duzeltilen üst dizin + $sapma dosya yazılabilir etikete geçirildi"; fi
+  if [ "$n" -eq 0 ]; then ok "no tenant directories"
+  elif [ $DRY -eq 1 ]; then say "  → (dry) $n directories scanned; $sapma file(s) would be fixed"
+  else ok "$n directories: $duzeltilen parent directories + $sapma files moved to the writable label"; fi
 }
 
 sec_nginx_cache() {
   want nginx_cache || return 0
-  head_ "nginx onbellek dizini (fastcgi_cache)"
+  head_ "nginx cache directory (fastcgi_cache)"
   # 🔴 /var/cache/nginx RPM tarafindan 0700 root:root birakiliyor.
   # Alt dizin (girgincache) dogru sahiplenmis olsa BILE nginx worker ust
   # dizini TRAVERSE edemiyor ve cache loader sunu veriyor:
@@ -610,7 +643,7 @@ sec_nginx_cache() {
   # Belirti sinsi: nginx AYAKTA kalir, hicbir vhost patlamaz, hicbir istek
   # hata vermez -- yalnizca sayfa onbellegi SESSIZCE devre disi kalir.
   # Mevcut sunucular installer duzeltmesini almayacagi icin onarim burada.
-  [ -d /var/cache/nginx ] || { ok "/var/cache/nginx yok - onbellek yapilandirilmamis"; return 0; }
+  [ -d /var/cache/nginx ] || { ok "/var/cache/nginx missing - cache not configured"; return 0; }
   # 🔴 HAM STRING KARSILASTIRMASI YANLIS: setgid/sticky bitli mesru bir dizinde
   # (2755, 1755) `stat -c%a` "2755" doner, "755" ile esitlenmez ve `chmod 0755`
   # GNU coreutils'te dizinde setgid'i TEMIZLEMEZ -> her kosuda "DUZELTILDI"
@@ -619,9 +652,9 @@ sec_nginx_cache() {
   local izin; izin=$(stat -c%a /var/cache/nginx 2>/dev/null)
   local izin9=$(( 8#${izin:-0} & 0777 ))
   if [ "$izin9" = "$(( 8#755 ))" ]; then
-    ok "/var/cache/nginx izni dogru (755)"
+    ok "/var/cache/nginx mode correct (755)"
   else
-    act "chmod 0755 /var/cache/nginx  (su an: $izin)"
+    act "chmod 0755 /var/cache/nginx  (now: $izin)"
     if [ $DRY -eq 0 ]; then
       # u+rwx,go+rx yuksek bitlere (setgid/sticky) DOKUNMAZ.
       chmod u+rwx,go+rx,go-w /var/cache/nginx 2>/dev/null
@@ -630,9 +663,9 @@ sec_nginx_cache() {
       # salt-okunur fs). "calistirdim" ile "oldu" ayni sey degil.
       local y; y=$(stat -c%a /var/cache/nginx 2>/dev/null)
       if [ "$(( 8#${y:-0} & 0777 ))" = "$(( 8#755 ))" ]; then
-        ok "izin $izin -> 755 (nginx artik traverse edebiliyor)"
+        ok "mode $izin -> 755 (nginx can traverse it now)"
       else
-        err "izin degismedi (hala $y)"
+        err "mode did not change (still $y)"
         return 0
       fi
     fi
@@ -642,25 +675,25 @@ sec_nginx_cache() {
   if [ -d "$CD" ]; then
     local sah; sah=$(stat -c%U "$CD" 2>/dev/null)
     if [ "$sah" != "nginx" ]; then
-      act "chown nginx:nginx $CD  (su an: $sah)"
-      [ $DRY -eq 0 ] && { chown -R nginx:nginx "$CD" 2>/dev/null || err "$CD sahiplenemedi"; }
+      act "chown nginx:nginx $CD  (now: $sah)"
+      [ $DRY -eq 0 ] && { chown -R nginx:nginx "$CD" 2>/dev/null || err "could not take ownership of $CD"; }
     else
-      ok "$CD sahibi dogru (nginx)"
+      ok "$CD owner correct (nginx)"
     fi
   fi
   # Gercekten acilabiliyor mu -- URETIM kullanicisiyla, izin bitine bakarak degil.
   if [ $DRY -eq 0 ] && [ -d "$CD" ] && command -v runuser >/dev/null 2>&1; then
     if runuser -u nginx -- test -r "$CD" 2>/dev/null; then
-      ok "nginx kullanicisi onbellek dizinini GERCEKTEN okuyabiliyor"
+      ok "the nginx user can ACTUALLY read the cache directory"
     else
-      err "nginx kullanicisi $CD i hala okuyamiyor"
+      err "the nginx user still cannot read $CD"
     fi
   fi
 }
 
 sec_eklenti_runtime() {
   want eklenti_runtime || return 0
-  head_ "eklenti soketleri ve marka dizini"
+  head_ "plugin sockets and brand directory"
   # 🔴 IKI AYRI KUSUR, AYNI BELIRTI: panelde "Bu modul su an hazirlaniyor".
   #
   # (a) Butun `girginospanel-eklenti-*` birimleri `RuntimeDirectory=girginospanel`
@@ -675,10 +708,10 @@ sec_eklenti_runtime() {
   #     Duzeltme: dizini VAR ET (birim disinda, namespace'e girmeden).
   local d=/opt/girginospanel/marka
   if [ ! -d "$d" ]; then
-    install -d -m 0755 -o root -g root "$d" && ok "marka dizini olusturuldu ($d)" \
-      || warn "marka dizini olusturulamadi ($d)"
+    install -d -m 0755 -o root -g root "$d" && ok "brand directory created ($d)" \
+      || warn "brand directory could not be created ($d)"
   else
-    ok "marka dizini var ($d)"
+    ok "brand directory exists ($d)"
   fi
 
   local birim degisti=0
@@ -691,7 +724,7 @@ sec_eklenti_runtime() {
     install -d -m 0755 "$dd" 2>/dev/null || continue
     printf "[Service]\nRuntimeDirectoryPreserve=yes\n" > "$dd/20-gosp-runtime.conf" \
       && { ok "$birim: RuntimeDirectoryPreserve=yes"; degisti=1; } \
-      || warn "$birim: drop-in yazilamadi"
+      || warn "$birim: drop-in could not be written"
   done
   if [ "$degisti" = "1" ]; then
     systemctl daemon-reload 2>/dev/null && ok "daemon-reload"
@@ -701,18 +734,18 @@ sec_eklenti_runtime() {
       local ad="${birim#girginospanel-eklenti-}"; ad="${ad%.service}"
       local sk="/run/girginospanel/eklenti-${ad}.sock"
       if [ "$(systemctl is-active "$birim" 2>/dev/null)" = "active" ] && [ ! -S "$sk" ]; then
-        systemctl restart "$birim" 2>/dev/null && ok "$ad: soket yoktu, servis yeniden baslatildi" \
-          || warn "$ad: yeniden baslatilamadi"
+        systemctl restart "$birim" 2>/dev/null && ok "$ad: socket was missing, service restarted" \
+          || warn "$ad: could not be restarted"
       fi
     done
   else
-    ok "tum eklenti birimlerinde preserve zaten acik"
+    ok "preserve is already on in all plugin units"
   fi
 }
 
 sec_env_izin() {
   want env_izin || return 0
-  head_ "panel env dosyasi izni (/etc/girginospanel/env)"
+  head_ "panel env file mode (/etc/girginospanel/env)"
   # 🔴🔴 BU DOSYA HERKESE OKUNUR OLABILIR ve icinde PANEL_JWT_SECRET,
   # PANEL_DB_DSN (DB parolasi) ve PANEL_REDIS_ADMIN_PASS var.
   #
@@ -725,18 +758,18 @@ sec_env_izin() {
   # hidepid'siz bagli oldugu icin surec ortamindan da okunabiliyordu.
   local f=/etc/girginospanel/env
   # 🔴 symlink TAKIP EDILMEZ: chown/chmod symlink'in hedefini degistirirdi.
-  if [ -L "$f" ]; then err "env dosyasi symlink — takip edilmedi, elle inceleyin: $f"; return 0; fi
-  [ -f "$f" ] || { ok "env dosyasi yok (kurulum eksik?)"; return 0; }
+  if [ -L "$f" ]; then err "env file is a symlink — not followed, inspect manually: $f"; return 0; fi
+  [ -f "$f" ] || { ok "env file missing (incomplete install?)"; return 0; }
   local mod sahip
   mod="$(stat -c %a "$f" 2>/dev/null)"
   sahip="$(stat -c %U:%G "$f" 2>/dev/null)"
   if [ "$mod" = "600" ] && [ "$sahip" = "root:root" ]; then
-    ok "izin zaten dogru ($mod $sahip)"
+    ok "mode already correct ($mod $sahip)"
     return 0
   fi
-  warn "env dosyasi $mod $sahip — SIR SIZINTISI (JWT/DB/Redis parolalari)"
+  warn "env file $mod $sahip — SECRET LEAK (JWT/DB/Redis passwords)"
   if [ "$DRY" = "1" ]; then
-    echo "    [kuru] chmod 600 + chown root:root $f"
+    echo "    [dry] chmod 600 + chown root:root $f"
     return 0
   fi
   chown root:root "$f" 2>/dev/null
@@ -748,7 +781,7 @@ sec_env_izin() {
     chown root:root "$y" 2>/dev/null; chmod 600 "$y" 2>/dev/null
   done
   FIXN=$((FIXN+1))
-  ok "duzeltildi: $(stat -c '%a %U:%G' "$f")"
+  ok "fixed: $(stat -c '%a %U:%G' "$f")"
 }
 
 # sec_sir_izin: gizli dosya envanteri (girginospanel-sir izin --onar) — panel sirlari,
@@ -757,23 +790,23 @@ sec_env_izin() {
 # yerde (girginospanel-sir); dogrula ayni tabloyla olcer.
 sec_sir_izin() {
   want sir_izin || return 0
-  head_ "gizli dosya izinleri (girginospanel-sir)"
+  head_ "secret file permissions (girginospanel-sir)"
   local arac
   arac=$(command -v girginospanel-sir 2>/dev/null || true)
   [ -n "$arac" ] || { _rd="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/girginospanel-sir"; [ -f "$_rd" ] && arac="$_rd"; }
-  [ -n "$arac" ] || { warn "girginospanel-sir yok — gizli dosya izinleri onarilmadi"; return 0; }
+  [ -n "$arac" ] || { warn "girginospanel-sir missing — secret file permissions not repaired"; return 0; }
   local cikti rc=0
   if [ $DRY -eq 1 ]; then cikti=$(bash "$arac" izin --onar --kuru 2>&1) || rc=$?
   else cikti=$(bash "$arac" izin --onar 2>&1) || rc=$?; fi
   say "$cikti"
-  local n; n=$(printf '%s\n' "$cikti" | grep -c '✔ onarıldı' || true)
+  local n; n=$(printf '%s\n' "$cikti" | grep -c '✔ repaired' || true)
   FIXN=$((FIXN + ${n:-0})); CHK=$((CHK+1))
-  [ $rc -eq 0 ] || [ $DRY -eq 1 ] || err "gizli dosya izinlerinde KRİTİK kaldı (yukarıda)"
+  [ $rc -eq 0 ] || [ $DRY -eq 1 ] || err "CRITICAL secret file permissions remain (see above)"
 }
 
 sec_backup_cron() {
   want backup_cron || return 0
-  head_ "kacak yedek cron'u (girginospanel-backup-all)"
+  head_ "stray backup cron (girginospanel-backup-all)"
   # 🔴 /etc/cron.d/girginospanel-backup her gece 03:00'te girginospanel-backup-all
   # calistiriyordu. O script `domains.backup_freq` sutununu HIC okumuyordu: panelde
   # yedegi KAPALI (none) olan domainler dahil TUM domainleri her gece tam kopyaliyor,
@@ -786,40 +819,40 @@ sec_backup_cron() {
   # SILINMEZ (bkz. yedekleri koru kurali) ve /usr/local/bin/girginospanel-backup-all
   # kaldirilmaz -- guncelleme onu zaten no-op stub ile degistirir.
   local f=/etc/cron.d/girginospanel-backup
-  [ -f "$f" ] || { ok "kacak yedek cron'u yok"; return 0; }
+  [ -f "$f" ] || { ok "no stray backup cron"; return 0; }
   if ! grep -qE '^[^#]*girginospanel-backup-all' "$f"; then
-    ok "yedek cron'u zaten devre disi"
+    ok "backup cron already disabled"
     return 0
   fi
   if [ $DRY -eq 1 ]; then
-    warn "kacak yedek cron'u AKTIF (dry-run: degistirilmedi)"
+    warn "stray backup cron is ACTIVE (dry-run: not changed)"
     return 0
   fi
   cp -a "$f" "${f}.oncesi" 2>/dev/null
-  sed -i 's|^\([^#]*girginospanel-backup-all.*\)$|# girginospanel-repair: panel scheduler devraldi (backup_freq + disk kapisi)\n#\1|' "$f"
+  sed -i 's|^\([^#]*girginospanel-backup-all.*\)$|# girginospanel-repair: the panel scheduler took over (backup_freq + disk gate)\n#\1|' "$f"
   if grep -qE '^[^#]*girginospanel-backup-all' "$f"; then
-    err "yedek cron'u devre disi birakilamadi: $f"
+    err "backup cron could not be disabled: $f"
     return 1
   fi
-  act "kacak yedek cron'u devre disi birakildi (yedek: ${f}.oncesi)"
+  act "stray backup cron disabled (backup: ${f}.oncesi)"
 }
 
 sec_mail_sieve() {
   want mail_sieve || return 0
-  head_ "mail sieve (iletim/oto-yanit motoru + forward deliverability)"
+  head_ "mail sieve (forwarding/auto-reply engine + forward deliverability)"
   # 🔴 Mevcut kurulumlarda dovecot-pigeonhole KURULU DEGILDI + lmtp/lda'da sieve
   # YOKtu -> forward VE oto-yanit SESSIZCE calismiyordu (mail yalniz yerelde). Ayrica
   # forward'da envelope-from orijinal gonderende kalinca hedef SPF -all ile spam/red
   # olurdu. Bu bolum kiraci izinlerine DOKUNMAZ (paket + dovecot config + restart).
-  command -v doveconf >/dev/null 2>&1 || { ok "dovecot yok - atlandi"; return 0; }
-  [ -f /etc/dovecot/conf.d/99-gosp-mail.conf ] || { ok "mail eklentisi kurulu degil - atlandi"; return 0; }
+  command -v doveconf >/dev/null 2>&1 || { ok "dovecot missing - skipped"; return 0; }
+  [ -f /etc/dovecot/conf.d/99-gosp-mail.conf ] || { ok "mail plugin not installed - skipped"; return 0; }
 
   # 1) Pigeonhole (Sieve motoru)
   if ! rpm -q dovecot-pigeonhole >/dev/null 2>&1; then
-    act "dovecot-pigeonhole eksik - kuruluyor (Sieve motoru)"
-    [ $DRY -eq 0 ] && { dnf -y install dovecot-pigeonhole >/dev/null 2>&1 || err "dovecot-pigeonhole kurulamadi"; }
+    act "dovecot-pigeonhole missing - installing (Sieve engine)"
+    [ $DRY -eq 0 ] && { dnf -y install dovecot-pigeonhole >/dev/null 2>&1 || err "dovecot-pigeonhole could not be installed"; }
   else
-    ok "dovecot-pigeonhole kurulu"
+    ok "dovecot-pigeonhole installed"
   fi
 
   # 1b) /var/vmail domain dizin sahipligi — root:root 0700 ise vmail traverse EDEMEZ
@@ -827,9 +860,9 @@ sec_mail_sieve() {
   if [ -d /var/vmail ]; then
     kotu=$(find /var/vmail -maxdepth 1 -type d ! -user vmail ! -path /var/vmail 2>/dev/null)
     if [ -n "$kotu" ]; then
-      if [ $DRY -eq 1 ]; then act "root-owned /var/vmail domain dizinleri vmail'e cevrilecek ($(echo "$kotu"|wc -l) adet)"
-      else echo "$kotu" | while read d; do [ -n "$d" ] && chown vmail:vmail "$d"; done; act "vmail domain dizin sahipligi duzeltildi ($(echo "$kotu"|wc -l) domain)"; fi
-    else ok "/var/vmail domain dizin sahipligi dogru"; fi
+      if [ $DRY -eq 1 ]; then act "root-owned /var/vmail domain directories will be handed to vmail ($(echo "$kotu"|wc -l) of them)"
+      else echo "$kotu" | while read d; do [ -n "$d" ] && chown vmail:vmail "$d"; done; act "vmail domain directory ownership fixed ($(echo "$kotu"|wc -l) domains)"; fi
+    else ok "/var/vmail domain directory ownership correct"; fi
   fi
 
   # 2) Sieve teslim yolu + forward envelope-from etkin mi (doveconf ile olc)
@@ -837,16 +870,16 @@ sec_mail_sieve() {
   has_sieve=$(doveconf -a 2>/dev/null | awk '/^protocol lmtp/{p=1} p&&/mail_plugins/{print; exit}' | grep -c sieve)
   has_env=$(doveconf -a 2>/dev/null | grep -c "sieve_redirect_envelope_from = user_email")
   if [ "${has_sieve:-0}" -ge 1 ] && [ "${has_env:-0}" -ge 1 ]; then
-    ok "sieve teslim yolu + forward envelope-from etkin"
+    ok "sieve delivery path + forward envelope-from enabled"
     return 0
   fi
 
-  act "sieve teslim config yaziliyor (lmtp/lda sieve + envelope-from=user_email)"
+  act "writing the sieve delivery config (lmtp/lda sieve + envelope-from=user_email)"
   [ $DRY -eq 1 ] && return 0
   local SF=/etc/dovecot/conf.d/99-gosp-sieve.conf
   cat > "$SF" <<'SIEVEEOF'
-# GirginOSPanel Mail - Sieve (iletim/oto-yanit) teslim yolunda ETKIN. OTOMATIK (repair).
-# quota GLOBAL $mail_plugins uzerinden korunur; buraya yalniz sieve eklenir.
+# GirginOSPanel Mail - Sieve (forwarding/auto-reply) ENABLED in the delivery path. AUTOMATIC (repair).
+# quota is kept via the GLOBAL $mail_plugins; only sieve is added here.
 protocol lmtp {
   mail_plugins = $mail_plugins sieve
 }
@@ -855,14 +888,14 @@ protocol lda {
 }
 plugin {
   sieve = file:/var/vmail/%d/%n/.dovecot.sieve
-  # Forward deliverability: envelope-from = kutunun kendi adresi (hedef SPF gecer).
+  # Forward deliverability: envelope-from = the mailbox's own address (target SPF passes).
   sieve_redirect_envelope_from = user_email
 }
 SIEVEEOF
   if doveconf -n >/dev/null 2>&1; then
-    systemctl restart dovecot >/dev/null 2>&1 && ok "dovecot yeniden baslatildi - forward+oto-yanit aktif" || err "dovecot restart basarisiz"
+    systemctl restart dovecot >/dev/null 2>&1 && ok "dovecot restarted - forward + auto-reply active" || err "dovecot restart failed"
   else
-    rm -f "$SF"; err "sieve config doveconf testini gecmedi - geri alindi"
+    rm -f "$SF"; err "sieve config failed the doveconf test - rolled back"
   fi
 }
 
@@ -871,7 +904,7 @@ SIEVEEOF
 if [ "${GOSP_REPAIR_KUTUPHANE:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 
 # ================= ÇALIŞTIR =================
-say "${c_b}GirginOSPanel Onarım${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — değişiklik yok' || echo 'canlı') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo var || echo yok))"
+say "${c_b}GirginOSPanel Repair${c_0}  ($([ $DRY -eq 1 ] && echo 'DRY-RUN — no changes' || echo 'live') | SELinux:$([ $SEL -eq 1 ] && echo on || echo off) | semanage:$([ $HAVE_SEMANAGE -eq 1 ] && echo present || echo absent))"
 sec_env_izin
 sec_sir_izin
 sec_eklenti_runtime
@@ -892,10 +925,10 @@ sec_backup_cron
 
 # nginx doğrula (htpasswd/context değiştiyse conf hâlâ geçerli mi)
 if want htpasswd && [ $DRY -eq 0 ]; then
-  if command -v nginx >/dev/null && nginx -t >/dev/null 2>&1; then :; else warn "nginx -t başarısız — kontrol edin"; fi
+  if command -v nginx >/dev/null && nginx -t >/dev/null 2>&1; then :; else warn "nginx -t failed — please check"; fi
 fi
 
-say "\n${c_b}== Özet ==${c_0}"
-say "  kontrol: $CHK   düzeltme: $FIXN   hata: $ERRN"
-[ $DRY -eq 1 ] && say "  (dry-run: hiçbir değişiklik uygulanmadı — canlı için --dry-run'ı kaldırın)"
+say "\n${c_b}== Summary ==${c_0}"
+say "  checks: $CHK   fixes: $FIXN   errors: $ERRN"
+[ $DRY -eq 1 ] && say "  (dry-run: no changes applied — remove --dry-run for a live run)"
 exit $([ $ERRN -gt 0 ] && echo 1 || echo 0)

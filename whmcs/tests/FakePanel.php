@@ -29,12 +29,22 @@ final class FakePanel
         'PUT /resellers/{id}' => ['bayi', 'yaz'],
         'DELETE /resellers/{id}' => ['bayi', 'yaz'],
         'POST /domains/{id}/sso' => ['sso', 'yaz'],
+        'GET /bayi-kaynak/{id}' => ['bayi', 'oku'],
+        // isleyici ayrica bayi:yaz ister (internal/bayisso)
+        'POST /resellers/{id}/sso' => ['sso', 'yaz'],
+        'PUT /resellers/{id}/password' => ['bayi.parola', 'yaz'],
     ];
-    public static $herZaman = ['GET /api-anahtari/ben', 'GET /kapi/adres'];
+    public static $herZaman = ['GET /api-anahtari/ben', 'GET /kapi/adres', 'GET /kapi/portlar'];
+    /** /kapi/portlar yaniti: null = uc yok (eski panel, 404); dizi = ['musteri' => P, 'bayi' => P] */
+    public $kapiPortlar = null;
+    /** /bayi-kaynak/{id} yaniti: null = uc yok (eski panel, 404) */
+    public $bayiKaynak = null;
     /** /kapi/adres yaniti: bos = yeni kapidayiz; ['adres' => 'https://h:P'] = eski kapi */
     public $kapiAdres = [];
 
-    public $izinler = ['hesap:yaz', 'plan:yaz', 'ftp.parola:yaz', 'bayi:yaz', 'sso:yaz'];
+    public $izinler = ['hesap:yaz', 'plan:yaz', 'ftp.parola:yaz', 'bayi:yaz', 'sso:yaz', 'bayi.parola:yaz'];
+    /** bayi parola ucu: 'var' | '404' (eski panel, uc yok) */
+    public $bayiParolaModu = 'var';
     public $istekler = [];
     public $domains = [];
     public $plans = [];
@@ -44,6 +54,8 @@ final class FakePanel
     public $anahtar = self::ANAHTAR;
     /** 'var' | '404' | '403' | '409' | '429' | 'url_http' | 'url_baska' | 'url_user' */
     public $ssoModu = 'var';
+    /** bayi SSO: 'var' | '404' (eski panel) | 'url_baska' */
+    public $bayiSsoModu = 'var';
     /** "METOD /yol" => [durum, govde] zorla */
     public $zorla = [];
     public $ag = false; // true: aga ulasilamadi
@@ -163,6 +175,12 @@ final class FakePanel
                 return $this->hata(403, 'bu uç API anahtarıyla kullanılamaz');
             }
             [$grup, $erisim] = self::$rotalar[$anahtar];
+            if ($anahtar === 'PUT /resellers/{id}/password' && $this->bayiParolaModu === '404') {
+                return $this->hata(404, '404 page not found');
+            }
+            if ($anahtar === 'POST /resellers/{id}/sso' && $this->bayiSsoModu === '404') {
+                return $this->hata(404, '404 page not found');
+            }
             if ($anahtar === 'POST /domains/{id}/sso') {
                 if ($this->ssoModu === '404') {
                     return $this->hata(404, '404 page not found');
@@ -199,6 +217,10 @@ final class FakePanel
     {
         $k = $m . ' ' . $desen;
         switch ($k) {
+            case 'GET /bayi-kaynak/{id}':
+                return $this->bayiKaynak === null ? $this->hata(404, '404 page not found') : $this->yanit(200, $this->bayiKaynak);
+            case 'GET /kapi/portlar':
+                return $this->kapiPortlar === null ? $this->hata(404, '404 page not found') : $this->yanit(200, $this->kapiPortlar);
             case 'GET /kapi/adres':
                 return $this->yanit(200, $this->kapiAdres === [] ? new \stdClass() : $this->kapiAdres);
             case 'GET /api-anahtari/ben':
@@ -275,6 +297,30 @@ final class FakePanel
                     $url = 'https://panel.example.test:8443/adina';
                 }
                 return $this->yanit(200, ['ok' => true, 'url' => $url, 'gecerlilik_sn' => 60]);
+            case 'PUT /resellers/{id}/password':
+                $id = $this->idAl($yol);
+                if (!isset($this->bayiler[$id])) {
+                    return $this->hata(404, 'reseller bulunamadı');
+                }
+                $pw = (string) ($g['parola'] ?? '');
+                if (strlen($pw) < 8 || strlen($pw) > 128) {
+                    return $this->hata(400, 'parola 8-128 karakter olmalı');
+                }
+                $this->bayiler[$id]['_parola'] = $pw;
+                return $this->yanit(200, ['ok' => true, 'id' => $id, 'kullanici' => $this->bayiler[$id]['kullanici']]);
+            case 'POST /resellers/{id}/sso':
+                if (!$this->izinVar('bayi', 'yaz')) {
+                    return $this->hata(403, 'bayi paneline giriş için anahtarda "bayi" (yazma) izni de gerekir');
+                }
+                $id = $this->idAl($yol);
+                if (!isset($this->bayiler[$id])) {
+                    return $this->hata(404, 'bayi bulunamadı');
+                }
+                if (($this->bayiler[$id]['durum'] ?? '') !== 'active') {
+                    return $this->hata(409, 'bayi hesabı askıda — askıdaki bayiye giriş yapılamaz');
+                }
+                $h = $this->bayiSsoModu === 'url_baska' ? 'evil.example.org' : 'panel.example.test';
+                return $this->yanit(200, ['ok' => true, 'url' => 'https://' . $h . ':9444/sso#kod=BAYIKOD-ONCE-1234567890', 'gecerlilik_sn' => 60]);
             case 'GET /resellers':
                 return $this->yanit(200, array_values($this->bayiler));
             case 'GET /reseller-plans':
@@ -326,7 +372,19 @@ final class FakePanel
             }
         }
         $plan = $g['plan_id'] ?? 1;
-        $d = $this->domainEkle($alan, (int) $plan, ['php_surum' => $g['php_surum'] ?? '8.3']);
+        $ek = ['php_surum' => $g['php_surum'] ?? '8.3'];
+        if (isset($g['bayi_id'])) {
+            // panel: yalniz kok + anahtarda bayi:yaz; olmayan bayi 400
+            if (!$this->izinVar('bayi', 'yaz')) {
+                return $this->hata(403, 'bayi_id için anahtarda bayi (yazma) izni de gerekir');
+            }
+            if (!isset($this->bayiler[(int) $g['bayi_id']])) {
+                return $this->hata(400, 'bayi bulunamadı');
+            }
+            $ek += ['reseller_id' => (int) $g['bayi_id'], 'sahip_tur' => 'bayi', 'sahip_ad' => $this->bayiler[(int) $g['bayi_id']]['kullanici']];
+            $this->bayiler[(int) $g['bayi_id']]['domain_sayisi']++;
+        }
+        $d = $this->domainEkle($alan, (int) $plan, $ek);
         if ($this->olusturmaGecikmeHatasi) {
             return $this->hata(504, 'gateway timeout');
         }

@@ -24,6 +24,30 @@ SIR_YEDEK_DIZIN=${SIR_YEDEK_DIZIN:-$SIR_KOK/var/lib/girginospanel/birim-yedek}
 SIR_DAEMON_RELOAD=${SIR_DAEMON_RELOAD:-systemctl daemon-reload}
 SIR_KIMLIK_SATIRI="LoadCredential=panel-env:$SIR_ENV"
 
+# Usage text (English). The Turkish header comment above is developer documentation.
+kullanim() {
+  cat <<'KULLANIM'
+girginospanel-sir — persistent layout of the panel secrets + permissions of secret files.
+
+Usage:
+  girginospanel-sir birim [--denetle]   switch the panel unit to LoadCredential (secrets do not
+                                         enter the process environment); --denetle: only measure
+  girginospanel-sir birim-geri          put back the latest unit backup (update rollback)
+  girginospanel-sir izin [--onar] [--kuru]
+                                         secret-file inventory: owner/mode check;
+                                         --onar strips excess permissions / fixes ownership;
+                                         --kuru (dry run, with --onar): show what would change
+
+It never reads or prints secret VALUES; only names, owners and modes.
+
+Exit codes:
+  birim              0 switched · 3 already switched · 1 could not switch (unit left UNTOUCHED)
+  birim --denetle    0 uses credentials · 1 old (EnvironmentFile)
+  izin               0 clean · 1 CRITICAL findings remain
+  other              2 (usage / invalid option / not root)
+KULLANIM
+}
+
 sir_systemd_surum() {
   if [ -n "${SIR_SYSTEMD_SURUM:-}" ]; then echo "$SIR_SYSTEMD_SURUM"; return; fi
   systemctl --version 2>/dev/null | awk 'NR==1{print $2+0}'
@@ -46,32 +70,32 @@ sir_birim_gecis() {
   local b=$SIR_BIRIM durum
   durum=$(sir_birim_durum "$b")
   case "$durum" in
-    kimlik) echo "  ✓ birim zaten LoadCredential ile (sırlar ortama girmiyor)"; return 3 ;;
-    yok)    echo "  ✗ birim yok: $b"; return 1 ;;
+    kimlik) echo "  ✓ unit already uses LoadCredential (secrets do not enter the environment)"; return 3 ;;
+    yok)    echo "  ✗ unit missing: $b"; return 1 ;;
   esac
-  if [ -L "$b" ]; then echo "  ✗ birim symlink — dokunulmadı: $b"; return 1; fi
+  if [ -L "$b" ]; then echo "  ✗ unit is a symlink — untouched: $b"; return 1; fi
   local sv; sv=$(sir_systemd_surum)
   case "$sv" in ''|*[!0-9]*) sv=0 ;; esac
   if [ "$sv" -lt 247 ]; then
-    echo "  ✗ systemd $sv < 247 (LoadCredential yok) — birim ESKİ kaldı; sırlar config.Load sonrası ortamdan silinir (1. katman)"
+    echo "  ✗ systemd $sv < 247 (no LoadCredential) — unit stays OLD; secrets are removed from the environment after config.Load (layer 1)"
     return 1
   fi
   # LoadCredential kaynağı yoksa servis 243/CREDENTIALS ile AÇILMAZ → önce doğrula.
   if [ -L "$SIR_ENV_DOSYA" ] || [ ! -f "$SIR_ENV_DOSYA" ] || [ ! -s "$SIR_ENV_DOSYA" ]; then
-    echo "  ✗ $SIR_ENV_DOSYA yok/boş/symlink — birim değiştirilmedi"
+    echo "  ✗ $SIR_ENV_DOSYA missing/empty/symlink — unit not changed"
     return 1
   fi
   if ! grep -qE '^[[:space:]]*PANEL_JWT_SECRET=.{32,}' "$SIR_ENV_DOSYA"; then
-    echo "  ✗ $SIR_ENV_DOSYA içinde geçerli PANEL_JWT_SECRET yok — birim değiştirilmedi"
+    echo "  ✗ no valid PANEL_JWT_SECRET in $SIR_ENV_DOSYA — unit not changed"
     return 1
   fi
-  mkdir -p "$SIR_YEDEK_DIZIN" && chmod 700 "$SIR_YEDEK_DIZIN" || { echo "  ✗ yedek dizini yok: $SIR_YEDEK_DIZIN"; return 1; }
+  mkdir -p "$SIR_YEDEK_DIZIN" && chmod 700 "$SIR_YEDEK_DIZIN" || { echo "  ✗ backup directory unavailable: $SIR_YEDEK_DIZIN"; return 1; }
   local ts yedek gecici
   ts=$(date +%Y%m%d%H%M%S)
   yedek="$SIR_YEDEK_DIZIN/girginospanel.service.$ts"
-  cp -p "$b" "$yedek" || { echo "  ✗ birim yedeklenemedi — dokunulmadı"; return 1; }
-  printf '%s\n' "$yedek" > "$SIR_YEDEK_DIZIN/son" || { echo "  ✗ yedek işareti yazılamadı — dokunulmadı"; return 1; }
-  gecici=$(mktemp "$(dirname "$b")/.girginospanel.service.XXXXXX") || { echo "  ✗ geçici dosya yok"; return 1; }
+  cp -p "$b" "$yedek" || { echo "  ✗ unit could not be backed up — untouched"; return 1; }
+  printf '%s\n' "$yedek" > "$SIR_YEDEK_DIZIN/son" || { echo "  ✗ backup marker could not be written — untouched"; return 1; }
+  gecici=$(mktemp "$(dirname "$b")/.girginospanel.service.XXXXXX") || { echo "  ✗ no temporary file"; return 1; }
   # EnvironmentFile=<env> (ya da =-<env>) → kimlik satırı; satır yoksa [Service] altına ekle.
   awk -v env="$SIR_ENV" -v yeni="$SIR_KIMLIK_SATIRI" '
     BEGIN { yapildi = 0 }
@@ -91,16 +115,16 @@ sir_birim_gecis() {
     rc=0
   fi
   if [ $rc != 0 ] || ! grep -qxF "$SIR_KIMLIK_SATIRI" "$gecici"; then
-    rm -f "$gecici"; echo "  ✗ birim dönüştürülemedi — dokunulmadı"; return 1
+    rm -f "$gecici"; echo "  ✗ unit could not be converted — untouched"; return 1
   fi
   chmod 644 "$gecici"; chown root:root "$gecici" 2>/dev/null || true
-  mv -f "$gecici" "$b" || { rm -f "$gecici"; echo "  ✗ birim yazılamadı — dokunulmadı"; return 1; }
+  mv -f "$gecici" "$b" || { rm -f "$gecici"; echo "  ✗ unit could not be written — untouched"; return 1; }
   command -v restorecon >/dev/null 2>&1 && [ -z "$SIR_KOK" ] && restorecon "$b" >/dev/null 2>&1
   if ! $SIR_DAEMON_RELOAD >/dev/null 2>&1; then
     cp -p "$yedek" "$b"; $SIR_DAEMON_RELOAD >/dev/null 2>&1
-    echo "  ✗ daemon-reload başarısız — eski birim geri kondu"; return 1
+    echo "  ✗ daemon-reload failed — the old unit was put back"; return 1
   fi
-  echo "  ✓ birim LoadCredential'a geçirildi (yedek: $yedek) — panel restart'ında etkin"
+  echo "  ✓ unit switched to LoadCredential (backup: $yedek) — takes effect at the next panel restart"
   return 0
 }
 
@@ -108,11 +132,11 @@ sir_birim_gecis() {
 sir_birim_geri() {
   local yedek
   yedek=$(cat "$SIR_YEDEK_DIZIN/son" 2>/dev/null)
-  if [ -z "$yedek" ] || [ ! -f "$yedek" ]; then echo "  ✗ birim yedeği yok"; return 1; fi
-  cp -p "$yedek" "$SIR_BIRIM" || { echo "  ✗ birim geri konamadı"; return 1; }
+  if [ -z "$yedek" ] || [ ! -f "$yedek" ]; then echo "  ✗ no unit backup"; return 1; fi
+  cp -p "$yedek" "$SIR_BIRIM" || { echo "  ✗ unit could not be restored"; return 1; }
   $SIR_DAEMON_RELOAD >/dev/null 2>&1
   rm -f "$SIR_YEDEK_DIZIN/son"
-  echo "  ✓ eski birim geri kondu ($yedek)"
+  echo "  ✓ old unit restored ($yedek)"
   return 0
 }
 
@@ -120,48 +144,48 @@ sir_birim_geri() {
 # yol(glob olabilir) | tür f/d | sahip | izinli gruplar (virgüllü; ilki onarım hedefi) | en çok mod | not
 # Mod kuralı: (mevcut & ~enÇok) != 0 → KRİTİK (fazla izin); onarım fazlayı soyar.
 SIR_ENVANTER='
-/etc/girginospanel/env|f|root|root|600|panel JWT/DB/Redis sırları (LoadCredential kaynağı)
-/etc/girginospanel/env.*|f|root|root|600|env yedekleri (port-swap) — eski sırlar
-/etc/girginospanel/.sir-yenile-bekleyen|f|root|root|600|yarım sır yenileme (eski+yeni değerler)
-/etc/girginospanel/db.key|f|root|root|600|at-rest şifreleme anahtarı
-/etc/girginospanel/proxy.secret|f|root|root|600|X-Gosp-Proxy gizlisi
-/etc/girginospanel/eklenti-*.key|f|root|root|600|eklenti anahtarları
-/etc/girginospanel/eklenti-*.env|f|root|root|600|eklenti ortamları (DSN/webmail parolaları)
-/etc/girginospanel/pma-internal.token|f|root|apache,root|640|phpMyAdmin signon jetonu (apache okur)
-/etc/girginospanel/kurulum-kimlik|f|root|root,apache|640|lisans parmak izi (webmail apache okur)
-/etc/ssl/girginospanel/*.key*|f|root|root|600|panel TLS özel anahtarı + yedekleri
-/etc/pki/girginospanel/*/*.key|f|root|root|600|alan adı TLS özel anahtarları
-/etc/pki/mail/*.key*|f|root|root|600|posta TLS özel anahtarı
-/etc/nginx/conf.d/_panel.conf|f|root|nginx,root|640|panel vhost (proxy gizlisi içerir)
-/etc/nginx/conf.d/_panel.conf.*|f|root|root,nginx|640|panel vhost yedekleri (proxy gizlisi)
-/var/lib/girginospanel/acme|d|root|root|700|ACME hesap anahtarları
-/var/lib/girginospanel/eklenti-anahtar|d|root|root|700|eklenti anahtar deposu
-/var/lib/girginospanel/tasima|d|root|root|700|taşıma SSH anahtarı
-/var/lib/girginospanel/tasima-yedek|d|root|root|700|taşıma yedekleri
-/var/lib/girginospanel/birim-yedek|d|root|root|700|birim yedekleri
-/var/backups/girginospanel/db|d|root|root|700|panel DB dökümleri
-/var/backups/girginospanel-sistem|d|root|root|700|sistem yedeği (env + tüm DB)
-/root/.acme.sh|d|root|root|700|acme.sh hesap/DNS API anahtarları
-/etc/pure-ftpd/.pfsql_pass|f|root|root|600|pure-ftpd DB parolası
-/etc/pure-ftpd/pureftpd-mysql.conf|f|root|root|640|pure-ftpd DB parolası
-/etc/valkey/users.acl|f|valkey|valkey,root|640|Valkey ACL (parola özetleri)
-/etc/postfix/mysql-*.cf|f|root|postfix|640|postfix DB parolası
-/etc/dovecot/dovecot-sql.conf.ext|f|root|root,dovecot|640|dovecot DB parolası
-/etc/dovecot/dovecot-sql.conf.ext.*|f|root|root|600|dovecot SQL yedekleri
-/opt/phpmyadmin/config.inc.php|f|root|apache|640|phpMyAdmin blowfish/kontrol kullanıcısı
-/etc/roundcubemail/config.inc.php|f|root|apache|640|webmail DB parolası / des_key
-/etc/opendkim/keys|d|opendkim|opendkim|750|DKIM özel anahtarları
-/root/.ssh/id_*|f|root|root|600|root SSH özel anahtarı
+/etc/girginospanel/env|f|root|root|600|panel JWT/DB/Redis secrets (LoadCredential source)
+/etc/girginospanel/env.*|f|root|root|600|env backups (port-swap) — old secrets
+/etc/girginospanel/.sir-yenile-bekleyen|f|root|root|600|half-finished secret rotation (old+new values)
+/etc/girginospanel/db.key|f|root|root|600|at-rest encryption key
+/etc/girginospanel/proxy.secret|f|root|root|600|X-Gosp-Proxy secret
+/etc/girginospanel/eklenti-*.key|f|root|root|600|plugin keys
+/etc/girginospanel/eklenti-*.env|f|root|root|600|plugin environments (DSN/webmail passwords)
+/etc/girginospanel/pma-internal.token|f|root|apache,root|640|phpMyAdmin signon token (read by apache)
+/etc/girginospanel/kurulum-kimlik|f|root|root,apache|640|license fingerprint (webmail/apache read it)
+/etc/ssl/girginospanel/*.key*|f|root|root|600|panel TLS private key + backups
+/etc/pki/girginospanel/*/*.key|f|root|root|600|domain TLS private keys
+/etc/pki/mail/*.key*|f|root|root|600|mail TLS private key
+/etc/nginx/conf.d/_panel.conf|f|root|nginx,root|640|panel vhost (contains the proxy secret)
+/etc/nginx/conf.d/_panel.conf.*|f|root|root,nginx|640|panel vhost backups (proxy secret)
+/var/lib/girginospanel/acme|d|root|root|700|ACME account keys
+/var/lib/girginospanel/eklenti-anahtar|d|root|root|700|plugin key store
+/var/lib/girginospanel/tasima|d|root|root|700|migration SSH key
+/var/lib/girginospanel/tasima-yedek|d|root|root|700|migration backups
+/var/lib/girginospanel/birim-yedek|d|root|root|700|unit backups
+/var/backups/girginospanel/db|d|root|root|700|panel DB dumps
+/var/backups/girginospanel-sistem|d|root|root|700|system backup (env + all DBs)
+/root/.acme.sh|d|root|root|700|acme.sh account/DNS API keys
+/etc/pure-ftpd/.pfsql_pass|f|root|root|600|pure-ftpd DB password
+/etc/pure-ftpd/pureftpd-mysql.conf|f|root|root|640|pure-ftpd DB password
+/etc/valkey/users.acl|f|valkey|valkey,root|640|Valkey ACL (password hashes)
+/etc/postfix/mysql-*.cf|f|root|postfix|640|postfix DB password
+/etc/dovecot/dovecot-sql.conf.ext|f|root|root,dovecot|640|dovecot DB password
+/etc/dovecot/dovecot-sql.conf.ext.*|f|root|root|600|dovecot SQL backups
+/opt/phpmyadmin/config.inc.php|f|root|apache|640|phpMyAdmin blowfish/control user
+/etc/roundcubemail/config.inc.php|f|root|apache|640|webmail DB password / des_key
+/etc/opendkim/keys|d|opendkim|opendkim|750|DKIM private keys
+/root/.ssh/id_*|f|root|root|600|root SSH private key
 '
 
 SIR_KRITIK=0; SIR_ONARILAN=0
-sir_kritik() { SIR_KRITIK=$((SIR_KRITIK+1)); echo "  KRİTİK $*"; }
+sir_kritik() { SIR_KRITIK=$((SIR_KRITIK+1)); echo "  CRITICAL $*"; }
 
 # sir_izin_tek <yol> <tür> <sahip> <gruplar> <enÇok> <onar 0/1> <kuru 0/1> <not>
 sir_izin_tek() {
   local p=$1 tur=$2 sahip=$3 gruplar=$4 enCok=$5 onar=$6 kuru=$7 notu=$8
   if [ -L "$p" ]; then
-    sir_kritik "$p: symlink — gizli dosya symlink OLMAMALI (takip edilmedi, elle inceleyin) [$notu]"
+    sir_kritik "$p: symlink — a secret file must NOT be a symlink (not followed, inspect manually) [$notu]"
     return
   fi
   case "$tur" in
@@ -173,13 +197,13 @@ sir_izin_tek() {
   u=$(stat -c '%U' -- "$p" 2>/dev/null)
   g=$(stat -c '%G' -- "$p" 2>/dev/null)
   fazla=$(( 8#$m & ~8#$enCok & 07777 ))
-  [ "$fazla" -ne 0 ] && sorun="fazla izin $m (en çok $enCok)"
-  [ "$u" != "$sahip" ] && sorun="${sorun:+$sorun, }sahip $u (beklenen $sahip)"
-  case ",$gruplar," in *",$g,"*) ;; *) sorun="${sorun:+$sorun, }grup $g (izinli: $gruplar)" ;; esac
+  [ "$fazla" -ne 0 ] && sorun="excess mode $m (at most $enCok)"
+  [ "$u" != "$sahip" ] && sorun="${sorun:+$sorun, }owner $u (expected $sahip)"
+  case ",$gruplar," in *",$g,"*) ;; *) sorun="${sorun:+$sorun, }group $g (allowed: $gruplar)" ;; esac
   [ -z "$sorun" ] && return 0
   if [ "$onar" = 1 ]; then
     if [ "$kuru" = 1 ]; then
-      echo "  → (kuru) onarılacak: $p — $sorun"
+      echo "  → (dry) will be repaired: $p — $sorun"
       SIR_KRITIK=$((SIR_KRITIK+1)); return
     fi
     hedefMod=$(printf '%o' $(( 8#$m & 8#$enCok & 07777 )))
@@ -194,13 +218,13 @@ sir_izin_tek() {
         tamam=0
       fi
     fi
-    [ -L "$p" ] && { sir_kritik "$p: işlem sırasında symlink oldu — durduruldu"; return; }
+    [ -L "$p" ] && { sir_kritik "$p: became a symlink during the operation — stopped"; return; }
     chmod -- "$hedefMod" "$p" 2>/dev/null || tamam=0
     if [ $tamam = 1 ]; then
       SIR_ONARILAN=$((SIR_ONARILAN+1))
-      echo "  ✔ onarıldı: $p — $sorun → $(stat -c '%a %U:%G' -- "$p")"
+      echo "  ✔ repaired: $p — $sorun → $(stat -c '%a %U:%G' -- "$p")"
     else
-      sir_kritik "$p: $sorun — ONARILAMADI [$notu]"
+      sir_kritik "$p: $sorun — COULD NOT BE REPAIRED [$notu]"
     fi
     return
   fi
@@ -215,11 +239,11 @@ sir_valkey_umask() {
   [ -f "$SIR_KOK/usr/lib/systemd/system/valkey.service" ] || [ -f "$SIR_KOK/etc/systemd/system/valkey.service" ] || return 0
   grep -qs '^UMask=0027' "$f" && return 0
   if [ "$onar" != 1 ]; then
-    echo "  ! valkey UMask drop-in yok — ACL SAVE users.acl'i 0644 yazar (onar: girginospanel-sir izin --onar)"
+    echo "  ! valkey UMask drop-in missing — ACL SAVE writes users.acl as 0644 (repair: girginospanel-sir izin --onar)"
     return 0
   fi
-  [ "$kuru" = 1 ] && { echo "  → (kuru) $f yazılacak (UMask=0027)"; return 0; }
-  mkdir -p "$d" && printf '[Service]\n# girginospanel-sir: ACL SAVE users.acl dosyasını 0640 yazsın (parola özetleri)\nUMask=0027\n' > "$f" \
+  [ "$kuru" = 1 ] && { echo "  → (dry) $f will be written (UMask=0027)"; return 0; }
+  mkdir -p "$d" && printf '[Service]\n# girginospanel-sir: make ACL SAVE write users.acl as 0640 (password hashes)\nUMask=0027\n' > "$f" \
     || return 0
   if [ -n "$SIR_KOK" ]; then echo "  ✔ valkey UMask=0027 drop-in"; return 0; fi
   # Drop-in ancak restart'ta etkin olur; restart'sız bırakılırsa panelin bir sonraki
@@ -227,16 +251,16 @@ sir_valkey_umask() {
   # (181'de ölçüldü). Tek seferlik: drop-in zaten varsa bu dala hiç gelinmez.
   systemctl daemon-reload >/dev/null 2>&1
   if systemctl try-restart valkey >/dev/null 2>&1; then
-    echo "  ✔ valkey UMask=0027 drop-in + valkey yeniden başlatıldı (bir kerelik)"
+    echo "  ✔ valkey UMask=0027 drop-in + valkey restarted (one-time)"
   else
-    echo "  ! valkey UMask=0027 drop-in yazıldı ama valkey yeniden başlatılamadı — elle: systemctl restart valkey"
+    echo "  ! valkey UMask=0027 drop-in written but valkey could not be restarted — manually: systemctl restart valkey"
   fi
 }
 
 sir_izin() {
   local onar=0 kuru=0
   while [ $# -gt 0 ]; do
-    case "$1" in --onar) onar=1 ;; --kuru) kuru=1 ;; *) echo "bilinmeyen: $1" >&2; return 2 ;; esac; shift
+    case "$1" in --onar) onar=1 ;; --kuru) kuru=1 ;; *) echo "unknown option: $1" >&2; return 2 ;; esac; shift
   done
   SIR_KRITIK=0; SIR_ONARILAN=0
   local satir yol tur sahip gruplar enCok notu p top=0
@@ -252,26 +276,26 @@ sir_izin() {
   done <<<"$SIR_ENVANTER"
   sir_valkey_umask "$onar" "$kuru"
   if [ "$SIR_KRITIK" -eq 0 ]; then
-    if [ "$SIR_ONARILAN" -gt 0 ]; then echo "  ✓ gizli dosyalar: $top denetlendi, $SIR_ONARILAN onarıldı, sorun kalmadı"; else echo "  ✓ gizli dosyalar: $top denetlendi, sorun yok"; fi
+    if [ "$SIR_ONARILAN" -gt 0 ]; then echo "  ✓ secret files: $top checked, $SIR_ONARILAN repaired, no problems left"; else echo "  ✓ secret files: $top checked, no problems"; fi
     return 0
   fi
-  echo "  ✗ gizli dosyalar: $top denetlendi, $SIR_KRITIK KRİTİK"
+  echo "  ✗ secret files: $top checked, $SIR_KRITIK CRITICAL"
   return 1
 }
 
 # Test kancası: GOSP_SIR_KUTUPHANE=1 ile source edilince yalnız fonksiyonlar yüklenir.
 if [ "${GOSP_SIR_KUTUPHANE:-0}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 
-[ "$(id -u)" = 0 ] || { echo "root gerekli" >&2; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "root required" >&2; exit 2; }
 komut=${1:-}; [ $# -gt 0 ] && shift
 case "$komut" in
   birim)
     if [ "${1:-}" = "--denetle" ]; then
-      d=$(sir_birim_durum "$SIR_BIRIM"); echo "birim: $d"
+      d=$(sir_birim_durum "$SIR_BIRIM"); echo "unit: $d"
       [ "$d" = kimlik ]; exit $?
     fi
     sir_birim_gecis; exit $? ;;
   birim-geri) sir_birim_geri; exit $? ;;
   izin) sir_izin "$@"; exit $? ;;
-  *) sed -n '2,16p' "$0"; exit 2 ;;
+  *) kullanim; exit 2 ;;
 esac

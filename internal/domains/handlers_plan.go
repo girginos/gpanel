@@ -31,7 +31,19 @@ type setPlanReq struct {
 func (h *Handlers) SetPlan(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	var req setPlanReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// plan_id ZORUNLU: gövdede yoksa (boş {} ya da yanlış yazılmış alan) eskiden plan sessizce
+	// KALDIRILIYOR, hesap sınırsız kotaya düşüyordu. Planı kaldırmak açık {"plan_id": null} ister.
+	var ham map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&ham); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
+		return
+	}
+	pid, ok := ham["plan_id"]
+	if !ok {
+		httpx.WriteError(w, http.StatusBadRequest, "plan_id zorunlu (planı kaldırmak için açıkça null gönderin)")
+		return
+	}
+	if err := json.Unmarshal(pid, &req.PlanID); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
@@ -227,6 +239,14 @@ func (h *Handlers) planKullanimSigar(ctx context.Context, domainID, planID int64
 		}
 		return fmt.Errorf("disk kullanımı okunamadı: %w", err)
 	}
+	// domains.boyut_kb örnekleyiciyle (15 dk) ya da /kaynak okunurken tazelenir: bayatken kota
+	// aşan düşürme kabul ediliyordu (VM doğrulaması 2026-10-13: 40 MB kullanım, boyut_kb 24 KB).
+	// Canlı XFS kota sayacı daha büyükse o esas alınır.
+	var sk string
+	_ = h.DB.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, domainID).Scan(&sk)
+	if canli := canliDiskMB(sk) * 1024; canli > boyutKB {
+		boyutKB = canli
+	}
 	if boyutKB > kotaMB*1024 {
 		return fmt.Errorf("mevcut disk kullanımı (%d MB) yeni planın disk sınırını (%d MB) aşıyor", boyutKB/1024, kotaMB)
 	}
@@ -269,14 +289,41 @@ func PlanSonrasiUygula(db *sql.DB, did int64, ad string) { planSonrasiUygula(db,
 var planSonrasiUygula = func(db *sql.DB, did int64, ad string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := kaynaklimit.UygulaHepsi(ctx, db, did); err != nil {
+	// Silmeyle seri (HostingYik aynı hesap kilidini tutar): plan değişiminin hemen ardından
+	// silinen hesabın vhost'u bu uygulamayla yeniden yazılıp YETİM kalıyordu (dom_c_<sk>.conf;
+	// VM doğrulaması 2026-10-13, 0-1 sn gecikmede 3/3). Hesap silindiyse uygulanacak bir şey yok.
+	var sk string
+	if err := db.QueryRowContext(ctx, `SELECT sistem_kullanici FROM domains WHERE id=?`, did).Scan(&sk); err != nil {
+		return
+	}
+	hk := kilit.Hesap(sk)
+	hk.Lock()
+	defer hk.Unlock()
+	var vardir int
+	if err := db.QueryRowContext(ctx, `SELECT 1 FROM domains WHERE id=?`, did).Scan(&vardir); err != nil {
+		return
+	}
+	if err := planSonrasiKaynak(ctx, db, did); err != nil {
 		log.Printf("kaynaklimit apply domain=%d: %v", did, err)
 	}
 	// Plan degisti → WAF plan varsayilani da degismis olabilir; vhost'u WAF ile yeniden
 	// render et (domain override yoksa yeni planin WAF varsayilanini devralir).
-	if err := provisioner.WAFUygula(db, did); err != nil {
+	if err := planSonrasiWAF(db, did); err != nil {
 		log.Printf("waf apply (plan degisimi) domain=%d: %v", did, err)
 	}
 	// Plan posta limitlerini (max_email + saatlik) mail eklentisine senkronla (best-effort).
 	mailKutuLimitSenkron(ctx, db, did, ad)
 }
+
+// Test dikişleri: plan sonrası arka plan uygulaması ve canlı disk ölçümü.
+var (
+	planSonrasiKaynak = kaynaklimit.UygulaHepsi
+	planSonrasiWAF    = provisioner.WAFUygula
+	canliDiskMB       = func(sk string) int64 {
+		if sk == "" {
+			return 0
+		}
+		kMB, _, _, _ := kaynaklimit.KotaDurum(sk)
+		return int64(kMB)
+	}
+)

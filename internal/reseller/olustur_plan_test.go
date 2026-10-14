@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,12 +56,16 @@ func opGeciciDB(t *testing.T) *sql.DB {
 			full_name VARCHAR(255) NULL, status ENUM('active','suspended') NOT NULL DEFAULT 'active',
 			max_domain INT NOT NULL DEFAULT 0, max_disk_mb BIGINT NOT NULL DEFAULT 0, max_trafik_mb BIGINT NOT NULL DEFAULT 0,
 			reseller_plan_id BIGINT NOT NULL DEFAULT 0, asim_ilkesi VARCHAR(16) NOT NULL DEFAULT 'yok',
-			asim_bildirim TINYINT NOT NULL DEFAULT 0, fazla_satis TINYINT NOT NULL DEFAULT 0)`,
+			asim_bildirim TINYINT NOT NULL DEFAULT 0, fazla_satis TINYINT NOT NULL DEFAULT 0,
+			kaynak_cpu_cekirdek DECIMAL(7,2) NOT NULL DEFAULT 0, kaynak_ram_mb BIGINT NOT NULL DEFAULT 0,
+			kaynak_io_agirlik INT NOT NULL DEFAULT 0)`,
 		`CREATE TABLE reseller_plans (id BIGINT UNSIGNED PRIMARY KEY, ad VARCHAR(64) NOT NULL DEFAULT '',
 			max_domain INT NOT NULL DEFAULT 0, max_disk_mb BIGINT NOT NULL DEFAULT 0, max_trafik_mb BIGINT NOT NULL DEFAULT 0,
 			asim_ilkesi VARCHAR(16) NOT NULL DEFAULT 'yok', asim_bildirim TINYINT NOT NULL DEFAULT 0,
 			fazla_satis TINYINT NOT NULL DEFAULT 0, mail_max_email INT NOT NULL DEFAULT 0,
-			mail_saatlik_limit INT NOT NULL DEFAULT 0, mail_kutu_kota_mb INT NOT NULL DEFAULT 0)`,
+			mail_saatlik_limit INT NOT NULL DEFAULT 0, mail_kutu_kota_mb INT NOT NULL DEFAULT 0,
+			kaynak_cpu_cekirdek DECIMAL(7,2) NOT NULL DEFAULT 0, kaynak_ram_mb BIGINT NOT NULL DEFAULT 0,
+			kaynak_io_agirlik INT NOT NULL DEFAULT 0)`,
 		// Eski otomatik plan INSERT'inin yazdığı tüm sütunlar (canlı şemanın yazılabilir alt kümesi).
 		`CREATE TABLE service_plans (id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, ad VARCHAR(64) NOT NULL UNIQUE,
 			aciklama VARCHAR(255) NOT NULL DEFAULT '', disk_kota_mb INT NOT NULL DEFAULT 0, trafik_kota_mb INT NOT NULL DEFAULT 0,
@@ -77,7 +82,8 @@ func opGeciciDB(t *testing.T) *sql.DB {
 			target VARCHAR(255) NOT NULL DEFAULT '', detail TEXT NULL, ok TINYINT NOT NULL DEFAULT 1,
 			reseller_id BIGINT UNSIGNED NOT NULL DEFAULT 0)`,
 		`INSERT INTO users (id, username, role) VALUES (1, 'root', 'admin')`,
-		`INSERT INTO reseller_plans (id, ad, max_domain, max_disk_mb, max_trafik_mb, fazla_satis) VALUES (1, 'Bayi S', 5, 10000, 50000, 0)`,
+		`INSERT INTO reseller_plans (id, ad, max_domain, max_disk_mb, max_trafik_mb, fazla_satis, kaynak_cpu_cekirdek, kaynak_ram_mb, kaynak_io_agirlik)
+			VALUES (1, 'Bayi S', 5, 10000, 50000, 0, 1.5, 2048, 200)`,
 		`INSERT INTO service_plans (id, ad, disk_kota_mb, trafik_kota_mb, varsayilan, reseller_id) VALUES
 			(1, 'Başlangıç', 1024, 5120, 1, 0), (2, 'Standart', 10240, 51200, 0, 0)`,
 	} {
@@ -102,6 +108,7 @@ func TestOlustur_BayiyeHostingPlaniAcmaz(t *testing.T) {
 	h := &Handlers{DB: db}
 	r := chi.NewRouter()
 	r.Post("/resellers", h.Olustur)
+	havuzKancaSifirla()
 	once := opSay(t, db, `SELECT COUNT(*) FROM service_plans`)
 
 	for _, kul := range []string{"bayi1", "bayi2", "bayi3"} {
@@ -143,8 +150,48 @@ func TestOlustur_BayiyeHostingPlaniAcmaz(t *testing.T) {
 	if md != 5 || dk != 10000 || tr != 50000 || paket != 1 || fazla != 0 {
 		t.Errorf("bayi kaydı limitleri: domain=%d disk=%d trafik=%d paket=%d fazla=%d", md, dk, tr, paket, fazla)
 	}
+	// Kaynak havuzu da paketten kopyalanır (anlık görüntü): 1.5 çekirdek / 2048 MB RAM / G-Ç 200.
+	var cpu float64
+	var ram int64
+	var io int
+	if err := db.QueryRow(`SELECT kaynak_cpu_cekirdek, kaynak_ram_mb, kaynak_io_agirlik FROM users WHERE username='bayi2'`).Scan(&cpu, &ram, &io); err != nil {
+		t.Fatal(err)
+	}
+	if cpu != 1.5 || ram != 2048 || io != 200 {
+		t.Errorf("bayi kaynak havuzu paketten kopyalanmadı: cpu=%v ram=%d io=%d", cpu, ram, io)
+	}
+	// Havuz tanımlı bayi oluşunca uzlaştırma kancası çağrıldı (3 bayi → 3 çağrı).
+	if u, _ := havuzKancaOku(); u != 3 {
+		t.Errorf("havuz uzlaştırma kancası %d kez çağrıldı (beklenen 3)", u)
+	}
 	// Kökün planları yerinde (varsayılan dahil).
 	if n := opSay(t, db, `SELECT COUNT(*) FROM service_plans WHERE reseller_id=0 AND varsayilan=1 AND id=1`); n != 1 {
 		t.Errorf("kökün varsayılan planı değişti")
+	}
+}
+
+// Gerçek VPS 2026-10-13: POST /resellers ad_soyad sınırı PUT ile aynı (120); uzun değer
+// eskiden 500 + "Data too long for column 'full_name'" dönüyordu.
+func TestOlustur_AdSoyadSiniri(t *testing.T) {
+	db := opGeciciDB(t)
+	h := &Handlers{DB: db}
+	r := chi.NewRouter()
+	r.Post("/resellers", h.Olustur)
+	havuzKancaSifirla()
+	kos := func(kul, ad string) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(map[string]any{"paket_id": 1, "kullanici": kul, "parola": "test-parola-123", "ad_soyad": ad})
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/resellers", bytes.NewReader(b)))
+		return w
+	}
+	w := kos("uzunad", strings.Repeat("ş", 121))
+	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "full_name") || strings.Contains(w.Body.String(), "Error") {
+		t.Fatalf("121 karakter: 400 ve ham SQL'siz beklenir: %d %s", w.Code, w.Body.String())
+	}
+	if n := opSay(t, db, `SELECT COUNT(*) FROM users WHERE username='uzunad'`); n != 0 {
+		t.Fatal("reddedilen bayi oluşturuldu")
+	}
+	if w := kos("tamad", strings.Repeat("ş", 120)); w.Code != http.StatusCreated {
+		t.Fatalf("120 karakter kabul edilmeli: %d %s", w.Code, w.Body.String())
 	}
 }

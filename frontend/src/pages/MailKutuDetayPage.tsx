@@ -14,6 +14,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import type { Domain } from '@/components/domainTipi'
 import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
+import { musteriMi, useRol } from '@/lib/rol'
 import { kaydet, oku, sil, GUN } from '@/lib/kalici'
 
 type MailDomain = { id: number; ad: string; kutu_sayisi: number }
@@ -62,6 +63,7 @@ const MAILKUTUDETAY_EN: Record<string, string> = {
   "kullanici@eskisunucu.com": "user@oldserver.com",
   "mail.eskisunucu.com": "mail.oldserver.com",
   "Aktifleştir": "Activate",
+  "Kapatılan kutuyu yalnız hosting sağlayıcınız yeniden açabilir.": "Only your hosting provider can reopen a closed mailbox.",
   "Askıya al": "Suspend",
   "Bağlantıyı doğrula": "Verify connection",
   "Başka bir sunucudaki IMAP kutusundan tüm mailleri bu kutuya kopyalar (imapsync). Kaynak kutu değişmez.": "Copies all mail from an IMAP mailbox on another server to this mailbox (imapsync). The source mailbox is unchanged.",
@@ -233,6 +235,8 @@ export default function MailKutuDetayPage() {
   useTranslation() // dil re-render aboneligi
   const { onay, sor } = useDialog()
   const toast = useToast()
+  // Müşteri kutuyu yalnız KAPATABİLİR; kapalı kutuyu yalnız bayi/yönetici açar (eklenti 403 verir).
+  const musteri = musteriMi(useRol())
   const { id, kutuId } = useParams()
   const navigate = useNavigate()
   const [domain, setDomain] = useState<Domain | null>(null)
@@ -640,9 +644,13 @@ export default function MailKutuDetayPage() {
               </div>
               <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
                 <Button onClick={webmailGiris} disabled={isleniyor || !kutu.aktif} color="primary" boyut="sm" ikonSonda={I.harici}>{cevir("Giriş")}</Button>
-                <Button onClick={aktifDegistir} disabled={isleniyor} variant="outlined" boyut="sm" ikon={kutu.aktif ? I.kilit : I.kilitAcik}>
-                  {kutu.aktif ? cevir("Askıya al") : cevir("Aktifleştir")}
-                </Button>
+                {kutu.aktif || !musteri ? (
+                  <Button onClick={aktifDegistir} disabled={isleniyor} variant="outlined" boyut="sm" ikon={kutu.aktif ? I.kilit : I.kilitAcik}>
+                    {kutu.aktif ? cevir("Askıya al") : cevir("Aktifleştir")}
+                  </Button>
+                ) : (
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{cevir("Kapatılan kutuyu yalnız hosting sağlayıcınız yeniden açabilir.")}</span>
+                )}
               </div>
             </div>
           </div>

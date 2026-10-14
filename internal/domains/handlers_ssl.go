@@ -14,6 +14,7 @@ import (
 
 	"girginospanel/internal/dnsutil"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/nginxset"
 
 	"github.com/go-chi/chi/v5"
@@ -182,7 +183,28 @@ func (h *Handlers) SSLIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mailSSL := (req.MailSSL || h.mailEklentiAktif(r.Context())) && req.Tip == "letsencrypt"
-	h.sslBaslat(id, alanAdi, sk, phpSurum, backend, req.Tip, mailSSL, req.MailAltlar)
+
+	// Denetim: iş ASENKRON olduğundan iki kayıt — burada "başlatıldı" (kabul), iş
+	// bitince "sonuç" (başarı/hata; aktör korunur, IP "sistem"). Detayda sertifika
+	// yolu / ham araç çıktısı YOK.
+	uid, kul := middleware.Aktor(r)
+	kapsam := httpx.DomainKapsam(h.DB, id)
+	tip := req.Tip
+	detay := "tip=" + tip
+	if mailSSL {
+		detay += " mail_ssl=true"
+	}
+	httpx.Denetim(h.DB, r, uid, kul, "ssl.kur", alanAdi, detay, kapsam, true)
+	h.sslBaslat(id, alanAdi, sk, phpSurum, backend, tip, mailSSL, req.MailAltlar, func(err error, yedek bool) {
+		durum, ok := "tamam", true
+		switch {
+		case err != nil:
+			durum, ok = "hata", false
+		case yedek: // Let's Encrypt alınamadı, geçici kendinden imzalı kuruldu
+			durum, ok = "kendinden-imzali-yedek", false
+		}
+		httpx.DenetimSistem(h.DB, uid, kul, "ssl.kur_sonuc", alanAdi, "tip="+tip+" durum="+durum, kapsam, ok)
+	})
 
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"ok":    true,
@@ -207,6 +229,8 @@ func (h *Handlers) SSLDnsYenile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dnsutil.OnbellekTemizle(alanAdi)
+	uid, kul := middleware.Aktor(r)
+	httpx.DenetimDomain(h.DB, r, uid, kul, "ssl.dns_yenile", alanAdi, "", id, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
 		"mesaj": "DNS önbelleği temizlendi. Kayıtlar kamu DNS'ten yeniden okunacak — birkaç saniye sonra “Yeniden çıkar” ile SSL'i deneyin.",
@@ -241,15 +265,19 @@ func (h *Handlers) SSLDisable(w http.ResponseWriter, r *http.Request) {
 	// vhost HTTP'ye döndükten sonra DB de yazılmalı (kopuk bağlam).
 	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
 	defer iptal()
+	uid, kul := middleware.Aktor(r)
 	if err := sslKapat(alanAdi, sk, phpSurum, backend); err != nil {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "ssl.kaldir", alanAdi, "", id, false)
 		httpx.WriteError(w, http.StatusInternalServerError, "SSL kapat: "+nginxset.SunucuHatasi(r, "domains.ssl-kapat", id, err))
 		return
 	}
 	if _, err := h.DB.ExecContext(kctx,
 		`UPDATE domains SET ssl_aktif=0, ssl_kaynak='', cert_path='', key_path='', ssl_bitis=NULL
 		 WHERE id=?`, id); err != nil {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "ssl.kaldir", alanAdi, "", id, false)
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
 	}
+	httpx.DenetimDomain(h.DB, r, uid, kul, "ssl.kaldir", alanAdi, "", id, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

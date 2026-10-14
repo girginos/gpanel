@@ -51,7 +51,7 @@ func (m MySQLCLI) calistir(ctx context.Context, sqlMetni string, gizle ...string
 // Hostlar: mysql.user'da kullanıcının tüm host tanımları (ör. 127.0.0.1, localhost).
 func (m MySQLCLI) Hostlar(ctx context.Context, kul string) ([]string, error) {
 	if !sqlGuvenli(kul) {
-		return nil, errors.New("geçersiz kullanıcı adı")
+		return nil, errors.New("invalid user name")
 	}
 	out, err := m.calistir(ctx, "SELECT Host FROM mysql.user WHERE User='"+kul+"' ORDER BY Host;\n")
 	if err != nil {
@@ -70,12 +70,12 @@ func (m MySQLCLI) Hostlar(ctx context.Context, kul string) ([]string, error) {
 // istemci oturumunda değiştirir. Bir host düşerse hata döner (çağıran geri alır).
 func (m MySQLCLI) ParolaAyarla(ctx context.Context, kul string, hostlar []string, parola string) error {
 	if !sqlGuvenli(kul) || !sqlGuvenli(parola) {
-		return errors.New("geçersiz kullanıcı/parola karakteri")
+		return errors.New("invalid user/password character")
 	}
 	var b strings.Builder
 	for _, h := range hostlar {
 		if !sqlGuvenli(h) {
-			return errors.New("geçersiz host karakteri")
+			return errors.New("invalid host character")
 		}
 		b.WriteString("ALTER USER '" + kul + "'@'" + h + "' IDENTIFIED BY '" + parola + "';\n")
 	}
@@ -92,7 +92,7 @@ func (m MySQLCLI) Dogrula(ctx context.Context, dsn string) error {
 func DSNDogrula(ctx context.Context, dsn string) error {
 	cfg, err := mysql.ParseDSN(dsn)
 	if err != nil {
-		return fmt.Errorf("DSN ayrıştırılamadı")
+		return fmt.Errorf("could not parse the DSN")
 	}
 	cfg.Timeout = 5 * time.Second
 	ctx, iptal := context.WithTimeout(ctx, 10*time.Second)
@@ -106,7 +106,7 @@ func DSNDogrula(ctx context.Context, dsn string) error {
 	var bir int
 	if err := db.QueryRowContext(ctx, "SELECT 1").Scan(&bir); err != nil {
 		// Sürücü hatası parolayı içermez; yine de yalnız kodu/mesajı döndür.
-		return fmt.Errorf("bağlantı: %v", err)
+		return fmt.Errorf("connection: %v", err)
 	}
 	return nil
 }

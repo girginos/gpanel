@@ -8,6 +8,8 @@
 package dns
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -108,6 +110,7 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var icerik []byte
+	var okumaHatasi error
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // zone dosyasi kucuktur — gövde 2 MiB'a sınırlı (DoS savunması)
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
 		// #nosec G120 -- gövde üstteki MaxBytesReader ile 2 MiB'a sınırlı; ParseMultipartForm bundan fazlasını belleğe/diske alamaz. Taint analizi MaxBytesReader'ı tanımadığı için yanlış-pozitif.
@@ -121,9 +124,19 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer f.Close()
-		icerik, _ = io.ReadAll(f)
+		icerik, okumaHatasi = io.ReadAll(f)
 	} else {
-		icerik, _ = io.ReadAll(r.Body)
+		icerik, okumaHatasi = io.ReadAll(r.Body)
+	}
+	if okumaHatasi != nil {
+		// Sınırı aşan gövde eskiden sessizce KESİLİP işleniyordu (kalan kayıtlar kayboluyordu).
+		var mb *http.MaxBytesError
+		if errors.As(okumaHatasi, &mb) {
+			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "zone dosyası en çok 2 MiB olabilir, hiçbir kayıt eklenmedi")
+			return
+		}
+		httpx.WriteError(w, http.StatusBadRequest, "zone içeriği okunamadı")
+		return
 	}
 	if len(strings.TrimSpace(string(icerik))) == 0 {
 		httpx.WriteError(w, http.StatusBadRequest, "boş zone içeriği")
@@ -135,73 +148,95 @@ func (h *Handlers) IceAktar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçerli DNS kaydı bulunamadı (dosya biçimini kontrol edin)")
 		return
 	}
+	// TÜM kayıtlar elle kayıtla AYNI doğrulayıcıdan geçer: tek bozuk satır zone'u
+	// reddettirip hesabın sonraki yazımlarını kilitlemesin. Hiçbiri eklenmez.
+	var kotu []string
+	for _, k := range ks {
+		if verr := kayitZoneGecerli(k, alanAdi); verr != nil {
+			kotu = append(kotu, fmt.Sprintf("%s %s: %v", k.Ad, k.Tip, verr))
+		}
+	}
+	if len(kotu) > 0 {
+		goster := kotu[:min(len(kotu), 5)]
+		ileti := "dosyada geçersiz kayıt var, hiçbir kayıt eklenmedi: " + strings.Join(goster, "; ")
+		if len(kotu) > len(goster) {
+			ileti += fmt.Sprintf(" (+%d kayıt daha)", len(kotu)-len(goster))
+		}
+		httpx.WriteError(w, http.StatusBadRequest, ileti)
+		return
+	}
+	if soaP != nil {
+		verr := SOAAlanlariGecerli(soaP.PrimaryNS, soaP.Hostmaster)
+		if verr == nil {
+			verr = SOASayilariGecerli(*soaP)
+		}
+		if verr != nil {
+			httpx.WriteError(w, http.StatusBadRequest, "dosyadaki SOA geçersiz, hiçbir kayıt eklenmedi: "+verr.Error())
+			return
+		}
+	}
 
 	degistir := r.URL.Query().Get("mod") == "degistir"
 
-	tx, err := h.DB.BeginTx(r.Context(), nil)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer func() { _ = tx.Rollback() }() // Commit başarılıysa no-op; hata/erken dönüşte geri alır.
-
-	if degistir {
-		if _, e := tx.ExecContext(r.Context(), `DELETE FROM dns_records WHERE domain_id=?`, id); e != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "eski kayıtlar silinemedi: "+e.Error())
-			return
-		}
-	}
-	eklenen, atlanan := 0, 0
-	for _, k := range ks {
-		if !degistir {
-			var n int
-			_ = tx.QueryRowContext(r.Context(),
-				`SELECT COUNT(*) FROM dns_records WHERE domain_id=? AND ad=? AND tip=? AND deger=?`,
-				id, k.Ad, k.Tip, k.Deger).Scan(&n)
-			if n > 0 {
-				atlanan++
-				continue
-			}
-		}
-		if _, e := tx.ExecContext(r.Context(),
-			`INSERT INTO dns_records(domain_id, ad, tip, deger, ttl, oncelik, aktif)
-			 VALUES(?,?,?,?,?,?, 1)`,
-			id, k.Ad, k.Tip, k.Deger, k.TTL, oncelikNormalize(k.Tip, k.Oncelik)); e != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "kayıt eklenemedi: "+e.Error())
-			return
-		}
-		eklenen++
-	}
-	if soaP != nil {
-		if _, e := tx.ExecContext(r.Context(),
-			`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
-			 VALUES(?,?,?,?,?,?,?,?)
-			 ON DUPLICATE KEY UPDATE primary_ns=VALUES(primary_ns), hostmaster=VALUES(hostmaster),
-			   refresh=VALUES(refresh), retry=VALUES(retry), expire=VALUES(expire),
-			   minimum=VALUES(minimum), ttl=VALUES(ttl)`,
-			id, soaP.PrimaryNS, soaP.Hostmaster, soaP.Refresh, soaP.Retry, soaP.Expire, soaP.Minimum, soaP.TTL); e != nil {
-			httpx.WriteError(w, http.StatusInternalServerError, "SOA kaydedilemedi: "+e.Error())
-			return
-		}
-	}
-	if e := tx.Commit(); e != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, e.Error())
-		return
-	}
-
-	zoneUyari := ""
-	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
+	// Kayıtlar + SOA + zone TEK işlem: zone yazılamazsa (named-checkzone/include/yeniden
+	// yükleme) içe aktarma tümüyle geri alınır. DB değişti: zone istemci kopsa da
+	// yazılmalı (kopuk bağlam).
 	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
 	defer ziptal()
-	if zerr := zoneYaz(zctx, h.DB, id); zerr != nil {
-		zoneUyari = "kayıtlar kaydedildi ancak zone doğrulaması uyarı verdi: " + zoneHatasi(r, id, zerr)
+	eklenen, atlanan := 0, 0
+	err = h.zoneliIslem(zctx, id, func(tx *sql.Tx) error {
+		eklenen, atlanan = 0, 0
+		if degistir {
+			if _, e := tx.ExecContext(zctx, `DELETE FROM dns_records WHERE domain_id=?`, id); e != nil {
+				return fmt.Errorf("eski kayıtlar silinemedi: %w", e)
+			}
+		}
+		for _, k := range ks {
+			if !degistir {
+				var n int
+				_ = tx.QueryRowContext(zctx,
+					`SELECT COUNT(*) FROM dns_records WHERE domain_id=? AND ad=? AND tip=? AND deger=?`,
+					id, k.Ad, k.Tip, k.Deger).Scan(&n)
+				if n > 0 {
+					atlanan++
+					continue
+				}
+			}
+			if _, e := tx.ExecContext(zctx,
+				`INSERT INTO dns_records(domain_id, ad, tip, deger, ttl, oncelik, aktif)
+				 VALUES(?,?,?,?,?,?, 1)`,
+				id, k.Ad, k.Tip, k.Deger, k.TTL, oncelikNormalize(k.Tip, k.Oncelik)); e != nil {
+				return fmt.Errorf("kayıt eklenemedi: %w", e)
+			}
+			eklenen++
+		}
+		if soaP != nil {
+			if _, e := tx.ExecContext(zctx,
+				`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
+				 VALUES(?,?,?,?,?,?,?,?)
+				 ON DUPLICATE KEY UPDATE primary_ns=VALUES(primary_ns), hostmaster=VALUES(hostmaster),
+				   refresh=VALUES(refresh), retry=VALUES(retry), expire=VALUES(expire),
+				   minimum=VALUES(minimum), ttl=VALUES(ttl)`,
+				id, soaP.PrimaryNS, soaP.Hostmaster, soaP.Refresh, soaP.Retry, soaP.Expire, soaP.Minimum, soaP.TTL); e != nil {
+				return fmt.Errorf("SOA kaydedilemedi: %w", e)
+			}
+		}
+		return nil
+	})
+	mod := map[bool]string{true: "değiştir", false: "birleştir"}[degistir]
+	if err != nil {
+		if h.hataYanitla(w, r, id, err, zoneGeriAlindi, http.StatusUnprocessableEntity) {
+			h.denetle(r, id, "dns.ice_aktar", alanAdi, "mod="+mod+" — zone yazılamadı, geri alındı", false)
+		}
+		return
 	}
+	h.denetle(r, id, "dns.ice_aktar", alanAdi, fmt.Sprintf("mod=%s eklenen=%d atlanan=%d", mod, eklenen, atlanan), true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"eklenen": eklenen,
 		"atlanan": atlanan,
-		"mod":     map[bool]string{true: "değiştir", false: "birleştir"}[degistir],
-		"uyari":   zoneUyari,
+		"mod":     mod,
+		"uyari":   "", // eski istemci uyumu: zone hatası artık HATA döner (içe aktarma geri alınır)
 	})
 }
 
@@ -446,7 +481,10 @@ func relName(name, origin string) string {
 		if strings.HasSuffix(n, "."+o) {
 			return strings.TrimSuffix(n, "."+o)
 		}
-		return n
+		// Zone DIŞI mutlak ad olduğu gibi (noktalı) kalır: eskiden nokta silinip göreli ada
+		// çevriliyordu (foo.example.org. → foo.example.org.<zone> olarak sessizce yayınlanıyordu);
+		// kayitZoneGecerli bu satırı açık iletiyle reddeder.
+		return name
 	}
 	return name
 }
@@ -462,6 +500,13 @@ func unquoteTXT(toks []string) string {
 	sawQuote := false
 	for i := 0; i < len(joined); i++ {
 		c := joined[i]
+		if inq && c == '\\' && i+1 < len(joined) {
+			// Kaçış (\; \" \DDD ...) olduğu gibi korunur; \" tırnak durumunu DEĞİŞTİRMEZ.
+			b.WriteByte(c)
+			b.WriteByte(joined[i+1])
+			i++
+			continue
+		}
 		if c == '"' {
 			inq = !inq
 			sawQuote = true
@@ -473,6 +518,10 @@ func unquoteTXT(toks []string) string {
 	}
 	if !sawQuote {
 		return strings.TrimSpace(joined) // tirnaksiz TXT
+	}
+	if strings.Contains(b.String(), `\"`) {
+		// Düz metin kaçışlı tırnağı taşıyamaz (txtQuote tırnakları siler): tırnaklı biçim korunur.
+		return strings.TrimSpace(joined)
 	}
 	return b.String()
 }

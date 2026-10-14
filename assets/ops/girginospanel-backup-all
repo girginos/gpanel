@@ -20,5 +20,17 @@
 # silinmedi: calisirsa hicbir sey yapmadan cikar. Cron girdisini
 # `girginospanel-repair --only backup_cron` temizler.
 
-logger -t girginospanel-backup "backup-all emekliye ayrildi; yedekleme panel scheduler'ina devredildi (girginospanel-repair --only backup_cron ile cron girdisini temizleyin)"
+case "${1:-}" in -h|--help)
+  cat <<'USAGE'
+Usage: girginospanel-backup-all
+
+RETIRED (2026-08-26). Backups are now run by the scheduler built into the panel
+(which honors each domain's backup frequency, hour and retention). This file
+only remains because old installs may still have a cron entry for it; it does
+nothing and exits 0. Remove the stale cron entry with:
+  girginospanel-repair --only backup_cron
+USAGE
+  exit 0 ;;
+esac
+logger -t girginospanel-backup "backup-all is retired; backups are handled by the panel scheduler (remove the stale cron entry with: girginospanel-repair --only backup_cron)"
 exit 0

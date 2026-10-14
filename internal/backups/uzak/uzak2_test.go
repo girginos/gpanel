@@ -217,7 +217,7 @@ func TestIndirVeCoz(t *testing.T) {
 	// uzak kopya bozulursa manifest özetiyle yakalanır
 	d := o.is(id)
 	o.bel.Boz(d.uzakAd)
-	if _, err := o.isci.IndirVeCoz(context.Background(), id, o.anahtarYol, filepath.Join(t.TempDir(), "x")); err == nil || !strings.Contains(err.Error(), "bozuk") {
+	if _, err := o.isci.IndirVeCoz(context.Background(), id, o.anahtarYol, filepath.Join(t.TempDir(), "x")); err == nil || !strings.Contains(err.Error(), "corrupt") {
 		t.Errorf("bozuk uzak kopya yakalanmalı: %v", err)
 	}
 }

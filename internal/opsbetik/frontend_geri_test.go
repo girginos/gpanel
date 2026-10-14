@@ -85,7 +85,7 @@ func TestFrontendGeri_EskiArayuzGeriGelir(t *testing.T) {
 	if k := fgrArtik(kok); len(k) != 0 {
 		t.Errorf("kenara alınan kopya artık bırakılmamalı: %v", k)
 	}
-	if !strings.Contains(out, "OK: frontend-dist güncelleme öncesine döndürüldü") {
+	if !strings.Contains(out, "OK: frontend-dist restored to its pre-update state") {
 		t.Errorf("rapor eksik: %s", out)
 	}
 }
@@ -151,7 +151,7 @@ func TestFrontendGeri_IkinciTasimaBasarisizsaYeniArayuzGeriKonur(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set -e altında düşmemeli: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "SONUC=1") || !strings.Contains(out, "WARN: frontend-dist geri alınamadı") {
+	if !strings.Contains(out, "SONUC=1") || !strings.Contains(out, "WARN: frontend-dist could not be rolled back") {
 		t.Errorf("hata kodu + uyarı bekleniyordu: %s", out)
 	}
 	if g := gdzOku(filepath.Join(kok, "frontend-dist", "index.html")); g != "YENI" {
@@ -173,7 +173,7 @@ func TestFrontendGeri_IlkTasimaBasarisizsaDokunmaz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set -e altında düşmemeli: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "SONUC=1") || !strings.Contains(out, "WARN: frontend-dist geri alınamadı") {
+	if !strings.Contains(out, "SONUC=1") || !strings.Contains(out, "WARN: frontend-dist could not be rolled back") {
 		t.Errorf("hata kodu + uyarı bekleniyordu: %s", out)
 	}
 	if g := gdzOku(filepath.Join(kok, "frontend-dist", "index.html")); g != "YENI" {
@@ -221,11 +221,11 @@ func TestUpdateFrontendGeriCagriSirasi(t *testing.T) {
 	}
 	takas := idx(`mv "$FDNEW" "$FDIST"`, 0)
 	isaret := idx(`FDIST_TAKAS=1`, takas)
-	tamam := idx(`ok "frontend-dist güncellendi`, takas)
+	tamam := idx(`ok "frontend-dist updated`, takas)
 	if !(isaret < tamam) || isaret-takas > 200 {
 		t.Errorf("takas işareti, takastan hemen sonra ve başarı satırından önce konmalı (takas=%d işaret=%d tamam=%d)", takas, isaret, tamam)
 	}
-	rb := idx(`yeni sürüm sağlıklı başlamadı`, 0)
+	rb := idx(`the new version did not start healthy`, 0)
 	dur := idx(`systemctl stop girginospanel`, rb)
 	geri := idx(`frontend_geri_al || true`, rb)
 	restart := idx(`systemctl restart girginospanel; sleep 3`, rb)

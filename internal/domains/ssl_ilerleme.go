@@ -221,6 +221,19 @@ func (k *sslIsi) bitir(err error) {
 	k.mu.Unlock()
 }
 
+// kayitUyarisi: "kayit" adımı UYARI ile bitti mi — Let's Encrypt istenip alınamadığında
+// geçici kendinden imzalı sertifika kurulduğu durum (bkz. sslBaslat 2. adım).
+func (k *sslIsi) kayitUyarisi() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for _, a := range k.Adimlar {
+		if a.Ad == "kayit" && a.Durum == "uyari" {
+			return true
+		}
+	}
+	return false
+}
+
 func sslKirp(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= n {
@@ -266,7 +279,11 @@ func SSLSuruyor(id int64) bool {
 
 // sslBaslat — asenkron SSL kurulumunu başlatır ve oturumu döner. Goroutine
 // istekten bağımsız context ile sonuna kadar çalışır (sekme kapansa da sürer).
-func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip string, mailSSL bool, mailAltlar []string) *sslIsi {
+//
+// bitince (nil olabilir): iş bittiğinde ARKA PLAN goroutine'inde bir kez çağrılır;
+// err = iş hatası, yedek = Let's Encrypt istenip alınamadı (geçici kendinden imzalı
+// kuruldu: iş "başarılı" görünür ama istenen sertifika yoktur). Denetim sonucu için.
+func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip string, mailSSL bool, mailAltlar []string, bitince func(err error, yedek bool)) *sslIsi {
 	// Adım sayısı: her koşulda "cert" + "kayit"; posta SSL'i devredeyse
 	// mail / mail-dogrula / mail-kur / webmail / dkim-dns de eklenir.
 	// (mailEklentiAktif burada ölçülemez — ctx goroutine içinde açılıyor —
@@ -284,6 +301,14 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 	go func() {
 		ctx, iptal := context.WithTimeout(context.Background(), 20*time.Minute)
 		defer iptal()
+
+		// bitir: durumu kapatır, sonra (varsa) denetim geri çağrısını çalıştırır.
+		bitir := func(err error) {
+			k.bitir(err)
+			if bitince != nil {
+				bitince(err, err == nil && k.kayitUyarisi())
+			}
+		}
 
 		var certYol, keyYol string
 
@@ -305,7 +330,7 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 			return "sertifika alındı ve web sunucusuna kuruldu", false, nil
 		})
 		if err != nil {
-			k.bitir(err)
+			bitir(err)
 			return
 		}
 
@@ -331,7 +356,7 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 			return "kaynak: " + kaynak + ", bitiş: " + bitis.Format("2006-01-02"), false, nil
 		})
 		if err != nil {
-			k.bitir(err)
+			bitir(err)
 			return
 		}
 
@@ -403,7 +428,7 @@ func (h *Handlers) sslBaslat(id int64, alanAdi, sk, phpSurum, backend, tip strin
 			}
 		}
 
-		k.bitir(nil)
+		bitir(nil)
 	}()
 
 	return k

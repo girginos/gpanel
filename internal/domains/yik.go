@@ -10,6 +10,7 @@ import (
 	"girginospanel/internal/hesaplar"
 	"girginospanel/internal/httpx"
 	"girginospanel/internal/kaynaklimit"
+	"girginospanel/internal/kilit"
 	"girginospanel/internal/provisioner"
 	"girginospanel/internal/redis"
 	"girginospanel/internal/subdomain"
@@ -25,6 +26,13 @@ import (
 // Dönen kapsam, satır gitmeden ÖNCE çözülen domains.reseller_id'dir (denetim için).
 // İstemci kopsa da yıkım yarım kalmasın diye çağıran context.WithoutCancel vermelidir.
 func HostingYik(ctx context.Context, db *sql.DB, id int64, alanAdi, sk string, isDemo int) (kapsam int64, err error) {
+	// Oluşturma sonrası arka plan uygulamasıyla seri (bkz. domains.Create): silme sürerken
+	// birim/vhost yeniden yazılmasın. Kilit sırası kilit.Bayi → kilit.Hesap (askı ile aynı).
+	if sk != "" {
+		hk := kilit.Hesap(sk)
+		hk.Lock()
+		defer hk.Unlock()
+	}
 	var iz *backups.SilinenIz
 	if isDemo == 0 {
 		// Yedekler silme akışından BAĞIMSIZDIR: dizine/uzak kopyalara dokunulmaz, yedek yüzünden

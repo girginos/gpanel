@@ -33,9 +33,9 @@ type Tarif struct {
 	Aciklama string
 	Kategori string // "vpn" | "iletisim" | "gelistirme" | "oyun" | "medya" | "diger"
 	Ikon     string // frontend için (emoji veya isim)
-	// LogoURL — markanin gercek SVG logosu (SimpleIcons CDN). Bos ise
-	// arayuz Ikon emojisine duser. CSP img-src cdn.simpleicons.org
-	// icermeli (bkz. assets/nginx/_panel.conf).
+	// LogoURL — markanin SVG logosu, panelle gelir: "/simge/<ad>.svg"
+	// (frontend/public/simge; dis CDN YOK, CSP img-src yalniz 'self'). Bos ise
+	// arayuz Ikon emojisine duser.
 	LogoURL string `json:"logo_url,omitempty"`
 	Surum   string // "1.32.5"
 

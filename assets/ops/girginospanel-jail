@@ -3,6 +3,30 @@
 # Paylaşılan şablon (hardlink -> disk paylaşımı) + gerçek home bind-mount.
 # FTP/nginx/php gerçek /home/<user>'ı kullanmaya devam eder — jail sadece SSH oturumunu sınırlar.
 set -o pipefail
+
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-jail {template|setup <c_user>|teardown <c_user>}
+
+Per-user chroot jail for hosting accounts ("jailed shell"). A shared template
+(hard-linked, so it costs little disk) plus a bind mount of the real home
+directory; FTP, nginx and PHP keep using the real /home/<user>, the jail only
+confines the SSH session. Called by the panel when SSH access is switched on
+or off for a tenant. Run as root.
+
+Commands:
+  template            (Re)build the shared template in /opt/girginospanel/jail-template
+  setup <c_user>      Create the jail /home/jails/<c_user> and bind-mount the home
+                      directory into it (also persisted in /etc/fstab, nofail)
+  teardown <c_user>   Unmount the bind and remove the jail; if the bind cannot be
+                      unmounted the jail directory is kept so the real home is safe
+
+<c_user> must be a hosting system user (name starts with c_).
+
+Exit codes: 0 success, 1 bad usage, invalid user or missing home directory
+USAGE
+}
+case "${1:-}" in -h|--help|help) kullanim; exit 0 ;; esac
 JAILROOT=/home/jails
 TEMPLATE=/opt/girginospanel/jail-template
 
@@ -59,9 +83,9 @@ build_template() {
 
 setup() {
   local sk="$1"
-  [[ "$sk" == c_* ]] || { echo "HATA: c_ olmayan kullanıcı"; exit 1; }
+  [[ "$sk" == c_* ]] || { echo "ERROR: user name does not start with c_"; exit 1; }
   local home="/home/$sk" jd="$JAILROOT/$sk"
-  [ -d "$home" ] || { echo "HATA: home yok: $home"; exit 1; }
+  [ -d "$home" ] || { echo "ERROR: home directory not found: $home"; exit 1; }
   [ -d "$TEMPLATE" ] || build_template
   mkdir -p "$JAILROOT"; chown root:root "$JAILROOT"; chmod 755 "$JAILROOT"
   # önceki bind'i çöz
@@ -94,23 +118,23 @@ setup() {
 
 teardown() {
   local sk="$1"
-  [[ "$sk" == c_* ]] || { echo "HATA: c_ olmayan kullanıcı — teardown iptal"; exit 1; }
+  [[ "$sk" == c_* ]] || { echo "ERROR: user name does not start with c_ — teardown cancelled"; exit 1; }
   local jd="$JAILROOT/$sk"
   local bp="$jd/home/$sk"
-  [ -d "$jd" ] || { echo "teardown: jail yok ($sk)"; return 0; }
+  [ -d "$jd" ] || { echo "teardown: no jail ($sk)"; return 0; }
   # bind'i çöz — ASLA fuser -km KULLANMA (bind-mount ana fs'i işaret eder,
   # tüm sistem process'lerini öldürür). Aktif oturum varsa lazy-umount yeter.
   if mountpoint -q "$bp"; then umount "$bp" 2>/dev/null || umount -l "$bp" 2>/dev/null || true; fi
   sed -i "\|$bp none bind|d" /etc/fstab
   # ek güvenlik: hâlâ mount ise SİLME (gerçek home'a inmeyi önle)
-  if mountpoint -q "$bp"; then echo "UYARI: bind çözülemedi, jail dizini korundu: $jd"; return 0; fi
+  if mountpoint -q "$bp"; then echo "WARNING: could not unmount the bind, jail directory kept: $jd"; return 0; fi
   rm -rf "$jd"
   echo "teardown OK: $sk"
 }
 
 case "${1:-}" in
   template) build_template ;;
-  setup)    setup "${2:?c_user gerek}" ;;
-  teardown) teardown "${2:?c_user gerek}" ;;
-  *) echo "kullanım: $0 {template|setup <c_user>|teardown <c_user>}"; exit 1 ;;
+  setup)    setup "${2:?c_user required}" ;;
+  teardown) teardown "${2:?c_user required}" ;;
+  *) echo "Usage: $0 {template|setup <c_user>|teardown <c_user>}"; exit 1 ;;
 esac

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
@@ -61,7 +62,7 @@ func (h *Handlers) Detay(w http.ResponseWriter, r *http.Request) {
 // PHPDegistir: PUT /domains/{id}/subdomain/{sid}/php {php_surum}
 // Subdomain'in PHP-FPM sürümünü değiştirir — vhost socket'ini yeniden yazar, nginx reload.
 func (h *Handlers) PHPDegistir(w http.ResponseWriter, r *http.Request) {
-	id, sk, _, _, demo, ok := h.parent(r)
+	id, sk, _, hostingPHP, demo, ok := h.parent(r)
 	if !ok {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -82,11 +83,22 @@ func (h *Handlers) PHPDegistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz gövde")
 		return
 	}
-	php := strings.TrimSpace(req.PHPSurum)
-	var altAd, tamAd string
+	// Hosting yolundaki kuralla aynı (PHPSurumDogrula): desteklenmeyen değer ham yazılmasın.
+	php, verr := provisioner.PHPSurumDogrula(req.PHPSurum)
+	if verr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, verr.Error())
+		return
+	}
+	var altAd, tamAd, eskiPHP string
 	if err := h.DB.QueryRowContext(r.Context(),
-		`SELECT alt_ad, tam_ad FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id).Scan(&altAd, &tamAd); err != nil {
+		`SELECT alt_ad, tam_ad, COALESCE(php_surum,'8.3') FROM subdomanlar WHERE id=? AND domain_id=?`, sid, id).Scan(&altAd, &tamAd, &eskiPHP); err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "subdomain bulunamadı")
+		return
+	}
+	// Per-tenant FPM'de alt alan hesabın TEK havuzunu (hosting sürümü) kullanır: farklı
+	// sürüm eskiden DB'ye yazılıp 200 dönüyordu ama çalışan sürüm değişmiyordu.
+	if tenantFPMAktif(sk) && php != strings.TrimSpace(hostingPHP) {
+		httpx.WriteError(w, http.StatusConflict, tenantAltAlanPHPIletisi(hostingPHP))
 		return
 	}
 	// sürüm sunucuda kurulu mu? (doğrulama)
@@ -94,6 +106,11 @@ func (h *Handlers) PHPDegistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "PHP sürümü sunucuda kurulu değil: "+php)
 		return
 	}
+	uid, kul := middleware.Aktor(r)
+	basarili := false
+	defer func() {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "subdomain.php_surum", tamAd, "eski="+eskiPHP+" yeni="+php, id, basarili)
+	}()
 	if _, err := h.DB.Exec(`UPDATE subdomanlar SET php_surum=? WHERE id=? AND domain_id=?`, php, sid, id); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "kayıt güncellenemedi")
 		return
@@ -106,5 +123,15 @@ func (h *Handlers) PHPDegistir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.php", id, err))
 		return
 	}
+	basarili = true
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "php_surum": php})
+}
+
+// tenantFPMAktif — hesapta per-tenant php-fpm kurulu mu (dikiş: testler sahteyle değiştirir).
+var tenantFPMAktif = provisioner.TenantFPMActive
+
+// tenantAltAlanPHPIletisi — per-tenant FPM'de alt alana hosting'den farklı sürüm istenince.
+func tenantAltAlanPHPIletisi(hostingPHP string) string {
+	return "bu hesapta alt alanlar hosting'in PHP sürümünü (" + strings.TrimSpace(hostingPHP) +
+		") kullanır; sürümü hosting PHP ayarlarından değiştirin"
 }

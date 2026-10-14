@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +69,7 @@ func Init(d *sql.DB) {
 	// ve dosya yöneticisi RAR-extract'i onlara GÜVENMEDEN ÖNCE garanti et. Böylece araçlar
 	// paketten gelmese bile İLK update'te per-user ACL izolasyonu + RAR extract hazır olur.
 	ensureArchiveTools()
+	PHPSurumHealOnStartup() // geçersiz php_surum DB değerleri, kaydın fiilen çalıştığı sürüme çekilir (davranış değişmez)
 	HealCacheZoneOnStartup()
 	// Batch2 sertlestirme: panel vhost guvenlik header'lari + mevcut tenant
 	// vhost/pool'larinin (retroaktif) guvenli yeniden-render'i. Her ikisi de
@@ -108,8 +111,10 @@ func Init(d *sql.DB) {
 	// Paylaşılan master / alt alan havuzlarının MEVCUT dosyaları (şablonlar yalnız yeni yazımları kapsar;
 	// HealVhostsOnStartup tek seferlik). Arka planda: php-fpm -t + reload saniyeler sürebilir.
 	MailYasakHavuzlariniKapatOnStartup()
-	EnsureTenantFPMOnStartup() // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
-	HealWAFOnStartup()         // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
+	EnsureTenantFPMOnStartup()         // Batch5A: kurulu per-tenant FPM servislerini (Seçenek A) ayakta tut
+	HealWAFOnStartup()                 // WAF: ModSecurity modul durumu + WAF-etkin domain'lerin per-domain modsec conf'unu tazele (modul yoksa graceful)
+	LaravelArtiklariniSupurOnStartup() // Laravel Toolkit: silinmiş hesapların yetim kuyruk birimi/cron'u + eski birimlerde StartLimit [Unit]'e (arka planda)
+	ApacheErisimLoguKapatOnStartup()   // Apache backend vhost'larında erişim günlüğü /dev/null (nginx zaten kaydediyor; arka planda)
 }
 
 // cacheZoneConf: panelin yönettiği TEK fastcgi_cache zone tanım dosyası.
@@ -366,6 +371,62 @@ func normalizePHP(v string) string {
 		return "8.3"
 	}
 	return v
+}
+
+// ErrPHPSurumGecersiz: PHPSurumDogrula'nın reddi (errors.Is ile ayırt edilir).
+var ErrPHPSurumGecersiz = errors.New("geçersiz php_surum")
+
+// ErrPHPKuruluDegil — sürüm desteklenir (phpMap) ama bu sunucuda kurulu değil; hiçbir
+// şeye dokunulmadan döner (çağıran 409 + açık ileti verir, 500 değil).
+var ErrPHPKuruluDegil = errors.New("PHP sürümü bu sunucuda kurulu değil")
+
+// PHPKurulu: desteklenen sürümün (phpMap) php-fpm ikilisi bu sunucuda var mı. Bilinmeyen
+// sürüm false (normalizePHP gibi 8.3'e düşmez).
+func PHPKurulu(surum string) bool {
+	ay, ok := phpMap[strings.TrimSpace(surum)]
+	if !ok || ay.FpmBin == "" {
+		return false
+	}
+	_, err := os.Stat(ay.FpmBin)
+	return err == nil
+}
+
+// phpKuruluMu: Provision'ın kurulu-sürüm kapısı (test dikişi).
+var phpKuruluMu = PHPKurulu
+
+// PHPSurumleri: panelin YÖNETTİĞİ PHP sürümleri (phpMap anahtarları), artan sırada.
+func PHPSurumleri() []string {
+	out := make([]string, 0, len(phpMap))
+	for v := range phpMap {
+		out = append(out, v)
+	}
+	sort.Strings(out) // "7.4" < "8.0" < … < "8.6" (tek haneli minor)
+	return out
+}
+
+// PHPSurumDogrula: İSTEMCİDEN gelen PHP sürümünü panelin yönettiği listeye (phpMap)
+// karşı doğrular ve kanonik (boşlukları kırpılmış) değeri döner.
+//
+// 🔴 normalizePHP geçersiz değeri SESSİZCE "8.3" havuzuna düşürür; DB'ye ise ham değer
+// yazılıyordu (havuz 8.3, kayıt "8.9" — sessiz ayrışma). İstemci girişi bu kapıdan
+// geçmeden DB'ye yazılmaz. Boş değerin anlamı (varsayılan / "zorunlu") ÇAĞIRANA aittir;
+// burada boş da geçersizdir.
+// phpSurumYazimi — açık sürüm yazımları kanonik "X.Y"ye indirgenir: "php81", "PHP 8.1",
+// "php-8.1", "8.1.2" (yama sürümü), "81" → "8.1". WHMCS ürün ayarı eskiden serbest metindi;
+// eski panel tanımadığı değeri SESSİZCE 8.3 yapıyordu ("php81" yazan 8.3 alıyordu). Anlamsız
+// değerler ("8.30", "08.3", "v8.3", "9.9") eşleşmez ya da phpMap'te yoktur → reddedilir.
+// WHMCS modülü (Yardimci::phpSurum) AYNI kuralı uygular.
+var phpSurumYazimi = regexp.MustCompile(`^(?i:php[ _-]?)?([0-9])\.?([0-9])(?:\.[0-9]+)?$`)
+
+func PHPSurumDogrula(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if m := phpSurumYazimi.FindStringSubmatch(v); m != nil {
+		v = m[1] + "." + m[2]
+	}
+	if _, ok := phpMap[v]; !ok {
+		return "", fmt.Errorf("%w — desteklenen sürümler: %s", ErrPHPSurumGecersiz, strings.Join(PHPSurumleri(), ", "))
+	}
+	return v, nil
 }
 
 // vhost template — SSL var/yok her durumu kapsar.
@@ -1280,6 +1341,12 @@ func Provision(alanAdi, phpSurum string) (*Result, error) {
 	}
 	phpSurum = normalizePHP(phpSurum)
 	alanAdi = strings.ToLower(strings.TrimSpace(alanAdi))
+	// Desteklenen ama KURULU OLMAYAN sürüm (ör. 8.6): kullanıcı/home açılmadan ÖNCE ret.
+	// Eskiden useradd + dizinler kurulup `php-fpm -t` düşünce yetim kullanıcı ve home kalıyor,
+	// yanıt 500 + iç yol oluyordu (gerçek VPS 2026-10-13).
+	if !phpKuruluMu(phpSurum) {
+		return nil, fmt.Errorf("%w: PHP %s", ErrPHPKuruluDegil, phpSurum)
+	}
 	// KRITIK BOLUM: slug tahsisi + useradd tek kilit altinda. Aksi halde iki
 	// eszamanli olusturma ayni slugu alip izolasyonu cokertir (TOCTOU).
 	provizyonKilit.Lock()
@@ -1474,6 +1541,10 @@ func Deprovision(alanAdi, sk string) error {
 		cron.Sil(sk)
 		sshaccess.AskiArtiginiSil(sk)
 		askiBirimArtiklariniSil(sk)
+		// Laravel Toolkit: kuyruk işleyicisi birimi + zamanlanmış görev. userdel'den ÖNCE: çalışan
+		// işleyici varken userdel "kullanıcı süreç kullanıyor" diye sessizce başarısız olur; kalan
+		// birim ise User= artık yok → sonsuz 217/USER yeniden başlatma döngüsüne girer.
+		LaravelArtiklariniSil(sk)
 	}
 	if userExists(sk) {
 		_, _ = exec.Command("userdel", "-r", sk).CombinedOutput()
@@ -2563,11 +2634,13 @@ var panelCSPSatirRe = regexp.MustCompile(`(?m)^([ \t]*)add_header[ \t]+Content-S
 
 // panelCSP: panelin TEK dogru CSP degeri. Hem enjekte edilen blok hem de
 // vhost'un baska yerlerindeki CSP satirlari buna hizalanir.
-// img-src'de cdn.simpleicons.org: uygulama katalogu logolari oradan geliyor.
+// DIS KAYNAK YOK: yazi tipleri (Inter, JetBrains Mono) ve marka logolari panelle
+// gelir (frontend/public/simge, @fontsource). Yeni bir dis adres eklemek yerine
+// kaynagi panele gomun — panel_dis_kaynak_test.go bunu bekler.
 const panelCSP = `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; ` +
-	`style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ` +
-	`img-src 'self' data: blob: https://cdn.simpleicons.org; ` +
-	`font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; ` +
+	`style-src 'self' 'unsafe-inline'; ` +
+	`img-src 'self' data: blob:; ` +
+	`font-src 'self' data:; connect-src 'self'; ` +
 	`frame-ancestors 'self'; base-uri 'self'; form-action 'self'`
 
 // panelServerNameRe: panel vhost'undaki server_name satirini ICERIGINDEN BAGIMSIZ
@@ -2692,7 +2765,7 @@ func HealPanelIndexNoCacheOnStartup() {
 		"        add_header X-Frame-Options \"SAMEORIGIN\" always;\n" +
 		"        add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n" +
 		"        add_header Permissions-Policy \"geolocation=(), microphone=(), camera=(), interest-cohort=()\" always;\n" +
-		"        add_header Content-Security-Policy \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://cdn.simpleicons.org; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'\" always;\n" +
+		"        add_header Content-Security-Policy \"" + panelCSP + "\" always;\n" +
 		"        add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n" +
 		"        try_files $uri $uri/ /index.html;\n" +
 		"    }"

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/bayidilim"
 	"girginospanel/internal/httpx"
 )
 
@@ -164,11 +165,27 @@ const queueUnitDizini = "/etc/systemd/system"
 func queueUnitName(id int64) string { return "girginos-laravel-queue-" + fmt.Sprint(id) }
 func queueUnitPath(id int64) string { return queueUnitDizini + "/" + queueUnitName(id) + ".service" }
 
+// Kuyruk işleyicisinin yeniden başlatma tavanı: aralık içinde patlama kadar başlatma
+// olursa systemd birimi "failed" bırakır (Restart=always artık yeniden başlatmaz).
+//
+// 🔴 StartLimit* anahtarları [Unit] bölümüne aittir. [Service]'e yazılırsa StartLimitIntervalSec
+// "Unknown key" diyerek YOK SAYILIR (StartLimitBurst eski takma adıyla uygulanır; systemd 257'de
+// ölçüldü) → etkin aralık 10 sn kalır, RestartSec=5 ile aralığa en çok 2 başlatma sığar, patlama
+// hiç aşılmaz ve çöken işleyici (Restart=always) sonsuza dek 5 sn'de bir yeniden başlar (181: tek
+// birimde 147.961 yeniden başlatma). Kurulu eski biçimli birimleri
+// açılışta provisioner.LaravelKuyrukBirimiYamala düzeltir; ikisinin uyumu
+// TestKuyrukBirimi_EskiBicimYamasiYeniSablonaEsit ile kilitli.
+const (
+	queueStartLimitAralikSn = 300
+	queueStartLimitPatlama  = 10
+)
+
 // queueUnit: sertleştirilmiş worker unit'i (tenantfpm reçetesi; YASAK direktifler yok).
 func queueUnit(id int64, sk, appDir, php, conn string, timeout, maxJobs int) string {
 	return "[Unit]\n" +
 		"Description=Laravel kuyruk işleyici (domain " + fmt.Sprint(id) + ")\n" +
-		"After=network.target mariadb.service\n\n" +
+		"After=network.target mariadb.service\n" +
+		fmt.Sprintf("StartLimitIntervalSec=%d\nStartLimitBurst=%d\n\n", queueStartLimitAralikSn, queueStartLimitPatlama) +
 		"[Service]\n" +
 		"Type=simple\n" +
 		"User=" + sk + "\nGroup=" + sk + "\n" +
@@ -177,8 +194,7 @@ func queueUnit(id int64, sk, appDir, php, conn string, timeout, maxJobs int) str
 		fmt.Sprintf("ExecStart=%s %s/artisan queue:work %s --sleep=3 --tries=3 --timeout=%d --max-jobs=%d --max-time=3600\n",
 			php, appDir, conn, timeout, maxJobs) +
 		"Restart=always\nRestartSec=5\n" +
-		"StartLimitIntervalSec=300\nStartLimitBurst=10\n" +
-		"Slice=girginos-" + sk + ".slice\n" +
+		"Slice=" + bayidilim.AdiYedekli(sk) + "\n" +
 		"NoNewPrivileges=yes\n" +
 		"ProtectSystem=strict\n" +
 		"ReadWritePaths=/home/" + sk + "\n" +
@@ -253,6 +269,9 @@ func (h *Handlers) Queue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = exec.Command("systemctl", "daemon-reload").Run()
+	// StartLimit artık [Unit]'te (etkin): sınıra takılıp "failed" kalmış birim, ayar düzeltilip yeniden
+	// kaydedilince "start request repeated too quickly" ile REDDEDİLMESİN — sayaç sıfırlanır.
+	_ = exec.Command("systemctl", "reset-failed", unit).Run()
 	if out, err := exec.Command("systemctl", "enable", "--now", unit).CombinedOutput(); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "worker başlatılamadı: "+string(out))
 		return

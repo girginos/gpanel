@@ -160,9 +160,9 @@ func TestDomainEviOnar_SymlinkHedefiDegismez(t *testing.T) {
 				t.Fatalf("deep=%v: KURBAN DEĞİŞTİ %s: önce %+v sonra %+v\n%s", deep, p, o, s, cikti)
 			}
 		}
-		// Symlink sessizce atlanmalı (uyarı), "onarılamadı" hatası değil: ikinci
+		// Symlink sessizce atlanmalı (uyarı), "could not be repaired" hatası değil: ikinci
 		// savunma katmanına (pwd -P) düşmek ERRN'i artırıp repair'i exit 1 yapar.
-		if strings.Count(cikti, "symlink — kiracı ağacında izlenmez") != 3 || strings.Contains(cikti, "onarılamadı") {
+		if strings.Count(cikti, "symlink — not followed in the tenant tree") != 3 || strings.Contains(cikti, "could not be repaired") {
 			t.Fatalf("deep=%v: symlink uyarısı beklenen gibi değil:\n%s", deep, cikti)
 		}
 	}
@@ -263,7 +263,7 @@ kiraci_dizin_onar "$ev/.ssh" 700 "root:root"; exit 0`
 	if s := oku(t, kurban); s != once {
 		t.Fatalf("YARIŞTA KURBAN DEĞİŞTİ: %+v → %+v\n%s", once, s, out)
 	}
-	if !strings.Contains(string(out), "onarılamadı") {
+	if !strings.Contains(string(out), "could not be repaired") {
 		t.Fatalf("yarış reddedilmedi:\n%s", out)
 	}
 }

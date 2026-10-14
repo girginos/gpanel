@@ -543,15 +543,15 @@ function formatUptime(sn: number): string {
   return `${s}s`
 }
 
-/* ---------- Servis brand logoları — SimpleIcons CDN + kernel için tux ---------- */
+/* ---------- Servis brand logoları — panelin içinde (public/simge, Simple Icons CC0) + kernel için dişli ---------- */
 
 function ServisLogo({ kod, boy = 20 }: { kod: string; boy?: number }) {
   const boyStil = { width: boy, height: boy } as React.CSSProperties
-  // Simple Icons: brand rengiyle otomatik render (`/mariadb` → orijinal renk)
-  if (kod === 'mariadb') return <img src="https://cdn.simpleicons.org/mariadb/003545" alt="MariaDB" style={boyStil} className="dark:invert-[0.85]" />
-  if (kod === 'nginx')   return <img src="https://cdn.simpleicons.org/nginx/009639"   alt="Nginx"   style={boyStil} />
-  if (kod === 'apache')  return <img src="https://cdn.simpleicons.org/apache/D22128"  alt="Apache"  style={boyStil} />
-  if (kod === 'phpfpm')  return <img src="https://cdn.simpleicons.org/php/777BB4"     alt="PHP"     style={boyStil} />
+  // Logolar panelle gelir (dış CDN yok — CSP img-src 'self'); renkler SVG'nin içinde.
+  if (kod === 'mariadb') return <img src="/simge/mariadb.svg" alt="MariaDB" style={boyStil} className="dark:invert-[0.85]" />
+  if (kod === 'nginx')   return <img src="/simge/nginx.svg"   alt="Nginx"   style={boyStil} />
+  if (kod === 'apache')  return <img src="/simge/apache.svg"  alt="Apache"  style={boyStil} />
+  if (kod === 'phpfpm')  return <img src="/simge/php.svg"     alt="PHP"     style={boyStil} />
   if (kod === 'sysctl')  return <IcCog width={boy} height={boy} className="text-slate-600 dark:text-slate-300" />
   return null
 }

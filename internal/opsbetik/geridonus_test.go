@@ -165,7 +165,7 @@ func TestGeriDonusKapisi(t *testing.T) {
 	// G1: DB 0120'yi geçti, paket onu içermiyor → RED (die), hiçbir yan etki yok.
 	o.yaz("defter", defterD1)
 	out, kod := o.kos(`geri_donus_kapisi "` + eski + `"; echo GECTI`)
-	if kod != 7 || !strings.Contains(out, "GERİ DÖNÜŞ REDDEDİLDİ") || !strings.Contains(out, d1) || strings.Contains(out, "GECTI") {
+	if kod != 7 || !strings.Contains(out, "DOWNGRADE REFUSED") || !strings.Contains(out, d1) || strings.Contains(out, "GECTI") {
 		t.Errorf("eski paket reddedilmeliydi: kod=%d %s", kod, out)
 	}
 	// G2: güncel/yeni paket → geçer.
@@ -179,7 +179,7 @@ func TestGeriDonusKapisi(t *testing.T) {
 	}
 	// G4: bilerek zorlama → geçer ama 🔴 uyarı basar.
 	o.yaz("defter", defterD1)
-	if out, kod := o.kos(`geri_donus_kapisi "`+eski+`"; echo GECTI`, "GOSP_GERI_DONUS_ZORLA=1"); kod != 0 || !strings.Contains(out, "ZORLANDI") {
+	if out, kod := o.kos(`geri_donus_kapisi "`+eski+`"; echo GECTI`, "GOSP_GERI_DONUS_ZORLA=1"); kod != 0 || !strings.Contains(out, "FORCED") {
 		t.Errorf("zorlama: kod=%d %s", kod, out)
 	}
 	// G5: paket göç listesi taşımıyor (bilinmiyor) + DB 0120'yi geçti → RED (fail-closed).
@@ -194,7 +194,7 @@ func TestGeriDonusKapisi(t *testing.T) {
 		t.Errorf("dizin biçimli paket: kod=%d %s", kod, out)
 	}
 	// G7: defter okunamıyor (mysql kapalı / defter yok) → uyarı + geç (DB yedeği zaten fail-closed).
-	if out, kod := o.kos(`geri_donus_kapisi "`+eski+`"; echo GECTI`, "SAHTE_DEFTER_HATA=1"); kod != 0 || !strings.Contains(out, "W: geri dönüş kapısı") {
+	if out, kod := o.kos(`geri_donus_kapisi "`+eski+`"; echo GECTI`, "SAHTE_DEFTER_HATA=1"); kod != 0 || !strings.Contains(out, "W: downgrade guard") {
 		t.Errorf("defter hatası: kod=%d %s", kod, out)
 	}
 	// Ad yalnız TAM satır eşleşmesiyle sayılır (önek/sonek benzerleri değil).

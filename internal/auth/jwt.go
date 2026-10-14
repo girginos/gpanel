@@ -15,6 +15,10 @@ type Claims struct {
 	// Kapi: token'in alindigi panel kapisi (kapi.Admin/Bayi/Eski; "" = kapi modu
 	// kapaliyken alinmis, bagsiz). RequireAuth baska kapida kullanimi reddeder.
 	Kapi string `json:"kpi,omitempty"`
+	// SSO: bayi oturumu API anahtarıyla (otomasyon tek tık girişi, internal/bayisso)
+	// açıldı. Bu oturumda anahtar yönetimi ve 2FA değişikliği yoktur
+	// (middleware.YalnizOturum): anahtar, kalıcı kimlik bilgisi basamaz.
+	SSO bool `json:"sso,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -53,6 +57,16 @@ func IssueReseller(secret []byte, lifetimeSec int, uid int64, username string, r
 
 // IssueResellerAt: bkz. IssueAt — bayi tokeni icin ayni davranis.
 func IssueResellerAt(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64, enErkenIat int64, kapiAdi string) (string, error) {
+	return bayiTokeni(secret, lifetimeSec, uid, username, resellerID, enErkenIat, kapiAdi, false)
+}
+
+// IssueResellerSSOAt: bkz. IssueResellerAt — API anahtarıyla açılan (SSO damgalı) bayi
+// oturumu (internal/bayisso).
+func IssueResellerSSOAt(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64, enErkenIat int64, kapiAdi string) (string, error) {
+	return bayiTokeni(secret, lifetimeSec, uid, username, resellerID, enErkenIat, kapiAdi, true)
+}
+
+func bayiTokeni(secret []byte, lifetimeSec int, uid int64, username string, resellerID int64, enErkenIat int64, kapiAdi string, sso bool) (string, error) {
 	now := time.Now()
 	if enErkenIat > now.Unix() {
 		now = time.Unix(enErkenIat, 0)
@@ -63,6 +77,7 @@ func IssueResellerAt(secret []byte, lifetimeSec int, uid int64, username string,
 		Role:       "reseller",
 		ResellerID: resellerID,
 		Kapi:       kapiAdi,
+		SSO:        sso,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(lifetimeSec) * time.Second)),

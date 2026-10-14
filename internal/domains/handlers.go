@@ -221,6 +221,10 @@ type createReq struct {
 	// aynı sahip + aynı sistem kullanıcısıyla silinmiş bir hesabın yetim yedekleri bu hostinge bağlanır
 	// (backups.YetimleriDevral). Bu uca yalnız yönetici/bayi/API anahtarı erişir; müşteri akışı yedek devralmaz.
 	YedekleriDevral bool `json:"yedekleri_devral,omitempty"`
+	// BayiID: yalnız KÖK — hostingi bu bayi ADINA aç (WHMCS bayi ürünü: bayinin kendi alan adı).
+	// Hosting bayiye ait olur; bayinin kotası, plan kapsamı ve ad-alanı kuralları bayi kendisi
+	// açıyormuş gibi uygulanır.
+	BayiID *int64 `json:"bayi_id,omitempty"`
 }
 
 type createResp struct {
@@ -350,6 +354,8 @@ const kopukSure = 5 * time.Minute
 // yönetici ayrıntıyı aynen görür, öteki roller genel mesaj (ayrıntı günlükte).
 var (
 	phpSurumUygula  = provisioner.SetPHPVersion
+	tenantFPMAktif  = provisioner.TenantFPMActive // per-tenant php-fpm kurulu mu
+	tenantFPMUygula = provisioner.EnableTenantFPM // per-tenant birimi (yeni sürümle) yeniden kurar
 	vhostUygulaAlan = provisioner.ApplyVhostForDomain
 	vhostYenidenCiz = provisioner.RerenderVhost
 	webKokDogrula   = provisioner.WebRootMutlak
@@ -382,6 +388,48 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.AlanAdi = strings.ToLower(strings.TrimSpace(req.AlanAdi))
+	// Bayi ADINA hosting (yalnız kök): bundan sonra her kural rid = bayi ile işler (varsayılan plan,
+	// plan kapsamı, kota + askı, ad alanı, sahiplik). Bayi oturumu/anahtarı bu alanı kullanamaz:
+	// kendi kapsamı zaten kendisidir, başka bayi adına açmak IDOR olurdu.
+	if req.BayiID != nil {
+		if rid > 0 || middleware.RolFrom(r) != "admin" {
+			httpx.WriteError(w, http.StatusForbidden, "bayi_id yalnız kök kullanıcıyla kullanılabilir")
+			return
+		}
+		// API anahtarında genel hesap izni yetmez: bayinin kotasını/kapsamını kullanan işlem bayi
+		// (yazma) izni de ister (WHMCS bayi ürünü anahtarında zaten vardır).
+		if k := middleware.AnahtarFrom(r); k != nil && !izinVar(k.Izinler, "bayi:yaz") {
+			httpx.WriteError(w, http.StatusForbidden, "bayi_id için anahtarda bayi (yazma) izni de gerekir")
+			return
+		}
+		var bir int
+		err := sql.ErrNoRows
+		if *req.BayiID > 0 {
+			err = h.DB.QueryRowContext(r.Context(), `SELECT 1 FROM users WHERE id=? AND role='reseller'`, *req.BayiID).Scan(&bir)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			httpx.WriteError(w, http.StatusBadRequest, "bayi bulunamadı")
+			return
+		}
+		if err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, "bayi okunamadı")
+			return
+		}
+		rid = *req.BayiID
+	}
+	// 🔴 php_surum: İSTEMCİNİN yazdığı değer panelin yönettiği listede olmalı. Eskiden
+	// geçersiz değer sağlamada sessizce 8.3 havuzuna düşüyor, domains.php_surum'a ise
+	// ham değer yazılıyordu (havuz 8.3, kayıt "8.9"). Boş değer: aşağıdaki varsayılan
+	// (plan / 8.3) davranışı AYNEN korunur. Yan etkisiz ret: plan, kilit ve DB'den önce.
+	req.PHPSurum = strings.TrimSpace(req.PHPSurum)
+	if req.PHPSurum != "" {
+		s, verr := provisioner.PHPSurumDogrula(req.PHPSurum)
+		if verr != nil {
+			httpx.WriteError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		req.PHPSurum = s
+	}
 	// Plan seçilmediyse varsayılan planı ata — kaynak limitleri HER domaine uygulanır
 	// (plan-driven default). Varsayılan yoksa plansız devam eder (limit uygulanmaz).
 	if req.PlanID == nil {
@@ -392,6 +440,24 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		if e := h.DB.QueryRowContext(r.Context(),
 			`SELECT id FROM service_plans WHERE varsayilan=1 AND domain_id IS NULL AND reseller_id IN (?,0) ORDER BY reseller_id DESC, id LIMIT 1`, rid).Scan(&defID); e == nil && defID > 0 {
 			req.PlanID = &defID
+		}
+	}
+	// Yönetici: açıkça verilen plan VAR olmalı ve bir hostinge ÖZEL plan olmamalı (bayi yolu
+	// plans.BaglanabilirMi ile aynı kuralı aşağıda uygular). Eskiden kök anahtarla plan_id=99999
+	// kotasız hosting açıyor, DB'ye sarkık plan_id yazıyordu (gerçek VPS 2026-10-13).
+	if rid <= 0 && req.PlanID != nil {
+		var planDomain sql.NullInt64
+		if err := h.DB.QueryRowContext(r.Context(), `SELECT domain_id FROM service_plans WHERE id=?`, *req.PlanID).Scan(&planDomain); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				httpx.WriteError(w, http.StatusInternalServerError, "plan okunamadı")
+				return
+			}
+			httpx.WriteError(w, http.StatusBadRequest, "plan bulunamadı")
+			return
+		}
+		if planDomain.Valid {
+			httpx.WriteError(w, http.StatusBadRequest, plans.ErrOzelPlanBaskaHosting.Error())
+			return
 		}
 	}
 	// Reseller kapsam denetimi: kota + plan sahipligi + musteri atamasi yasak.
@@ -423,7 +489,12 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		if req.PlanID != nil {
 			var pv string
 			if e := h.DB.QueryRowContext(r.Context(), `SELECT php_surum FROM service_plans WHERE id=?`, *req.PlanID).Scan(&pv); e == nil && strings.TrimSpace(pv) != "" {
-				req.PHPSurum = pv
+				// Planın değeri de listeden geçmeli: bozuk plan değeri hostinge ham yazılmaz (8.3 kalır).
+				if s, verr := provisioner.PHPSurumDogrula(pv); verr == nil {
+					req.PHPSurum = s
+				} else {
+					log.Printf("domains.Create: planın php_surum değeri geçersiz (plan=%d) — 8.3 kullanıldı", *req.PlanID)
+				}
 			}
 		}
 	}
@@ -457,6 +528,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	defer iptal()
 
 	pr, err := saglama(req.AlanAdi, req.PHPSurum)
+	if errors.Is(err, provisioner.ErrPHPKuruluDegil) {
+		// Sağlama hiçbir şeye dokunmadan reddetti (PUT /domains/{id}/php ile aynı yanıt).
+		httpx.WriteError(w, http.StatusConflict, "PHP "+req.PHPSurum+" bu sunucuda kurulu değil")
+		return
+	}
 	if err != nil {
 		log.Printf("provision %q başarısız: %v", req.AlanAdi, err)
 		// Sağlama SUNUCU GENELİ `nginx -t` / `php-fpm -t` / reload çalıştırır;
@@ -530,13 +606,26 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	//
 	// Arka plan + kendi 5dk context'i ZORUNLU: r.Context() HTTP istegi bitince iptal olur,
 	// cutover yarida kalirdi. SetPlan ile ayni desen.
-	go func(did int64) {
+	// Seam istek goroutine'inde BİR KEZ okunur: arka plan goroutine'i paket değişkenini
+	// okusaydı, testin Cleanup'ta geri yüklediği değişkenle yarışırdı (-race).
+	kaynakUygula := olusturKaynakUygula
+	go func(did int64, sk string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		if err := olusturKaynakUygula(ctx, h.DB, did); err != nil {
+		// Silmeyle seri (HostingYik aynı hesap kilidini tutar): hosting oluşturulur oluşturulmaz
+		// silinirse bu uygulama silinen hesabın vhost'unu/birimini yeniden yazıp yetim
+		// bırakıyordu (VM doğrulaması 2026-10-13). Silindiyse uygulanacak hesap yok.
+		hk := kilit.Hesap(sk)
+		hk.Lock()
+		defer hk.Unlock()
+		var vardir int
+		if err := h.DB.QueryRowContext(ctx, `SELECT 1 FROM domains WHERE id=?`, did).Scan(&vardir); errors.Is(err, sql.ErrNoRows) {
+			return
+		}
+		if err := kaynakUygula(ctx, h.DB, did); err != nil {
 			log.Printf("kaynaklimit apply (create) domain=%d: %v", did, err)
 		}
-	}(id)
+	}(id, pr.SistemKullanici)
 
 	// 3) FTP hesap (random parola)
 	ftpPass := hesaplar.RandomParola(20)
@@ -750,8 +839,16 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
 		return
 	}
+	req.PHPSurum = strings.TrimSpace(req.PHPSurum)
 	if req.PHPSurum == "" {
 		httpx.WriteError(w, http.StatusBadRequest, "php_surum zorunlu")
+		return
+	}
+	// 🔴 Yan etkiden ÖNCE doğrula: desteklenmeyen değer sessizce 8.3 havuzuna düşüp DB'ye
+	// ham yazılıyordu. Boş değer yukarıda "zorunlu" (varsayılan YOK).
+	surum, verr := provisioner.PHPSurumDogrula(req.PHPSurum)
+	if verr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, verr.Error())
 		return
 	}
 	var alanAdi, sk, backend, certPath, keyPath, sslKaynak string
@@ -771,30 +868,64 @@ func (h *Handlers) SetPHP(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusForbidden, "demo aboneliğin PHP sürümü değiştirilemez")
 		return
 	}
+	// Denetim: önceki sürüm (best-effort; okunamazsa detayda yer almaz).
+	var eskiSurum string
+	_ = h.DB.QueryRowContext(r.Context(), `SELECT COALESCE(php_surum,'') FROM domains WHERE id=?`, id).Scan(&eskiSurum)
+	detay := "yeni=" + surum
+	if es := strings.TrimSpace(eskiSurum); es != "" {
+		detay = "eski=" + es + " " + detay
+	}
+	uid, kul := middleware.Aktor(r)
+
 	// Havuz/vhost değişince DB de yazılmalı — istemci kopsa da (kopuk bağlam).
 	kctx, iptal := httpx.KopukBaglam(r, kopukSure)
 	defer iptal()
-	socket, err := phpSurumUygula(alanAdi, sk, req.PHPSurum, certPath, keyPath, sslKaynak, backend)
+	var socket string
+	if tenantFPMAktif(sk) {
+		// 🔴 Per-tenant FPM (Seçenek A) kurulu hesapta sürüm PER-TENANT BİRİMİNDEDİR:
+		// SetPHPVersion yalnız paylaşılan havuzu yazar (sahipsiz paylaşılan pool +
+		// DB "yeni sürüm" derken birim ESKİ php-fpm'i çalıştırmaya devam ederdi).
+		// UI yolu (PUT /php-settings) ile aynı: birim yeni sürümle yeniden kurulur,
+		// vhost per-tenant sokete render edilir.
+		socket, err = tenantFPMUygula(h.DB, id, sk, surum)
+	} else {
+		socket, err = phpSurumUygula(alanAdi, sk, surum, certPath, keyPath, sslKaynak, backend)
+	}
 	if errors.Is(err, hesaplar.ErrHesapAskida) {
 		// Hiçbir şeye dokunulmadı (havuz askıda başlatılmaz).
 		httpx.WriteError(w, http.StatusConflict, "hesap askıda — PHP sürümü askıdan alındıktan sonra değiştirilebilir")
 		return
 	}
+	if errors.Is(err, provisioner.ErrPHPKuruluDegil) {
+		// Birim kurulmadan önce denetlenir: hiçbir şeye dokunulmadı.
+		httpx.WriteError(w, http.StatusConflict, "PHP "+surum+" bu sunucuda kurulu değil")
+		return
+	}
 	if err != nil {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "hosting.php_surum", alanAdi, detay, id, false)
 		httpx.WriteError(w, http.StatusInternalServerError, "değişim başarısız: "+nginxset.SunucuHatasi(r, "domains.php", id, err))
 		return
 	}
 	if _, err := h.DB.ExecContext(kctx,
-		`UPDATE domains SET php_surum=? WHERE id=?`, req.PHPSurum, id); err != nil {
+		`UPDATE domains SET php_surum=? WHERE id=?`, surum, id); err != nil {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "hosting.php_surum", alanAdi, detay, id, false)
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
+	}
+	// Per-tenant FPM'de alt alanlar hesabın TEK havuzunu kullanır: kayıtları gerçekte çalışan
+	// sürüme eşitle (arayüz alt alanda eski sürümü göstermesin).
+	if tenantFPMAktif(sk) {
+		if _, err := h.DB.ExecContext(kctx, `UPDATE subdomanlar SET php_surum=? WHERE domain_id=?`, surum, id); err != nil {
+			log.Printf("php sürümü sonrası alt alan kayıtları (domain=%d): %v", id, err)
+		}
 	}
 	// Ek alan adları hesabın PHP havuzunu kullanır: sürüm/soket değişti → vhost'ları yeniden kur.
 	if err := subdomain.EkAlanVhostlariniYenidenKur(kctx, h.DB, id); err != nil {
 		log.Printf("php sürümü sonrası ek alan vhost'ları (domain=%d): %v", id, err)
 	}
+	httpx.DenetimDomain(h.DB, r, uid, kul, "hosting.php_surum", alanAdi, detay, id, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "id": id, "php_surum": req.PHPSurum, "socket": socket,
+		"ok": true, "id": id, "php_surum": surum, "socket": socket,
 	})
 }
 
@@ -1503,4 +1634,14 @@ func silmeOnayi(r *http.Request, alanAdi string) (int, string) {
 		return http.StatusBadRequest, "onay metni alan adıyla eşleşmiyor"
 	}
 	return 0, ""
+}
+
+// izinVar: anahtar izin listesinde birebir grup:düzey var mı.
+func izinVar(izinler []string, aranan string) bool {
+	for _, iz := range izinler {
+		if iz == aranan {
+			return true
+		}
+	}
+	return false
 }

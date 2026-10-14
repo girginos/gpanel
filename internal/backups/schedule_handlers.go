@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 )
 
 // ScheduleYanit: GET backup-schedule. Plan alanları + görünümün ihtiyaç duyduğu
@@ -79,7 +81,7 @@ func (h *Handlers) SetSchedule(w http.ResponseWriter, r *http.Request) {
 			"Otomatik yedek planı yalnız sunucu yöneticisi tarafından yönetilir. Hesabınız sistem tarafından yedeklenir; ek yedek için 'Şimdi Yedekle'yi kullanın.")
 		return
 	}
-	id, _, _, demo, err := h.lookupDomain(r)
+	id, alanAdi, _, demo, err := h.lookupDomain(r)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "domain bulunamadı")
 		return
@@ -116,10 +118,14 @@ func (h *Handlers) SetSchedule(w http.ResponseWriter, r *http.Request) {
 		// 0114 koşmamış: plan yine yazılır (kaynak işaretsiz kalır, semaDogrula uyarır).
 		q = `UPDATE domains SET backup_freq=?, backup_hour=?, backup_retention=? WHERE id=?`
 	}
+	uid, kul := middleware.Aktor(r)
+	detay := fmt.Sprintf("siklik=%s saat=%d saklama=%d", s.Freq, s.Hour, s.Retention)
 	if _, err := h.DB.ExecContext(r.Context(), q, s.Freq, s.Hour, s.Retention, id); err != nil {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "yedek.zamanlama", alanAdi, detay, id, false)
 		httpx.WriteError(w, http.StatusInternalServerError, "DB güncelleme: "+err.Error())
 		return
 	}
+	httpx.DenetimDomain(h.DB, r, uid, kul, "yedek.zamanlama", alanAdi, detay, id, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "schedule": s})
 }
 

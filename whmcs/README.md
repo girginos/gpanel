@@ -50,11 +50,11 @@ Anahtara IP kilidi tanımlıysa WHMCS sunucusunun çıkış IP'sini ekleyin.
 |---|---|
 | Ürün tipi | `Hosting hesabı` ya da `Bayi hesabı` |
 | Panel planı | Plan ID'si ya da **tam adı** (sunucu seçiliyse listeden de gelir). Boş = panelin varsayılan planı. Bulunamazsa hesap AÇILMAZ, net hata verilir |
-| PHP sürümü | Örn. `8.3`; boş = plan/panel varsayılanı |
+| PHP sürümü | Açılır liste (7.4–8.5); "Plandan / panelden" = plan/panel varsayılanı. 1.0.4 öncesi serbest metin değerleri (`php81`, `PHP 8.1`, `8.1.2`) doğru sürüme çevrilir |
 | Bayi paketi | Yalnız bayi ürünü; ID ya da ad |
 | Varsayılan veritabanı aç | Hesapla birlikte MariaDB oluşturur |
 | TLS doğrulamasını KAPAT | **Tehlikeli**: sertifika doğrulanmaz, araya girme (MITM) ile API anahtarı çalınabilir. Önce panele geçerli sertifika (Let's Encrypt) kurun. Varsayılan KAPALI (doğrula) |
-| Panel adresi | `https://…:PORT/` müşteri/bayi kapısı; SSO yokken düz bağlantı + bayi ürününde giriş adresi |
+| Panel adresi | Boş bırakılabilir: gPanel 0.3.0-20261013+ adresi kendisi verir — hosting ürününde müşteri kapısı, bayi ürününde bayi kapısı. Başka ad/port için `https://…:PORT/`. Eski panelde bayi ürününde bayi kapısını girin |
 | Mevcut hesabı bağla | Aşağıya bakın (güvenlik) |
 
 Hizmetin **alan adı** panel hesabının alan adıdır; WHMCS "Kullanıcı adı" alanı oluşturma sonrası

@@ -7,6 +7,7 @@ DELETE /api/v1/plans/{id}  plan:yaz
 DELETE /api/v1/reseller-plans/{id}  bayi:yaz
 DELETE /api/v1/resellers/{id}  bayi:yaz
 GET /api/v1/api-anahtari/ben  (her zaman)
+GET /api/v1/bayi-kaynak/{id}  bayi:oku
 GET /api/v1/bildirimler  bildirim:oku
 GET /api/v1/denetim  denetim:oku
 GET /api/v1/domains  hesap:oku
@@ -25,6 +26,7 @@ GET /api/v1/domains/{id}/ssl  ssl:oku
 GET /api/v1/domains/{id}/ssl/ilerleme  ssl:oku
 GET /api/v1/domains/{id}/ssl/kapsam  ssl:oku
 GET /api/v1/kapi/adres  (her zaman)
+GET /api/v1/kapi/portlar  (her zaman)
 GET /api/v1/plans  plan:oku
 GET /api/v1/plans/{id}  plan:oku
 GET /api/v1/plans/{id}/domains  plan:oku
@@ -53,6 +55,7 @@ POST /api/v1/domains/{id}/sso  sso:yaz
 POST /api/v1/plans  plan:yaz
 POST /api/v1/reseller-plans  bayi:yaz
 POST /api/v1/resellers  bayi:yaz
+POST /api/v1/resellers/{id}/sso  sso:yaz
 PUT /api/v1/domains/{id}/backup-schedule  yedek:yaz
 PUT /api/v1/domains/{id}/databases/users/{kullanici}/password  db.parola:yaz
 PUT /api/v1/domains/{id}/dns/soa  dns:yaz
@@ -64,3 +67,4 @@ PUT /api/v1/domains/{id}/plan  hesap:yaz
 PUT /api/v1/plans/{id}  plan:yaz
 PUT /api/v1/reseller-plans/{id}  bayi:yaz
 PUT /api/v1/resellers/{id}  bayi:yaz
+PUT /api/v1/resellers/{id}/password  bayi.parola:yaz

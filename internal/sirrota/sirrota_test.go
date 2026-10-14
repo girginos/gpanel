@@ -435,7 +435,7 @@ func TestYenile_YabanciSahipliEnvReddedilir(t *testing.T) {
 	if err := os.Chown(d.r.EnvYolu, 65534, 65534); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.r.Yenile(context.Background(), Hepsi); err == nil || !strings.Contains(err.Error(), "sahibi") {
+	if _, err := d.r.Yenile(context.Background(), Hepsi); err == nil || !strings.Contains(err.Error(), "owned by") {
 		t.Fatalf("yabancı sahipli env reddedilmedi: %v", err)
 	}
 	if oku(t, d.r.EnvYolu) != eskiEnv() || d.db.parola["localhost"] != eskiPw || d.redis.parola != eskiRedis {

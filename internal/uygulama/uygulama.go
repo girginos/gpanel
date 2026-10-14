@@ -55,14 +55,15 @@ type Tarif struct {
 	NativeApp bool
 }
 
-// Simple Icons CDN — https://simpleicons.org/ — brand SVG'leri
-const simpleIcon = "https://cdn.simpleicons.org/"
+// Marka logoları panelin İÇİNDE: frontend/public/simge/<ad>.svg (Simple Icons, CC0 1.0; markalar
+// sahiplerine aittir). Panel dışarıdan hiçbir kaynak yüklemez — CSP img-src yalnız 'self'.
+const simgeYolu = "/simge/"
 
 var Katalog = []Tarif{
 	// -------- CMS'ler (PHP) --------
 	{
 		Kod: "joomla", Ad: "Joomla!", Ikon: "🟠",
-		LogoURL:  simpleIcon + "joomla/F44321",
+		LogoURL:  simgeYolu + "joomla.svg",
 		Aciklama: "Esnek CMS — çok dilli, çok kullanıcılı siteler için ideal.",
 		Kategori: "cms", Surum: "5.2.3",
 		IndirmeURL:  "https://downloads.joomla.org/cms/joomla5/5-2-3/Joomla_5-2-3-Stable-Full_Package.tar.gz",
@@ -71,7 +72,7 @@ var Katalog = []Tarif{
 	},
 	{
 		Kod: "drupal", Ad: "Drupal", Ikon: "💧",
-		LogoURL:  simpleIcon + "drupal/0678BE",
+		LogoURL:  simgeYolu + "drupal.svg",
 		Aciklama: "Kurumsal seviye CMS — büyük siteler, çoklu içerik türü.",
 		Kategori: "cms", Surum: "10.3.8",
 		IndirmeURL:  "https://ftp.drupal.org/files/projects/drupal-10.3.8.tar.gz",
@@ -80,7 +81,7 @@ var Katalog = []Tarif{
 	},
 	{
 		Kod: "grav", Ad: "Grav CMS", Ikon: "⚡",
-		LogoURL:  simpleIcon + "grav/221E1F",
+		LogoURL:  simgeYolu + "grav.svg",
 		Aciklama: "Flat-file (DB'siz) modern CMS — hızlı, hafif, geliştirici dostu.",
 		Kategori: "cms", Surum: "2.0.19",
 		// 🔴 getgrav.org/download/core/... adresi 404 veriyor (site tarafi degisti).
@@ -91,7 +92,7 @@ var Katalog = []Tarif{
 	},
 	{
 		Kod: "prestashop", Ad: "PrestaShop", Ikon: "🛒",
-		LogoURL:  simpleIcon + "prestashop/DF0067",
+		LogoURL:  simgeYolu + "prestashop.svg",
 		Aciklama: "E-ticaret platformu — 300K+ mağaza kullanır. Türkçe destekli.",
 		Kategori: "cms", Surum: "8.2.0",
 		IndirmeURL:  "https://github.com/PrestaShop/PrestaShop/releases/download/8.2.0/prestashop_8.2.0.zip",
@@ -100,7 +101,7 @@ var Katalog = []Tarif{
 	},
 	{
 		Kod: "mediawiki", Ad: "MediaWiki", Ikon: "📚",
-		LogoURL:  simpleIcon + "wikipedia/000000",
+		LogoURL:  simgeYolu + "wikipedia.svg",
 		Aciklama: "Wikipedia'nın motoru — kurumsal wiki, döküman platformu.",
 		Kategori: "cms", Surum: "1.42.3",
 		IndirmeURL:  "https://releases.wikimedia.org/mediawiki/1.42/mediawiki-1.42.3.tar.gz",
@@ -110,7 +111,7 @@ var Katalog = []Tarif{
 	// -------- Bulut / Depolama --------
 	{
 		Kod: "nextcloud", Ad: "Nextcloud", Ikon: "☁️",
-		LogoURL:  simpleIcon + "nextcloud/0082C9",
+		LogoURL:  simgeYolu + "nextcloud.svg",
 		Aciklama: "Self-hosted bulut depolama + ofis — Google Drive alternatifi.",
 		Kategori: "bulut", Surum: "30.0.2",
 		IndirmeURL:  "https://download.nextcloud.com/server/releases/nextcloud-30.0.2.tar.bz2",
@@ -119,7 +120,7 @@ var Katalog = []Tarif{
 	},
 	{
 		Kod: "matomo", Ad: "Matomo Analytics", Ikon: "📊",
-		LogoURL:  simpleIcon + "matomo/3152A0",
+		LogoURL:  simgeYolu + "matomo.svg",
 		Aciklama: "Google Analytics alternatifi — kendi verilerin, GDPR uyumlu.",
 		Kategori: "analitik", Surum: "5.2.1",
 		IndirmeURL:  "https://builds.matomo.org/matomo-5.2.1.tar.gz",
@@ -129,21 +130,21 @@ var Katalog = []Tarif{
 	// -------- Native app'ler (sunucu-level, "yakında") --------
 	{
 		Kod: "teamspeak3", Ad: "TeamSpeak 3", Ikon: "🎧",
-		LogoURL:  simpleIcon + "teamspeak/2580C3",
+		LogoURL:  simgeYolu + "teamspeak.svg",
 		Aciklama: "Sesli iletişim sunucusu — 32 slot ücretsiz. UDP 9987 voice.",
 		Kategori: "iletisim", Surum: "3.13.7",
 		NativeApp: true,
 	},
 	{
 		Kod: "wireguard", Ad: "WireGuard VPN", Ikon: "🔒",
-		LogoURL:  simpleIcon + "wireguard/88171A",
+		LogoURL:  simgeYolu + "wireguard.svg",
 		Aciklama: "Hızlı, modern VPN — kernel modülü + wg-quick.",
 		Kategori: "guvenlik", Surum: "latest",
 		NativeApp: true,
 	},
 	{
 		Kod: "gitea", Ad: "Gitea", Ikon: "🌿",
-		LogoURL:  simpleIcon + "gitea/609926",
+		LogoURL:  simgeYolu + "gitea.svg",
 		Aciklama: "Kendi git deponuz — GitHub benzeri, hafif.",
 		Kategori: "gelistirme", Surum: "1.22.6",
 		NativeApp: true,

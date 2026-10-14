@@ -275,7 +275,11 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 	// alakasiz hatalar donduruyordu. Artik istek hemen doner; ilerleme
 	// GET /domains/{id}/backups/ilerleme ucundan izlenir.
 	IlerlemeBaslat(id, "yedek", "sırada", oncekiYedekBoyutu(h.DB, id))
-	go h.yedekGorevi(id, alanAdi, sk)
+	yedekGoreviBaslat(h, id, alanAdi, sk)
+	// Denetim: istek KABUL edildi, yedek başladı/sıraya alındı (iş asenkron; sonucu
+	// ilerleme ucu + başarısızlıkta kritik bildirim bildirir). Detayda yol/ham çıktı YOK.
+	uid, kul := middleware.Aktor(r)
+	httpx.DenetimDomain(h.DB, r, uid, kul, "yedek.baslat", alanAdi, "tip=manuel", id, true)
 	mesaj := "Yedekleme başladı — ilerlemeyi bu sayfadan izleyebilirsiniz."
 	if sira > ManuelEszamanliSinir || manuelKuyrugu.Calisan() >= ManuelEszamanliSinir {
 		mesaj = "Yedekleme sıraya alındı — sırası gelince düşük öncelikle başlayacak."
@@ -287,6 +291,10 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		"mesaj":   mesaj,
 	})
 }
+
+// yedekGoreviBaslat: Create'in arka plan işini başlatır (dikiş: testler gerçek arşive —
+// tar/mysqldump/BackupRoot — dokunmayan sahteyle değiştirir).
+var yedekGoreviBaslat = func(h *Handlers, id int64, alanAdi, sk string) { go h.yedekGorevi(id, alanAdi, sk) }
 
 // yedekGorevi: Create'in arka plan govdesi. Kendi context'i vardir (istek
 // context'i cevapla birlikte iptal olur).
@@ -424,7 +432,9 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, "yedek kaydı silinemedi: "+e.Error())
 			return
 		}
-		httpx.Denetim(h.DB, r, uid, kullanici, "yedek.sil.uzak-yoksayildi", dosya,
+		// Kapsam domainin SAHİBİdir (DenetimDomain). Eskiden Denetim'e domain KİMLİĞİ
+		// verilip kayıt yanlış kiracıya düşüyordu.
+		httpx.DenetimDomain(h.DB, r, uid, kullanici, "yedek.sil.uzak-yoksayildi", dosya,
 			"uzak kopya BIRAKILDI (kullanıcı onayı)", id, true)
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"ok":    true,
@@ -450,7 +460,7 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("yedek sil: lftp kurulu değil — %s uzak kopyası SİLİNEMEDİ (domain=%d)", dosya, id)
-		httpx.Denetim(h.DB, r, uid, kullanici, "yedek.sil.lftp-yok", dosya, "uzak kopya kaldı", id, true)
+		httpx.DenetimDomain(h.DB, r, uid, kullanici, "yedek.sil.lftp-yok", dosya, "uzak kopya kaldı", id, true)
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"ok":    true,
 			"uyari": "Yedek kaydı silindi, ancak sunucuda lftp kurulu olmadığı için uzak depodaki (FTP/SFTP) kopya SİLİNEMEDİ. Sunucuya lftp kurulmalı.",
@@ -471,6 +481,8 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 			ayrinti += " " + e.Error()
 		}
 		log.Printf("yedek sil: %s uzak kopyası silinemedi (domain=%d): %v", dosya, id, e)
+		// Denetim: silme DENENDİ ve başarısız (kayıt korundu). Ham lftp çıktısı (host/dizin) detaya GİRMEZ.
+		httpx.DenetimDomain(h.DB, r, uid, kullanici, "yedek.sil", dosya, "uzak kopya silinemedi, yedek korundu", id, false)
 		httpx.WriteJSON(w, http.StatusConflict, map[string]any{
 			"ok":           false,
 			"hata":         ayrinti,
@@ -479,12 +491,14 @@ func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if yerelHata != "" {
+		httpx.DenetimDomain(h.DB, r, uid, kullanici, "yedek.sil", dosya, "yerel dosya silinemedi", id, true)
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"ok":    true,
 			"uyari": "Yedek kaydı ve uzak kopya silindi, ancak sunucudaki yerel dosya silinemedi: " + yerelHata,
 		})
 		return
 	}
+	httpx.DenetimDomain(h.DB, r, uid, kullanici, "yedek.sil", dosya, "", id, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

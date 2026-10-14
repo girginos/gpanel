@@ -139,7 +139,7 @@ func (r *Rotator) envOku() ([]byte, error) {
 		return nil, err
 	}
 	if uid, _, ok := sirdosya.Sahip(st); ok && int(uid) != os.Geteuid() {
-		return nil, fmt.Errorf("%s sahibi uid %d (beklenen %d) — başkasının kontrol ettiği dosyaya sır yazılmaz", r.EnvYolu, uid, os.Geteuid())
+		return nil, fmt.Errorf("%s is owned by uid %d (expected %d) — secrets are not written to a file someone else controls", r.EnvYolu, uid, os.Geteuid())
 	}
 	return b, nil
 }
@@ -184,16 +184,16 @@ func EnvDegistir(icerik []byte, degisim map[string]string) []byte {
 func DSNParolaDegistir(dsn, yeni string) (string, error) {
 	cfg, err := mysql.ParseDSN(dsn)
 	if err != nil {
-		return "", fmt.Errorf("DSN ayrıştırılamadı: %w", err)
+		return "", fmt.Errorf("could not parse the DSN: %w", err)
 	}
 	on := cfg.User + ":" + cfg.Passwd + "@"
 	if !strings.HasPrefix(dsn, on) {
-		return "", errors.New("DSN biçimi beklenmedik (kullanici:parola@... değil)")
+		return "", errors.New("unexpected DSN format (not user:password@...)")
 	}
 	out := cfg.User + ":" + yeni + "@" + dsn[len(on):]
 	c2, err := mysql.ParseDSN(out)
 	if err != nil || c2.User != cfg.User || c2.Passwd != yeni || c2.Addr != cfg.Addr || c2.DBName != cfg.DBName {
-		return "", errors.New("yeni DSN doğrulanamadı")
+		return "", errors.New("the new DSN could not be verified")
 	}
 	return out, nil
 }
@@ -220,11 +220,11 @@ func hedefKume(hedefler []string) (map[string]bool, error) {
 		case JWT, DB, Redis:
 			m[h] = true
 		default:
-			return nil, fmt.Errorf("bilinmeyen sır: %q (jwt|db|redis)", h)
+			return nil, fmt.Errorf("unknown secret: %q (jwt|db|redis)", h)
 		}
 	}
 	if len(m) == 0 {
-		return nil, errors.New("yenilenecek sır seçilmedi")
+		return nil, errors.New("no secret selected to rotate")
 	}
 	return m, nil
 }
@@ -237,7 +237,7 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 		return nil, err
 	}
 	if err := r.Kurtar(ctx); err != nil {
-		return nil, fmt.Errorf("yarım kalmış önceki yenileme kurtarılamadı: %w", err)
+		return nil, fmt.Errorf("could not recover the interrupted previous rotation: %w", err)
 	}
 	envEski, err := r.envOku()
 	if err != nil {
@@ -251,7 +251,7 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 
 	if kume[JWT] {
 		if strings.TrimSpace(eski[anahtarJWT]) == "" {
-			s.Atlanan[JWT] = "env'de PANEL_JWT_SECRET yok"
+			s.Atlanan[JWT] = "PANEL_JWT_SECRET is not in env"
 		} else {
 			v, err := r.uret(32)
 			if err != nil {
@@ -266,15 +266,15 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 		cfg, perr := mysql.ParseDSN(dsn)
 		switch {
 		case dsn == "":
-			s.Atlanan[DB] = "env'de PANEL_DB_DSN yok"
+			s.Atlanan[DB] = "PANEL_DB_DSN is not in env"
 		case perr != nil:
-			s.Atlanan[DB] = "PANEL_DB_DSN ayrıştırılamadı"
+			s.Atlanan[DB] = "PANEL_DB_DSN could not be parsed"
 		case cfg.User == "" || cfg.User == "root":
-			s.Atlanan[DB] = "DSN kullanıcısı boş/root — panel kullanıcısı değil, parolası panelce yönetilmez"
+			s.Atlanan[DB] = "DSN user is empty/root — not a panel user, its password is not managed by the panel"
 		case cfg.Passwd == "":
-			s.Atlanan[DB] = "DSN'de parola yok (soket kimliği) — yenilenecek parola yok"
+			s.Atlanan[DB] = "no password in the DSN (socket auth) — nothing to rotate"
 		case !sqlGuvenli(cfg.User) || !sqlGuvenli(cfg.Passwd):
-			s.Atlanan[DB] = "DSN kullanıcı/parolası desteklenmeyen karakter içeriyor — elle yenileyin"
+			s.Atlanan[DB] = "the DSN user/password contains unsupported characters — rotate it manually"
 		default:
 			dbKul, dbEskiPw = cfg.User, cfg.Passwd
 			if dbYeniPw, err = r.uret(16); err != nil {
@@ -291,9 +291,9 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 		redisEski = eski[anahtarRedis]
 		switch {
 		case redisEski == "":
-			s.Atlanan[Redis] = "PANEL_REDIS_ADMIN_PASS boş — Redis yapılandırılmamış"
+			s.Atlanan[Redis] = "PANEL_REDIS_ADMIN_PASS is empty — Redis is not configured"
 		case r.Redis == nil:
-			s.Atlanan[Redis] = "Redis yöneticisi yok"
+			s.Atlanan[Redis] = "no Redis admin handler"
 		default:
 			if redisYeni, err = r.uret(24); err != nil {
 				return nil, err
@@ -311,7 +311,7 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 		bekleyen["YENI_"+k] = v
 	}
 	if err := sirdosya.Yaz(r.BekleyenYolu, envBicimle(bekleyen), 0o600, os.Geteuid(), os.Getegid()); err != nil {
-		return nil, fmt.Errorf("bekleyen dosyası yazılamadı (hiçbir şey değiştirilmedi): %w", err)
+		return nil, fmt.Errorf("could not write the pending file (nothing was changed): %w", err)
 	}
 	basarisiz := func(e error) (*Sonuc, error) {
 		r.geriAlDis(ctx, s)
@@ -323,41 +323,41 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 	if dsnYeni != "" {
 		hostlar, err := r.DB.Hostlar(ctx, dbKul)
 		if err != nil {
-			return basarisiz(fmt.Errorf("DB: %q kullanıcısının host tanımları okunamadı: %w", dbKul, err))
+			return basarisiz(fmt.Errorf("DB: could not read the host entries of user %q: %w", dbKul, err))
 		}
 		if len(hostlar) == 0 {
-			return basarisiz(fmt.Errorf("DB: %q kullanıcısı mysql.user'da yok", dbKul))
+			return basarisiz(fmt.Errorf("DB: user %q is not in mysql.user", dbKul))
 		}
 		for _, h := range hostlar {
 			if !sqlGuvenli(h) {
-				return basarisiz(fmt.Errorf("DB: host tanımı desteklenmeyen karakter içeriyor"))
+				return basarisiz(fmt.Errorf("DB: a host entry contains unsupported characters"))
 			}
 		}
 		s.geri.dbKul, s.geri.dbHostlar, s.geri.dbEskiPw = dbKul, hostlar, dbEskiPw
 		s.geri.dbDegisti = true // kısmi uygulanmış olabilir → geri almada hepsine eski parola
 		if err := r.DB.ParolaAyarla(ctx, dbKul, hostlar, dbYeniPw); err != nil {
-			return basarisiz(fmt.Errorf("DB: ALTER USER başarısız (eski parolaya geri alındı): %w", err))
+			return basarisiz(fmt.Errorf("DB: ALTER USER failed (rolled back to the old password): %w", err))
 		}
 		if err := r.DB.Dogrula(ctx, dsnYeni); err != nil {
-			return basarisiz(fmt.Errorf("DB: yeni parolayla bağlanılamadı (eski parolaya geri alındı): %w", err))
+			return basarisiz(fmt.Errorf("DB: could not connect with the new password (rolled back to the old password): %w", err))
 		}
-		r.logf("DB: %q parolası yenilendi (%d host tanımı) ve yeni DSN ile bağlantı doğrulandı", dbKul, len(hostlar))
+		r.logf("DB: password of %q rotated (%d host entries) and the connection with the new DSN verified", dbKul, len(hostlar))
 	}
 	// 3) Valkey
 	if redisYeni != "" {
 		s.geri.redisEski, s.geri.redisYeni = redisEski, redisYeni
 		if err := r.Redis.ParolaDegistir(ctx, redisEski, redisYeni); err != nil {
-			return basarisiz(fmt.Errorf("Valkey: yönetici parolası değiştirilemedi (geri alındı): %w", err))
+			return basarisiz(fmt.Errorf("Valkey: could not change the admin password (rolled back): %w", err))
 		}
 		s.geri.redisDegist = true
 		if err := r.Redis.Dogrula(ctx, redisYeni); err != nil {
-			return basarisiz(fmt.Errorf("Valkey: yeni parolayla AUTH başarısız (geri alındı): %w", err))
+			return basarisiz(fmt.Errorf("Valkey: AUTH with the new password failed (rolled back): %w", err))
 		}
-		r.logf("Valkey: yönetici parolası yenilendi ve doğrulandı (kiracı ACL kullanıcıları etkilenmedi)")
+		r.logf("Valkey: admin password rotated and verified (tenant ACL users unaffected)")
 	}
 	// 4) env
 	if err := r.envYaz(EnvDegistir(envEski, degisim)); err != nil {
-		return basarisiz(fmt.Errorf("env yazılamadı (DB/Valkey eski parolaya geri alındı): %w", err))
+		return basarisiz(fmt.Errorf("could not write env (DB/Valkey rolled back to the old password): %w", err))
 	}
 	// 5) eklenti DSN kopyaları
 	if dsnYeni != "" {
@@ -366,7 +366,7 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 	}
 	// 6)
 	if err := os.Remove(r.BekleyenYolu); err != nil && !errors.Is(err, os.ErrNotExist) {
-		s.Uyarilar = append(s.Uyarilar, "bekleyen dosyası silinemedi: "+err.Error())
+		s.Uyarilar = append(s.Uyarilar, "could not delete the pending file: "+err.Error())
 	}
 	for _, h := range []string{JWT, DB, Redis} {
 		if _, ok := degisim[map[string]string{JWT: anahtarJWT, DB: anahtarDSN, Redis: anahtarRedis}[h]]; ok {
@@ -380,14 +380,14 @@ func (r *Rotator) Yenile(ctx context.Context, hedefler []string) (*Sonuc, error)
 func (r *Rotator) geriAlDis(ctx context.Context, s *Sonuc) {
 	if s.geri.redisDegist {
 		if err := r.Redis.ParolaDegistir(ctx, s.geri.redisYeni, s.geri.redisEski); err != nil {
-			r.logf("UYARI Valkey geri alınamadı: %v — elle: valkey-cli ACL SETUSER default resetpass >(env'deki değer); ACL SAVE", err)
+			r.logf("WARNING could not roll Valkey back: %v — manually: valkey-cli ACL SETUSER default resetpass >(value from env); ACL SAVE", err)
 		} else {
 			s.geri.redisDegist = false
 		}
 	}
 	if s.geri.dbDegisti {
 		if err := r.DB.ParolaAyarla(ctx, s.geri.dbKul, s.geri.dbHostlar, s.geri.dbEskiPw); err != nil {
-			r.logf("UYARI DB parolası geri alınamadı: %v — env'deki parola ile ALTER USER elle yapılmalı", err)
+			r.logf("WARNING could not roll the DB password back: %v — run ALTER USER by hand with the password from env", err)
 		} else {
 			s.geri.dbDegisti = false
 		}
@@ -420,7 +420,7 @@ func (r *Rotator) GeriDon(ctx context.Context, s *Sonuc) error {
 		}
 	}
 	if len(hatalar) > 0 {
-		return fmt.Errorf("geri dönüş eksik: %s", strings.Join(hatalar, "; "))
+		return fmt.Errorf("rollback incomplete: %s", strings.Join(hatalar, "; "))
 	}
 	return nil
 }
@@ -437,7 +437,7 @@ func (r *Rotator) eklentiDSNHizala(eskiDSN, yeniDSN string, s *Sonuc) {
 		b, _, err := sirdosya.Oku(yol, envEnCok)
 		if err != nil {
 			if errors.Is(err, sirdosya.ErrSymlink) {
-				s.Uyarilar = append(s.Uyarilar, filepath.Base(yol)+": symlink — atlandı")
+				s.Uyarilar = append(s.Uyarilar, filepath.Base(yol)+": symlink — skipped")
 			}
 			continue
 		}
@@ -451,13 +451,13 @@ func (r *Rotator) eklentiDSNHizala(eskiDSN, yeniDSN string, s *Sonuc) {
 			continue
 		}
 		if err := sirdosya.Yaz(yol, EnvDegistir(b, degisim), 0o600, os.Geteuid(), os.Getegid()); err != nil {
-			s.Uyarilar = append(s.Uyarilar, fmt.Sprintf("%s: panel DSN kopyası güncellenemedi (%v) — eklenti DB'ye bağlanamaz; elle düzeltin", filepath.Base(yol), err))
+			s.Uyarilar = append(s.Uyarilar, fmt.Sprintf("%s: could not update the panel DSN copy (%v) — the add-on cannot connect to the DB; fix it manually", filepath.Base(yol), err))
 			continue
 		}
 		s.geri.ekEski[yol] = b
 		ad := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(yol), "eklenti-"), ".env")
 		s.Eklentiler = append(s.Eklentiler, ad)
-		r.logf("eklenti %s: panel DSN kopyası yeni parolaya hizalandı", ad)
+		r.logf("add-on %s: panel DSN copy aligned to the new password", ad)
 	}
 }
 
@@ -491,7 +491,7 @@ func (r *Rotator) Kurtar(ctx context.Context) error {
 				}
 			}
 			if secildi == "" {
-				return errors.New("DB: env'deki, yeni ve eski parolaların hiçbiriyle bağlanılamadı (MariaDB çalışıyor mu?) — bekleyen dosyası korundu")
+				return errors.New("DB: could not connect with any of the env, new or old passwords (is MariaDB running?) — pending file kept")
 			}
 			degisim[anahtarDSN] = secildi
 		}
@@ -507,14 +507,14 @@ func (r *Rotator) Kurtar(ctx context.Context) error {
 				}
 			}
 			if secildi == "" {
-				return errors.New("Valkey: env'deki, yeni ve eski parolaların hiçbiriyle AUTH olmadı (valkey çalışıyor mu?) — bekleyen dosyası korundu")
+				return errors.New("Valkey: AUTH failed with every one of the env, new and old passwords (is valkey running?) — pending file kept")
 			}
 			degisim[anahtarRedis] = secildi
 		}
 	}
 	if len(degisim) > 0 {
 		if err := r.envYaz(EnvDegistir(envB, degisim)); err != nil {
-			return fmt.Errorf("env hizalanamadı: %w", err)
+			return fmt.Errorf("could not align env: %w", err)
 		}
 		if yeniDSN, ok := degisim[anahtarDSN]; ok {
 			s := &Sonuc{geri: geriBilgi{ekEski: map[string][]byte{}}}
@@ -525,7 +525,7 @@ func (r *Rotator) Kurtar(ctx context.Context) error {
 			adlar = append(adlar, k)
 		}
 		sort.Strings(adlar)
-		r.logf("kurtarma: env geçerli parolaya hizalandı: %s", strings.Join(adlar, ", "))
+		r.logf("recovery: env aligned to the valid password: %s", strings.Join(adlar, ", "))
 	}
 	if err := os.Remove(r.BekleyenYolu); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err

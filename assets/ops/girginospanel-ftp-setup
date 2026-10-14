@@ -4,23 +4,39 @@
 #   Idempotent — tekrar çalıştırılabilir.
 set -uo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-ftp-setup
+
+Installs or repairs Pure-FTPd with the MySQL backend: virtual users read from
+the panel's ftp_accounts table, chroot for everyone, passive ports 30000-30100,
+TLS (self-signed certificate if none exists), SELinux ftpd booleans and the
+nft rules for port 21 + the passive range. Idempotent; safe to re-run.
+Takes no options. Run as root.
+
+Exit codes: 0 FTP is set up and pure-ftpd is active, 1 failure (not root, package
+not installable, or pure-ftpd did not start)
+USAGE
+}
+case "${1:-}" in -h|--help) kullanim; exit 0 ;; esac
+
 c_g="\033[32m"; c_r="\033[31m"; c_y="\033[33m"; c_0="\033[0m"
 [ -t 1 ] || { c_g=; c_r=; c_y=; c_0=; }
 ok(){ echo -e "  ${c_g}✓${c_0} $*"; }
 warn(){ echo -e "  ${c_y}!${c_0} $*"; }
 die(){ echo -e "  ${c_r}✗${c_0} $*"; exit 1; }
 
-[ "$(id -u)" = 0 ] || die "root gerekli"
+[ "$(id -u)" = 0 ] || die "must be run as root"
 
 # (Panel DB parolası burada OKUNMAZ: pure-ftpd kendi salt-okur 'pureftpd' kullanıcısıyla
 # bağlanır. Eskiden okunup hiç kullanılmayan PANEL_DB_PASS satırları kaldırıldı.)
 
-echo "══ Pure-FTPd (MySQL backend) kurulumu ══"
+echo "══ Pure-FTPd (MySQL backend) setup ══"
 
 # 1) paket
 if ! rpm -q pure-ftpd >/dev/null 2>&1; then
-  dnf install -y pure-ftpd >/dev/null 2>&1 && ok "pure-ftpd kuruldu" || die "pure-ftpd kurulamadı (EPEL gerekli)"
-else ok "pure-ftpd zaten kurulu"; fi
+  dnf install -y pure-ftpd >/dev/null 2>&1 && ok "pure-ftpd installed" || die "could not install pure-ftpd (EPEL required)"
+else ok "pure-ftpd already installed"; fi
 
 # 2) read-only MySQL kullanıcısı (ftp_accounts SELECT)
 PFPW_FILE=/etc/pure-ftpd/.pfsql_pass
@@ -28,11 +44,11 @@ if [ -s "$PFPW_FILE" ]; then PFPW=$(cat "$PFPW_FILE"); else PFPW=$(openssl rand 
 # NOT: ftp_accounts tablosu migration'da oluşur; installer ftp-setup'ı panel
 # başladıktan SONRA çağırır. Yine de tablo yoksa GRANT panel.* ile devam et (patlamasın).
 mysql -e "CREATE USER IF NOT EXISTS 'pureftpd'@'localhost' IDENTIFIED BY '$PFPW';
-          ALTER USER 'pureftpd'@'localhost' IDENTIFIED BY '$PFPW';" 2>/dev/null || warn "pureftpd user"
+          ALTER USER 'pureftpd'@'localhost' IDENTIFIED BY '$PFPW';" 2>/dev/null || warn "could not create or alter the pureftpd MySQL user"
 if ! mysql -e "GRANT SELECT ON panel.ftp_accounts TO 'pureftpd'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null; then
-  mysql -e "GRANT SELECT ON panel.* TO 'pureftpd'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null && warn "ftp_accounts tablosu yok — GRANT panel.* ile verildi"
+  mysql -e "GRANT SELECT ON panel.* TO 'pureftpd'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null && warn "ftp_accounts table missing — GRANT given on panel.*"
 fi
-ok "MySQL kullanıcısı 'pureftpd' (SELECT ftp_accounts)"
+ok "MySQL user 'pureftpd' (SELECT ftp_accounts)"
 umask 077; echo "$PFPW" > "$PFPW_FILE"; chmod 600 "$PFPW_FILE"
 
 # 3) MySQL config (Pure-FTPd)
@@ -55,7 +71,7 @@ MYSQLGetGID     SELECT gid_n FROM ftp_accounts WHERE username="\L" AND status='a
 MYSQLGetDir     SELECT home_dir FROM ftp_accounts WHERE username="\L" AND status='active'
 EOF
 chmod 640 /etc/pure-ftpd/pureftpd-mysql.conf; chown root:root /etc/pure-ftpd/pureftpd-mysql.conf
-ok "pureftpd-mysql.conf (ftp_accounts sorguları)"
+ok "pureftpd-mysql.conf (ftp_accounts queries)"
 
 # 4) TLS self-signed sertifika (explicit FTPS için)
 mkdir -p /etc/ssl/private
@@ -65,8 +81,8 @@ if [ ! -s /etc/pki/pure-ftpd/pure-ftpd.pem ]; then
     -keyout /etc/pki/pure-ftpd/pure-ftpd.pem -out /etc/pki/pure-ftpd/pure-ftpd.pem \
     -subj "/CN=$(hostname -f 2>/dev/null || hostname)" >/dev/null 2>&1
   chmod 600 /etc/pki/pure-ftpd/pure-ftpd.pem
-  ok "TLS self-signed sertifika"
-else ok "TLS sertifikası mevcut"; fi
+  ok "TLS self-signed certificate"
+else ok "TLS certificate present"; fi
 
 # 5) pure-ftpd.conf (MySQL auth + chroot + passive + TLS opsiyonel)
 CONF=/etc/pure-ftpd/pure-ftpd.conf
@@ -90,14 +106,14 @@ set_directive MaxClientsNumber 50
 set_directive MaxClientsPerIP  8
 set_directive UnixAuthentication no
 set_directive PAMAuthentication  no
-ok "pure-ftpd.conf yapılandırıldı (MySQL auth, chroot, passive 30000-30100, TLS)"
+ok "pure-ftpd.conf configured (MySQL auth, chroot, passive 30000-30100, TLS)"
 
 # 6) SELinux — pure-ftpd home + mysql erişimi + passive
 if command -v setsebool >/dev/null 2>&1; then
   setsebool -P ftpd_full_access 1 2>/dev/null
   setsebool -P ftpd_connect_db 1 2>/dev/null
   setsebool -P ftpd_use_passive_mode 1 2>/dev/null
-  ok "SELinux ftpd boolean'ları"
+  ok "SELinux ftpd booleans"
 fi
 
 # 7) firewall — 21 + passive range (nft girginos_fw varsa)
@@ -107,13 +123,13 @@ if command -v nft >/dev/null 2>&1 && nft list table inet girginos_fw >/dev/null 
     nft list chain inet girginos_fw input 2>/dev/null | grep "dport $p accept" >/dev/null || \
       nft add rule inet girginos_fw input tcp dport $p accept 2>/dev/null
   done
-  ok "nft: port 21 + passive 30000-30100 açık"
-else warn "nft girginos_fw yok — firewall ACCEPT varsayıldı (21 + 30000-30100 açık olmalı)"; fi
+  ok "nft: port 21 + passive 30000-30100 open"
+else warn "nft girginos_fw missing — assuming the firewall accepts (21 + 30000-30100 must be open)"; fi
 
 # 8) başlat
 systemctl enable --now pure-ftpd >/dev/null 2>&1
 systemctl restart pure-ftpd >/dev/null 2>&1; sleep 1
 if systemctl is-active --quiet pure-ftpd; then ok "pure-ftpd ACTIVE (port 21)"; else
-  journalctl -u pure-ftpd --no-pager -n 15; die "pure-ftpd başlamadı"; fi
+  journalctl -u pure-ftpd --no-pager -n 15; die "pure-ftpd did not start"; fi
 
-echo -e "${c_g}══ FTP kurulumu tamamlandı — panel ftp_accounts virtual-user'ları çalışıyor ══${c_0}"
+echo -e "${c_g}══ FTP setup complete — panel ftp_accounts virtual users are working ══${c_0}"

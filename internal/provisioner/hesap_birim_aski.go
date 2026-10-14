@@ -96,8 +96,13 @@ func birimKullanicisi(yol string) string {
 		return ""
 	}
 	defer f.Close()
+	return birimKullanicisiOku(io.LimitReader(f, 1<<20))
+}
+
+// birimKullanicisiOku — birim gövdesinin [Service] bölümündeki (son) User= değeri.
+func birimKullanicisiOku(r io.Reader) string {
 	bolum, kul := "", ""
-	sc := bufio.NewScanner(io.LimitReader(f, 1<<20))
+	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		s := strings.TrimSpace(sc.Text())
 		switch {

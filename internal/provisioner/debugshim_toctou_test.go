@@ -183,7 +183,10 @@ func TestRenderDebugPrependPHP_LintAndFatalGuard(t *testing.T) {
 	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(php, "-l", f).CombinedOutput()
+	// -n: yalnız SÖZDİZİMİ denetlenir, ini/eklenti yüklenmez. Sistem PHP'sinde ionCube
+	// yükleyici + opcache.enable_cli=1 birlikteyken `php -l` segfault veriyor (181'de
+	// ölçüldü; normal çalıştırma etkilenmiyor) — sözdizimi denetimi eklentiye bağlı olmamalı.
+	out, err := exec.Command(php, "-n", "-l", f).CombinedOutput()
 	if err != nil {
 		t.Fatalf("php -l BASARISIZ: %v\n%s", err, out)
 	}

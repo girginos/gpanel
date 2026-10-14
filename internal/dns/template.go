@@ -145,7 +145,7 @@ func LoadTemplate(ctx context.Context, db *sql.DB) ([]TemplateRow, error) {
 // LoadTemplateFor: reseller'in KENDI sablonu varsa onu, yoksa global (reseller_id=0)
 // sablonu doner. Boylece her bayi kendi DNS sablonunu tanimlayabilir; tanimlamazsa
 // sunucu geneli sablon kullanilir.
-func LoadTemplateFor(ctx context.Context, db *sql.DB, resellerID int64) ([]TemplateRow, error) {
+func LoadTemplateFor(ctx context.Context, db sorgucu, resellerID int64) ([]TemplateRow, error) {
 	if resellerID > 0 {
 		var n int
 		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dns_template WHERE reseller_id=?`, resellerID).Scan(&n)
@@ -174,7 +174,7 @@ func LoadTemplateFor(ctx context.Context, db *sql.DB, resellerID int64) ([]Templ
 // LoadTemplateMeta: SOA + DKIM ayarlarını okur (yoksa makul default).
 // SUNUCU GENELİ tek satır (id=1) — her kiracının domainine uygulanır; yalnız
 // yönetici yazar (PutTemplate).
-func LoadTemplateMeta(ctx context.Context, db *sql.DB) TemplateMeta {
+func LoadTemplateMeta(ctx context.Context, db sorgucu) TemplateMeta {
 	m := TemplateMeta{SOARefresh: 3600, SOARetry: 900, SOAExpire: 1209600, SOAMinimum: 3600, SOATTL: 3600, DKIMSelector: "default", DKIMAktif: true}
 	var dk int
 	_ = db.QueryRowContext(ctx,

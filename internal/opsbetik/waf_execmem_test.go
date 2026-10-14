@@ -63,7 +63,7 @@ func TestWafExecmem_DryRunYazmaz(t *testing.T) {
 	if strings.Contains(lg, "setsebool") {
 		t.Fatalf("dry-run yazdı:\n%s", lg)
 	}
-	if !strings.Contains(out, "httpd_execmem kapalı") {
+	if !strings.Contains(out, "httpd_execmem is off") {
 		t.Fatalf("dry-run düzeltilecek boolean'ı söylemeli:\n%s", out)
 	}
 }
@@ -176,7 +176,7 @@ func TestWafSetup_ZatenAcikYazmaz(t *testing.T) {
 	if lg, _ := os.ReadFile(o.log); strings.Contains(string(lg), "setsebool") {
 		t.Fatalf("zaten açıkken yazıldı:\n%s", lg)
 	}
-	if !strings.Contains(out, "zaten acik") {
+	if !strings.Contains(out, "is already on") {
 		t.Fatalf("bilgi satırı bekleniyordu:\n%s", out)
 	}
 }
@@ -197,7 +197,7 @@ func TestWafSetup_SetseboolHatasiKurulumuDusurmez(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := o.wafSetupKos(t, "Enforcing", true)
-	if !strings.Contains(out, "RC=0") || !strings.Contains(out, "BASARISIZ") {
+	if !strings.Contains(out, "RC=0") || !strings.Contains(out, "FAILED") {
 		t.Fatalf("hata uyarıya dönmeli, rc=0:\n%s", out)
 	}
 }
@@ -210,9 +210,9 @@ func TestWafSetup_CagriNginxTKapisindanSonra(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	kapi := strings.Index(s, `ok "ana nginx -t OK — kurulum tamam"`)
+	kapi := strings.Index(s, `ok "main nginx -t OK — setup complete"`)
 	cagri := strings.Index(s[kapi:], "waf_selinux_execmem")
-	rollback := strings.Index(s, "nginx.conf GERI ALINDI")
+	rollback := strings.Index(s, "nginx.conf ROLLED BACK")
 	if kapi < 0 || cagri < 0 || rollback < 0 || kapi < rollback {
 		t.Fatalf("waf_selinux_execmem nginx -t kapısından sonra çağrılmalı (kapi=%d cagri=%d rb=%d)", kapi, cagri, rollback)
 	}

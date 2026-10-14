@@ -2,7 +2,9 @@ package dns
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -67,18 +69,23 @@ func (h *Handlers) PostDNSSEC(w http.ResponseWriter, r *http.Request) {
 	if req.Aktif {
 		ak = 1
 	}
-	if _, err := h.DB.ExecContext(r.Context(), `UPDATE domains SET dnssec_aktif=? WHERE id=?`, ak, id); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
 	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
 	defer ziptal()
-	if zerr := zoneYaz(zctx, h.DB, id); zerr != nil {
-		log.Printf("dns WriteZone(dnssec) domain=%d: %v", id, zerr)
-		httpx.WriteError(w, http.StatusInternalServerError, "zone güncellenemedi: "+zoneHatasi(r, id, zerr))
+	// Bayrak + zone TEK işlem: zone yazılamazsa bayrak da eski değerine döner
+	// (DNSSEC'in yarım açık/kapalı kalması DS uyuşmazlığıyla SERVFAIL demektir).
+	err = h.zoneliIslem(zctx, id, func(tx *sql.Tx) error {
+		_, e := tx.ExecContext(zctx, `UPDATE domains SET dnssec_aktif=? WHERE id=?`, ak, id)
+		return e
+	})
+	if err != nil {
+		if h.hataYanitla(w, r, id, err, "zone güncellenemedi: ", http.StatusInternalServerError) {
+			log.Printf("dns WriteZone(dnssec) domain=%d: %v", id, err)
+			h.denetle(r, id, "dns.dnssec.degistir", alanAdi, fmt.Sprintf("aktif=%t — zone yazılamadı, geri alındı", req.Aktif), false)
+		}
 		return
 	}
+	h.denetle(r, id, "dns.dnssec.degistir", alanAdi, fmt.Sprintf("aktif=%t", req.Aktif), true)
 	out := DNSSECDurum{Aktif: req.Aktif}
 	if req.Aktif {
 		// İmzalama birkaç saniye sürebilir; DS/DNSKEY hemen görünmeyebilir → frontend "durum"

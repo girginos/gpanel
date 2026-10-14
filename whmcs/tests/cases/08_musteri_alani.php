@@ -26,7 +26,9 @@ test('musteri alani: sablon — panel baglantilari YENI SEKMEDE, CSS literal ici
     global $MODUL;
     $t = file_get_contents($MODUL . '/templates/clientarea.tpl');
     dogru((bool) preg_match('#href="clientarea\.php\?action=productdetails&amp;id=\{\$serviceid\|escape\}&amp;dosinglesignon=1" target="_blank" rel="noopener"#', $t), 'SSO baglantisi yeni sekmede');
-    dogru((bool) preg_match('#href="\{\$panel_url\|escape\}" target="_blank" rel="noopener noreferrer"#', $t), 'panel adresi yeni sekmede');
+    // 1.0.9: düz panel bağlantısı düğmesi yok (tek tık giriş kullanılamazsa WHMCS düz adrese yönlendirir).
+    icermez($t, 'href="{$panel_url|escape}"', 'düz panel bağlantısı düğmesi kalktı');
+    dogru((bool) preg_match('#&amp;gp_hedef=hosting" target="_blank" rel="noopener"#', $t), 'bayinin hosting girişi yeni sekmede');
     esit(1, substr_count($t, '{literal}'));
     $stil = substr($t, strpos($t, '{literal}'), strpos($t, '{/literal}') - strpos($t, '{literal}'));
     dogru(strpos($stil, '<style>') !== false && strpos($stil, '</style>') !== false, 'stil literal icinde');
@@ -38,15 +40,15 @@ test('musteri alani: sablon — panel baglantilari YENI SEKMEDE, CSS literal ici
     }
 });
 
-test('musteri alani: bayi — trafik olceri YOK (panel olcmez), yerine hesap sayisi olceri', function () {
+test('musteri alani: bayi — trafik olceri YOK (panel olcmez), alan sayisi olcer DEGIL hesap satiri', function () {
     $p = yeni();
     $b = $p->bayiEkle('bayi01');
     \GirginOSPanel\WHMCS\Kayit::yaz(11, $b['id'], 'bayi', 'bayi01');
     $p->bayiler[$b['id']] = array_merge($p->bayiler[$b['id']], ['domain_sayisi' => 9, 'max_domain' => 10, 'disk_kullanim_kb' => 2048 * 1024, 'max_disk_mb' => 20480, 'max_trafik_mb' => 51200, 'durum' => 'suspended']);
     $v = gpanel_ClientArea(params(['configoption1' => 'bayi']))['vars'];
     $adlar = array_column($v['olcerler'], 'ad');
-    esit(['disk', 'alan_sayisi'], $adlar);
-    esit(['ad' => 'alan_sayisi', 'kullanim_metin' => '9', 'limit_metin' => '10', 'yuzde' => 90, 'limitli' => true, 'sinif' => 'kritik'], $v['olcerler'][1]);
+    esit(['disk'], $adlar, 'toplam alan adi kaynak olcerlerinde YOK (hesap bilgilerinde var)');
+    esit([9, 10], [$v['hesap']['alan_sayisi'], $v['hesap']['max_domain']], 'hesap bilgileri satiri');
     esit('2 GB', $v['olcerler'][0]['kullanim_metin']);
     esit('askida', $v['hesap']['durum'], 'panel suspended -> sablon askida');
     esit(2, count($v['cubuklar']), 'eski cubuklar (geri uyum) degismedi');

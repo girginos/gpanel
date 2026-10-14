@@ -60,14 +60,14 @@ const avKapali = true
 
 func main() {
 	var (
-		tara  = flag.Bool("tara", false, "tek seferlik tarama")
-		izle  = flag.Bool("izle", false, "gerçek zamanlı izleme (fanotify)")
-		jsn   = flag.Bool("json", false, "makine okunur çıktı")
-		surec = flag.Bool("surec", false, "süreç davranış izleme (netlink proc connector)")
+		tara  = flag.Bool("tara", false, "one-off scan")
+		izle  = flag.Bool("izle", false, "real-time monitoring (fanotify)")
+		jsn   = flag.Bool("json", false, "machine-readable output")
+		surec = flag.Bool("surec", false, "process behavior monitoring (netlink proc connector)")
 	)
 	flag.Parse()
 	if !*tara && !*izle && !*surec {
-		fmt.Fprintln(os.Stderr, "kullanım: girginospanel-avajan --tara [yol...] | --izle | --surec")
+		fmt.Fprintln(os.Stderr, "usage: girginospanel-avajan --tara [path...] | --izle | --surec  [--json]")
 		os.Exit(2)
 	}
 
@@ -83,13 +83,13 @@ func main() {
 
 	db, err := dbAc()
 	if err != nil {
-		log.Fatalf("veritabanı: %v", err)
+		log.Fatalf("database: %v", err)
 	}
 	defer db.Close()
 
 	ayar, err := avayar.Oku(context.Background(), db)
 	if err != nil {
-		log.Fatalf("ayarlar okunamadı: %v", err)
+		log.Fatalf("could not read the settings: %v", err)
 	}
 
 	// 🔴 Kural seti: uzak İMZALI paket (varsa + doğrulanırsa) → disk → gömülü
@@ -99,7 +99,7 @@ func main() {
 	set := avmotor.GuncelSet(avmotor.TabanSet().Surum, false)
 	motor, bozuk := avmotor.Yeni(set, 0)
 	if bozuk > 0 {
-		log.Printf("uyarı: %d kural derlenemedi (atlandı)", bozuk)
+		log.Printf("warning: %d rules could not be compiled (skipped)", bozuk)
 	}
 
 	a := &ajan{db: db, ayar: ayar, motor: motor, json: *jsn, domCache: yeniDomainCache(db)}
@@ -896,20 +896,20 @@ func (a *ajan) ozetYaz(basla time.Time, kokler []string) {
 		})
 		return
 	}
-	fmt.Printf("tarandı: %d dosya (analiz: %d · rapidscan atlanan: %d) · bulgu: %d · süre: %s · kapsam: %s\n",
+	fmt.Printf("scanned: %d files (analyzed: %d · rapidscan skipped: %d) · findings: %d · time: %s · scope: %s\n",
 		a.taranan, a.analizEdilen, a.atlanan, a.bulunan, sure.Round(time.Millisecond), strings.Join(kokler, " "))
 	for _, b := range a.bulgular {
 		fmt.Printf("  [%s puan=%d] %s\n      %s\n", b.Seviye, b.Puan, gosterim(b.Dosya), gosterim(b.Aciklama))
 	}
 	if a.bulunan == 0 {
-		fmt.Println("  temiz — eşiği aşan dosya yok")
+		fmt.Println("  clean — no file above the threshold")
 	}
 	// Kural seti kaynagi + surum: operator gomulu taban mi guncel mi gorsun.
-	kaynak := "gomulu taban"
+	kaynak := "built-in baseline"
 	if u := a.motor.Uretim(); u != "" && u != "gomulu" && u != "gömülü" {
-		kaynak = "imzali set uretim " + u
+		kaynak = "signed set, production " + u
 	}
-	fmt.Printf("kural seti: surum %d · %s · %d kural\n", a.motor.Surum(), kaynak, a.motor.KuralSayisi())
+	fmt.Printf("rule set: version %d · %s · %d rules\n", a.motor.Surum(), kaynak, a.motor.KuralSayisi())
 }
 
 // ── gerçek zamanlı izleme (fanotify) ───────────────────────────────────────
@@ -926,11 +926,11 @@ func altKokMu(yol string, kokler []string) bool {
 
 func (a *ajan) izleyiciCalistir() {
 	if !a.ayar.GercekZamanli {
-		log.Fatal("gerçek zamanlı izleme ayarlarda KAPALI (panel → Antivirüs → Modüller)")
+		log.Fatal("real-time monitoring is OFF in the settings (panel → Antivirus → Modules)")
 	}
 	fd, err := unix.FanotifyInit(unix.FAN_CLASS_NOTIF|unix.FAN_CLOEXEC, unix.O_RDONLY|unix.O_LARGEFILE)
 	if err != nil {
-		log.Fatalf("fanotify_init: %v (CAP_SYS_ADMIN gerekli)", err)
+		log.Fatalf("fanotify_init: %v (CAP_SYS_ADMIN required)", err)
 	}
 	defer unix.Close(fd)
 
@@ -946,7 +946,7 @@ func (a *ajan) izleyiciCalistir() {
 			unix.FAN_CLOSE_WRITE, unix.AT_FDCWD, kok); err != nil {
 			log.Fatalf("fanotify_mark %s: %v", kok, err)
 		}
-		log.Printf("izleniyor: %s (filesystem)", kok)
+		log.Printf("watching: %s (filesystem)", kok)
 	}
 
 	ctx, iptal := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

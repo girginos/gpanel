@@ -42,6 +42,14 @@ var ortamIstisnalari = map[string]int{
 	"internal/platform/veritabani_windows.go": 1,
 }
 
+// ortamIstisnalariOzel — depoda OLMAYAN özel dosyalar (git-ignored; paketleme ağacına
+// kopyalanır). Varsa başvuru sayısı tutmalı; yoksa (herkese açık depo) sorun değil.
+var ortamIstisnalariOzel = map[string]int{
+	// Eklenti başlatıcısı yalnız eklenti systemd biriminin ExecStart'ında çalışır; birimin
+	// KENDİ ortamını bellekten çalıştırılan eklentiye geçirir (exec eşdeğeri), panel ortamını değil.
+	"cmd/gosp-baslatici/main.go": 1,
+}
+
 // goDosyalari: cmd/ ve internal/ altındaki üretim .go dosyaları (test ve
 // internal/kiraci hariç), depo köküne göreli yol → ayrıştırılmış dosya.
 func goDosyalari(t *testing.T, fset *token.FileSet) map[string]*ast.File {
@@ -145,6 +153,9 @@ func TestKaynakKoruma_PanelOrtamiYalnizIstisnalarda(t *testing.T) {
 	sort.Strings(adlar)
 	for _, d := range adlar {
 		if izinli, ok := ortamIstisnalari[d]; ok && len(bulunan[d]) == izinli {
+			continue
+		}
+		if izinli, ok := ortamIstisnalariOzel[d]; ok && len(bulunan[d]) == izinli {
 			continue
 		}
 		t.Errorf("%s: panel ortamının tamamı (os/syscall.Environ) çocuğa verilebilir — çocuk ortamını açıkça kur "+

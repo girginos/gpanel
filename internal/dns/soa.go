@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,7 +39,7 @@ func defaultSOA(alanAdi string) SOA {
 }
 
 // LoadSOA: DB'den oku; satır yoksa domain adına göre default üret.
-func LoadSOA(ctx context.Context, db *sql.DB, domainID int64, alanAdi string) SOA {
+func LoadSOA(ctx context.Context, db sorgucu, domainID int64, alanAdi string) SOA {
 	s := defaultSOA(alanAdi)
 	var ns, hm string
 	var ref, ret, exp, mini, ttl int
@@ -127,21 +127,29 @@ func (h *Handlers) PutSOA(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := h.DB.ExecContext(r.Context(),
-		`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
-		 VALUES(?,?,?,?,?,?,?,?)
-		 ON DUPLICATE KEY UPDATE primary_ns=VALUES(primary_ns), hostmaster=VALUES(hostmaster),
-		   refresh=VALUES(refresh), retry=VALUES(retry), expire=VALUES(expire),
-		   minimum=VALUES(minimum), ttl=VALUES(ttl)`,
-		id, s.PrimaryNS, s.Hostmaster, s.Refresh, s.Retry, s.Expire, s.Minimum, s.TTL); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+	if err := SOASayilariGecerli(s); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// DB değişti: zone istemci kopsa da yeniden yazılmalı (kopuk bağlam).
 	zctx, ziptal := httpx.KopukBaglam(r, 2*time.Minute)
 	defer ziptal()
-	if zerr := WriteZone(zctx, h.DB, id); zerr != nil {
-		log.Printf("dns WriteZone(soa) domain=%d: %v", id, zerr)
+	err := h.zoneliIslem(zctx, id, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(zctx,
+			`INSERT INTO dns_soa(domain_id, primary_ns, hostmaster, refresh, retry, expire, minimum, ttl)
+			 VALUES(?,?,?,?,?,?,?,?)
+			 ON DUPLICATE KEY UPDATE primary_ns=VALUES(primary_ns), hostmaster=VALUES(hostmaster),
+			   refresh=VALUES(refresh), retry=VALUES(retry), expire=VALUES(expire),
+			   minimum=VALUES(minimum), ttl=VALUES(ttl)`,
+			id, s.PrimaryNS, s.Hostmaster, s.Refresh, s.Retry, s.Expire, s.Minimum, s.TTL)
+		return err
+	})
+	if err != nil {
+		if h.hataYanitla(w, r, id, err, zoneGeriAlindi, http.StatusUnprocessableEntity) {
+			h.denetle(r, id, "dns.soa.guncelle", alanAdi, "zone yazılamadı, geri alındı", false)
+		}
+		return
 	}
+	h.denetle(r, id, "dns.soa.guncelle", alanAdi, fmt.Sprintf("birincil NS=%s hostmaster=%s", s.PrimaryNS, s.Hostmaster), true)
 	httpx.WriteJSON(w, http.StatusOK, s)
 }

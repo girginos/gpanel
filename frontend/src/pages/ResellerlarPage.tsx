@@ -14,10 +14,14 @@ import { useToast } from '@/components/Toast'
 import { Button, Badge } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
 import Modal from '@/components/Modal'
+import KaynakHavuzAlanlari from '@/components/KaynakHavuzAlanlari'
+import KaynakGrafik from '@/components/bayi/KaynakGrafik'
+import { kaynakOzet } from '@/lib/kaynakOzet'
 
 type Reseller = {
   id: number; kullanici: string; ad_soyad: string; durum: string
   max_domain: number; max_disk_mb: number; max_trafik_mb: number
+  cpu_cekirdek?: number; ram_mb?: number; io_agirlik?: number // kaynak havuzu (0 = sınırsız)
   domain_sayisi: number; disk_kullanim_kb: number; paket_id: number; paket_ad: string; son_giris: string; olusturulma: string
 }
 
@@ -46,6 +50,8 @@ const RES_EN: Record<string, string> = {
   "Aktif": "Active",
   "Askıda": "Suspended",
   "Düzenle": "Edit",
+  "Kaynak": "Resources",
+  "Kaynak kullanımı — {0}": "Resource usage — {0}",
   "Sil": "Delete",
   "Bayi paketi": "Reseller package",
   "Henüz bayi paketi yok — limitleri aşağıdan tek tek girebilir ya da": "No reseller packages yet — you can enter the limits one by one below or",
@@ -95,6 +101,8 @@ const RES_EN: Record<string, string> = {
   "Silme devam ediyor": "Deletion in progress",
   "İlerlemeyi göster": "Show progress",
   "Başka bir toplu işlem çalışıyor; bitmesini bekleyin.": "Another bulk operation is running; wait for it to finish.",
+  "CPU / RAM": "CPU / RAM",
+  "CPU ve RAM, bayinin tüm hostinglerinin paylaştığı fiziksel havuzdur (0 = sınırsız); disk havuzu yukarıdaki Disk alanıdır. Değişiklik çalışan siteleri yeniden başlatmaz: CPU/RAM sınırı etkin hostinglere anında, havuza yeni katılan hostinglere bir sonraki yeniden başlatmada uygulanır.": "CPU and RAM are the physical pool shared by all of the reseller's hostings (0 = unlimited); the disk pool is the Disk field above. Changes do not restart running sites: the CPU/RAM limit applies to active hostings immediately and to hostings newly joining the pool at their next restart.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (RES_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -113,20 +121,23 @@ type Paket = {
   asim_ilkesi?: string; asim_bildirim?: boolean; fazla_satis?: boolean
   id: number; ad: string; aciklama: string
   max_domain: number; max_disk_mb: number; max_trafik_mb: number
+  cpu_cekirdek?: number; ram_mb?: number; io_agirlik?: number
   fiyat_kurus: number; varsayilan: boolean; bayi_sayisi: number
 }
 
 type BayiForm = {
   kullanici: string; parola: string; ad_soyad: string; paket_id: number
   max_domain: number | string; max_disk_mb: number | string; max_trafik_mb: number | string; durum?: string
+  cpu_cekirdek: number | string; ram_mb: number | string; io_agirlik: number | string
 }
-const bos: BayiForm = { kullanici: '', parola: '', ad_soyad: '', paket_id: 0, max_domain: 0, max_disk_mb: 0, max_trafik_mb: 0 }
+const bos: BayiForm = { kullanici: '', parola: '', ad_soyad: '', paket_id: 0, max_domain: 0, max_disk_mb: 0, max_trafik_mb: 0, cpu_cekirdek: 0, ram_mb: 0, io_agirlik: 0 }
 
 export default function ResellerlarPage() {
   useTranslation() // dil re-render aboneligi
   const { onay } = useDialog()
   const toast = useToast()
   const [items, setItems] = useState<Reseller[]>([])
+  const [grafikBayi, setGrafikBayi] = useState<Reseller | null>(null)
   const [yuk, setYuk] = useState(true)
   const [paketler, setPaketler] = useState<Paket[]>([])
   const [parolaGoster, setParolaGoster] = useState(false)
@@ -159,7 +170,8 @@ export default function ResellerlarPage() {
   function yeniAc() { setForm(bos); setModal('yeni');  }
   function duzenleAc(x: Reseller) {
     setForm({ kullanici: x.kullanici, parola: '', ad_soyad: x.ad_soyad, durum: x.durum, paket_id: x.paket_id || 0,
-      max_domain: x.max_domain, max_disk_mb: x.max_disk_mb, max_trafik_mb: x.max_trafik_mb })
+      max_domain: x.max_domain, max_disk_mb: x.max_disk_mb, max_trafik_mb: x.max_trafik_mb,
+      cpu_cekirdek: x.cpu_cekirdek ?? 0, ram_mb: x.ram_mb ?? 0, io_agirlik: x.io_agirlik ?? 0 })
     setModal(x); setParolaGoster(false); setKopyalandi(false)
   }
 
@@ -177,6 +189,7 @@ export default function ResellerlarPage() {
         const body: Record<string, unknown> = {
           ad_soyad: form.ad_soyad, durum: form.durum, paket_id: Number(form.paket_id) || 0,
           max_domain: Number(form.max_domain), max_disk_mb: Number(form.max_disk_mb), max_trafik_mb: Number(form.max_trafik_mb),
+          cpu_cekirdek: Number(form.cpu_cekirdek) || 0, ram_mb: Number(form.ram_mb) || 0, io_agirlik: Number(form.io_agirlik) || 0,
         }
         if (form.parola) body.parola = form.parola
         await api.put(`/resellers/${modal.id}`, body)
@@ -240,6 +253,7 @@ export default function ResellerlarPage() {
                   <th className={T.baslik}>{cevir("Paket")}</th>
                   <th className={T.baslik}>Hosting</th>
                   <th className={T.baslik}>Disk</th>
+                  <th className={T.baslik}>{cevir("CPU / RAM")}</th>
                   <th className={T.baslik}>{cevir("Durum")}</th>
                   <th className={T.baslik}>{cevir("Son Giriş")}</th>
                   <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
@@ -253,11 +267,13 @@ export default function ResellerlarPage() {
                     <td className={T.hucre} data-etiket={cevir("Paket")}><span className="text-slate-600 dark:text-slate-400">{x.paket_ad || '—'}</span></td>
                     <td className={T.hucre} data-etiket="Hosting"><span className="text-slate-700 dark:text-slate-300">{x.domain_sayisi}{x.max_domain > 0 ? ` / ${x.max_domain}` : ' / ∞'}</span></td>
                     <td className={T.hucre} data-etiket="Disk"><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtKB(x.disk_kullanim_kb)} / {fmtMB(x.max_disk_mb)}</span></td>
+                    <td className={T.hucre} data-etiket={cevir("CPU / RAM")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{kaynakOzet(x.cpu_cekirdek, x.ram_mb)}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Durum")}>
                       <Badge color={x.durum === 'active' ? 'success' : 'error'} variant="soft" className="text-[10px] uppercase tracking-wider">{x.durum === 'active' ? cevir('Aktif') : cevir("Askıda")}</Badge>
                     </td>
                     <td className={T.hucre} data-etiket={cevir("Son Giriş")}><span className="font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{x.son_giris || '—'}</span></td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>
+                      <Button variant="outlined" boyut="sm" ikon={I.grafik} onClick={() => setGrafikBayi(x)} className="lg:mr-2">{cevir("Kaynak")}</Button>
                       <Button variant="outlined" boyut="sm" ikon={I.kalem} onClick={() => duzenleAc(x)} className="lg:mr-2">{cevir("Düzenle")}</Button>
                       <Button color="error" variant="soft" boyut="sm" ikon={I.cop} onClick={() => sil(x)} yukleniyor={silinen === x.id}>{cevir("Sil")}</Button>
                     </td>
@@ -280,6 +296,11 @@ export default function ResellerlarPage() {
           onGizle={() => setSilModal(false)}
           onBitti={() => { setSilIs(null); setSilModal(false); yukle() }} />
       )}
+      <Modal acik={!!grafikBayi} genislik="xl" baslik={grafikBayi ? cevirT(cevir("Kaynak kullanımı — {0}"), grafikBayi.kullanici) : ''}
+        onKapat={() => setGrafikBayi(null)}>
+        {grafikBayi && <KaynakGrafik yol={`/bayi-kaynak/${grafikBayi.id}/kullanim`} />}
+      </Modal>
+
       <Modal acik={!!modal} baslik={modal === 'yeni' ? cevir('Yeni Bayi') : modal ? cevirT(cevir("Bayi Düzenle — {0}"), modal.kullanici) : ''}
         onKapat={() => setModal(null)} kapatilamaz={kaydet} genislik="lg"
         alt={<>
@@ -308,7 +329,8 @@ export default function ResellerlarPage() {
                     <select className={inp} value={form.paket_id || 0} onChange={e => {
                       const pid = Number(e.target.value)
                       const pk = paketler.find(x => x.id === pid)
-                      setForm({ ...form, paket_id: pid, ...(pk ? { max_domain: pk.max_domain, max_disk_mb: pk.max_disk_mb, max_trafik_mb: pk.max_trafik_mb } : {}) })
+                      setForm({ ...form, paket_id: pid, ...(pk ? { max_domain: pk.max_domain, max_disk_mb: pk.max_disk_mb, max_trafik_mb: pk.max_trafik_mb,
+                        cpu_cekirdek: pk.cpu_cekirdek ?? 0, ram_mb: pk.ram_mb ?? 0, io_agirlik: pk.io_agirlik ?? 0 } : {}) })
                     }}>
                       <option value={0}>{cevir("Paketsiz (özel limitler)")}</option>
                       {paketler.map(pk => <option key={pk.id} value={pk.id}>{pk.ad} — {pk.max_domain > 0 ? pk.max_domain + ' hosting' : '∞'} / {fmtMB(pk.max_disk_mb)}</option>)}
@@ -387,6 +409,10 @@ export default function ResellerlarPage() {
                 <div><label className={lbl}>{cevir("Trafik (MB)")}</label><input className={`${inp} ${Number(form.paket_id) ? 'opacity-60 cursor-not-allowed' : ''}`} type="number" min={0} value={form.max_trafik_mb} readOnly={!!Number(form.paket_id)} title={Number(form.paket_id) ? cevir('Bu limit seçili paketten gelir') : ''} onChange={e => setForm({ ...form, max_trafik_mb: e.target.value })} /></div>
               </div>
               <p className="text-[11px] text-slate-400">{Number(form.paket_id) ? cevir('Limitler seçili paketten gelir — değiştirmek için paketi düzenleyin ya da “Paketsiz” seçin.') : cevir("0 = limitsiz. Disk/trafik havuzu bayinin tüm hosting hesaplarına dağıtılır.")}</p>
+              <div className="grid grid-cols-3 gap-2">
+                <KaynakHavuzAlanlari deger={form} onDegis={k => setForm({ ...form, ...k })} kilitli={!!Number(form.paket_id)} inp={inp} lbl={lbl} />
+              </div>
+              <p className="text-[11px] text-slate-400">{cevir("CPU ve RAM, bayinin tüm hostinglerinin paylaştığı fiziksel havuzdur (0 = sınırsız); disk havuzu yukarıdaki Disk alanıdır. Değişiklik çalışan siteleri yeniden başlatmaz: CPU/RAM sınırı etkin hostinglere anında, havuza yeni katılan hostinglere bir sonraki yeniden başlatmada uygulanır.")}</p>
               {modal !== 'yeni' && (
                 <div><label className={lbl}>{cevir("Durum")}</label>
                   <select className={inp} value={form.durum} onChange={e => setForm({ ...form, durum: e.target.value })}>

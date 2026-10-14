@@ -66,15 +66,21 @@ test('maskeleme: hata mesajlarinda ag hatasi metnindeki anahtar temizlenir', fun
     icermez($r['error'], FakePanel::ANAHTAR);
 });
 
-test('guvenlik: serviceid/sahiplik istekten OKUNMAZ (kaynakta $_REQUEST/$_GET/$_COOKIE yok; $_POST yalniz parola alanlari)', function () {
+test('guvenlik: serviceid/sahiplik istekten OKUNMAZ (kaynakta $_REQUEST/$_COOKIE yok; $_GET yalniz gp_hedef, $_POST yalniz parola alanlari)', function () {
     global $MODUL;
     $kaynak = '';
     foreach (array_merge([$MODUL . '/gpanel.php'], glob($MODUL . '/lib/*.php')) as $f) {
         $kaynak .= file_get_contents($f);
     }
     icermez($kaynak, '$_REQUEST');
-    icermez($kaynak, '$_GET');
     icermez($kaynak, '$_COOKIE');
+    // $_GET yalniz bayi tek tik girisinin HEDEF SAYFASI (Yardimci::ssoHedef, beyaz liste 'profil');
+    // kimlik/sahiplik degil. Indekssiz ya da baska alanla $_GET kullanimi yasak.
+    preg_match_all('/\$_GET(\[\'([a-z_0-9]+)\'\])?/', $kaynak, $g);
+    dogru(count($g[0]) > 0 && count($g[0]) <= 3, '$_GET kullanim sayisi: ' . count($g[0]));
+    foreach ($g[2] as $i => $alan) {
+        esit('gp_hedef', $alan, '$_GET kullanimi: ' . $g[0][$i]);
+    }
     preg_match_all('/\$_POST\[\'([a-z_0-9]+)\'\]/', $kaynak, $m);
     $izinli = ['yeni_parola', 'yeni_parola2', 'gpanel_panel_id'];
     foreach (array_unique($m[1]) as $alan) {
@@ -263,7 +269,7 @@ test('sozdizimi: tum PHP dosyalari php -l temiz', function () {
     $n = 0;
     foreach ($it as $f) {
         if (substr((string) $f, -4) === '.php' && strpos((string) $f, '/tests/') === false) {
-            exec('php -l ' . escapeshellarg((string) $f) . ' 2>&1', $o, $rc);
+            exec(escapeshellarg(PHP_BINARY) . ' -n -l ' . escapeshellarg((string) $f) . ' 2>&1', $o, $rc); // -n: ini/eklenti yok (ionCube + opcache.enable_cli -l'yi çökertebiliyor)
             esit(0, $rc, (string) $f);
             $n++;
         }

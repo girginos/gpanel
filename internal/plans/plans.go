@@ -259,6 +259,14 @@ func (h *Handlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	varsayilanDoldur(&p)
+	// Hosting yolundaki kuralla aynı (PHPSurumDogrula): plan geçersiz sürümü yeni
+	// hostinglere taşımasın (eskiden ham yazılıyordu).
+	if v, verr := provisioner.PHPSurumDogrula(p.PHPSurum); verr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, verr.Error())
+		return
+	} else {
+		p.PHPSurum = v
+	}
 	if ad := provisioner.TehlikeliNginxDirektifi(p.NginxEkDirektifler); ad != "" {
 		httpx.WriteError(w, http.StatusBadRequest, "güvenlik: nginx '"+ad+"' direktifine plan seviyesinde izin verilmiyor")
 		return
@@ -360,6 +368,14 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	varsayilanDoldur(&p)
+	// Hosting yolundaki kuralla aynı (PHPSurumDogrula): plan geçersiz sürümü yeni
+	// hostinglere taşımasın (eskiden ham yazılıyordu).
+	if v, verr := provisioner.PHPSurumDogrula(p.PHPSurum); verr != nil {
+		httpx.WriteError(w, http.StatusBadRequest, verr.Error())
+		return
+	} else {
+		p.PHPSurum = v
+	}
 	mevcut, err := scan(h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		httpx.WriteError(w, http.StatusNotFound, "plan bulunamadı")
@@ -444,7 +460,9 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	// uygula ("Yeniden Uygula" ile ayni yol: kaynaklimit + WAF + posta — HostingUygula).
 	// (nginx -t gate + rollback her render'da korur; hata log'lanir, panel bloklanmaz.)
 	if limitDegisti(mevcut, p) || mevcut.WafEnabled != p.WafEnabled || mevcut.WafMode != p.WafMode || mevcut.WafParanoia != p.WafParanoia {
-		go h.planReapply(id)
+		// HostingUygula seam'i istek goroutine'inde okunur (arka planda okumak testin
+		// Cleanup'ta geri yüklediği değişkenle yarışıyordu, -race).
+		go h.planReapply(id, HostingUygula)
 	}
 	row := h.DB.QueryRowContext(r.Context(), selectAll+" WHERE id=?", id)
 	saved, _ := scan(row)
@@ -461,7 +479,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 // planReapply: bu plana bagli tum hostinglere limitleri (HostingUygula: kaynaklimit +
 // WAF + posta; bagli degilse yalniz WAF) yeniden uygular. Arka plan goroutine — kendi
 // baglaminda, hostingleri SIRAYLA isler.
-func (h *Handlers) planReapply(planID int64) {
+func (h *Handlers) planReapply(planID int64, uygula func(*sql.DB, int64, string)) {
 	// Plan sahibi disindaki kiracilara ait domainler HARIC: devir sonrasi
 	// domain eski bayinin planina bagli kalabiliyor; o bayinin plan
 	// guncellemesi yabanci bir kiracinin vhost'una uygulanmamali.
@@ -485,7 +503,6 @@ func (h *Handlers) planReapply(planID int64) {
 		}
 	}
 	rows.Close()
-	uygula := HostingUygula
 	for _, x := range hl {
 		if uygula != nil {
 			uygula(h.DB, x.id, x.ad)

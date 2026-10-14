@@ -1,13 +1,18 @@
 package reseller
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"girginospanel/internal/bayikaynak"
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -20,6 +25,10 @@ type Paket struct {
 	MaxDomain   int    `json:"max_domain"`
 	MaxDiskMB   int64  `json:"max_disk_mb"`
 	MaxTrafikMB int64  `json:"max_trafik_mb"`
+	// Kaynak havuzu (CPU/RAM/G-Ç; disk havuzu = max_disk_mb). 0 = sınırsız. Bayiye KOPYALANIR.
+	CPUCekirdek float64 `json:"cpu_cekirdek"`
+	RAMMB       int64   `json:"ram_mb"`
+	IOAgirlik   int     `json:"io_agirlik"`
 	// Posta TAVANLARI — domain başına üst sınır (havuz değil). 0 = sınırsız.
 	MailMaxEmail     int   `json:"mail_max_email"`
 	MailSaatlikLimit int   `json:"mail_saatlik_limit"`
@@ -41,7 +50,8 @@ func (h *Handlers) PaketListe(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(p.mail_max_email,0), COALESCE(p.mail_saatlik_limit,0), COALESCE(p.mail_kutu_kota_mb,0),
 		        p.fiyat_kurus, p.asim_ilkesi, p.asim_bildirim, p.fazla_satis, p.varsayilan,
 		        (SELECT COUNT(*) FROM users u WHERE u.reseller_plan_id=p.id AND u.role='reseller'),
-		        COALESCE(DATE_FORMAT(p.created_at,'%Y-%m-%d'),'')
+		        COALESCE(DATE_FORMAT(p.created_at,'%Y-%m-%d'),''),
+		        COALESCE(p.kaynak_cpu_cekirdek,0), COALESCE(p.kaynak_ram_mb,0), COALESCE(p.kaynak_io_agirlik,0)
 		   FROM reseller_plans p ORDER BY p.varsayilan DESC, p.max_domain, p.id`)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "listelenemedi: "+err.Error())
@@ -54,7 +64,8 @@ func (h *Handlers) PaketListe(w http.ResponseWriter, r *http.Request) {
 		var vars, bild, fs int
 		if err := rows.Scan(&x.ID, &x.Ad, &x.Aciklama, &x.MaxDomain, &x.MaxDiskMB, &x.MaxTrafikMB,
 			&x.MailMaxEmail, &x.MailSaatlikLimit, &x.MailKutuKotaMB,
-			&x.FiyatKurus, &x.AsimIlkesi, &bild, &fs, &vars, &x.BayiSayisi, &x.Olusturulma); err == nil {
+			&x.FiyatKurus, &x.AsimIlkesi, &bild, &fs, &vars, &x.BayiSayisi, &x.Olusturulma,
+			&x.CPUCekirdek, &x.RAMMB, &x.IOAgirlik); err == nil {
 			x.Varsayilan = vars == 1
 			x.AsimBildirim = bild == 1
 			x.FazlaSatis = fs == 1
@@ -66,19 +77,22 @@ func (h *Handlers) PaketListe(w http.ResponseWriter, r *http.Request) {
 }
 
 type paketReq struct {
-	AsimIlkesi       string `json:"asim_ilkesi"`
-	AsimBildirim     bool   `json:"asim_bildirim"`
-	FazlaSatis       bool   `json:"fazla_satis"`
-	Ad               string `json:"ad"`
-	Aciklama         string `json:"aciklama"`
-	MaxDomain        int    `json:"max_domain"`
-	MaxDiskMB        int64  `json:"max_disk_mb"`
-	MaxTrafikMB      int64  `json:"max_trafik_mb"`
-	MailMaxEmail     int    `json:"mail_max_email"`
-	MailSaatlikLimit int    `json:"mail_saatlik_limit"`
-	MailKutuKotaMB   int    `json:"mail_kutu_kota_mb"`
-	FiyatKurus       int64  `json:"fiyat_kurus"`
-	Varsayilan       bool   `json:"varsayilan"`
+	AsimIlkesi       string  `json:"asim_ilkesi"`
+	AsimBildirim     bool    `json:"asim_bildirim"`
+	FazlaSatis       bool    `json:"fazla_satis"`
+	Ad               string  `json:"ad"`
+	Aciklama         string  `json:"aciklama"`
+	MaxDomain        int     `json:"max_domain"`
+	MaxDiskMB        int64   `json:"max_disk_mb"`
+	MaxTrafikMB      int64   `json:"max_trafik_mb"`
+	CPUCekirdek      float64 `json:"cpu_cekirdek"`
+	RAMMB            int64   `json:"ram_mb"`
+	IOAgirlik        int     `json:"io_agirlik"`
+	MailMaxEmail     int     `json:"mail_max_email"`
+	MailSaatlikLimit int     `json:"mail_saatlik_limit"`
+	MailKutuKotaMB   int     `json:"mail_kutu_kota_mb"`
+	FiyatKurus       int64   `json:"fiyat_kurus"`
+	Varsayilan       bool    `json:"varsayilan"`
 }
 
 func (q *paketReq) dogrula() string {
@@ -88,6 +102,22 @@ func (q *paketReq) dogrula() string {
 	}
 	if q.MaxDomain < 0 || q.MaxDiskMB < 0 || q.MaxTrafikMB < 0 || q.FiyatKurus < 0 {
 		return "limitler/fiyat negatif olamaz"
+	}
+	// Sütun sınırları (0045/0059: aciklama VARCHAR(255), max_domain ve mail_* INT): aşınca
+	// MySQL 1406/1264 hatası ham metniyle 500 dönüyordu (VM doğrulaması 2026-10-13).
+	if len([]rune(q.Aciklama)) > 255 {
+		return "açıklama en çok 255 karakter olabilir"
+	}
+	const intUst = 2147483647
+	if q.MaxDomain > intUst || q.MailMaxEmail > intUst || q.MailSaatlikLimit > intUst || q.MailKutuKotaMB > intUst {
+		return "limit değeri çok büyük (en çok 2147483647)"
+	}
+	if q.MailMaxEmail < 0 || q.MailSaatlikLimit < 0 || q.MailKutuKotaMB < 0 {
+		return "posta limitleri negatif olamaz"
+	}
+	// CPU/RAM/G-Ç havuzu (0 = sınırsız) + disk havuzu (max_disk_mb) sınırları.
+	if err := bayikaynak.DegerDogrula(q.CPUCekirdek, q.RAMMB, q.MaxDiskMB, q.IOAgirlik); err != nil {
+		return err.Error()
 	}
 	return ""
 }
@@ -175,20 +205,27 @@ func (h *Handlers) PaketOlustur(w http.ResponseWriter, r *http.Request) {
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO reseller_plans(ad, aciklama, max_domain, max_disk_mb, max_trafik_mb,
 		   mail_max_email, mail_saatlik_limit, mail_kutu_kota_mb, fiyat_kurus,
-		   asim_ilkesi, asim_bildirim, fazla_satis, varsayilan)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		   asim_ilkesi, asim_bildirim, fazla_satis, varsayilan,
+		   kaynak_cpu_cekirdek, kaynak_ram_mb, kaynak_io_agirlik)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		req.Ad, strings.TrimSpace(req.Aciklama), req.MaxDomain, req.MaxDiskMB, req.MaxTrafikMB,
 		req.MailMaxEmail, req.MailSaatlikLimit, req.MailKutuKotaMB, req.FiyatKurus,
-		asimNormalize(req.AsimIlkesi), b01(req.AsimBildirim), b01(req.FazlaSatis), v)
+		asimNormalize(req.AsimIlkesi), b01(req.AsimBildirim), b01(req.FazlaSatis), v,
+		req.CPUCekirdek, req.RAMMB, req.IOAgirlik)
 	if err != nil {
 		if strings.Contains(err.Error(), "Duplicate") {
 			httpx.WriteError(w, http.StatusConflict, "bu isimde paket zaten var")
 			return
 		}
-		httpx.WriteError(w, http.StatusInternalServerError, "oluşturulamadı: "+err.Error())
+		uid, kul := middleware.Aktor(r)
+		httpx.Denetim(h.DB, r, uid, kul, "bayi_paketi.olustur", req.Ad, paketDetay(req), 0, false)
+		log.Printf("reseller: paket oluşturulamadı: %v", err)
+		httpx.WriteError(w, http.StatusInternalServerError, "oluşturulamadı")
 		return
 	}
 	id, _ := res.LastInsertId()
+	uid, kul := middleware.Aktor(r)
+	httpx.Denetim(h.DB, r, uid, kul, "bayi_paketi.olustur", req.Ad, paketDetay(req), 0, true)
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
@@ -209,6 +246,17 @@ func (h *Handlers) PaketGuncelle(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
+	// Paket VAR olmalı: eskiden olmayan pakete varsayilan:true ile PUT mevcut varsayılanı
+	// sıfırlayıp 200 dönüyordu (gerçek VPS 2026-10-13).
+	var varMi int
+	if err := h.DB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM reseller_plans WHERE id=?`, id).Scan(&varMi); err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, "paket okunamadı")
+		return
+	}
+	if id <= 0 || varMi == 0 {
+		httpx.WriteError(w, http.StatusNotFound, "bayi paketi bulunamadı")
+		return
+	}
 	v := 0
 	if req.Varsayilan {
 		v = 1
@@ -217,16 +265,25 @@ func (h *Handlers) PaketGuncelle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	uid, kul := middleware.Aktor(r)
 	if _, err := h.DB.ExecContext(r.Context(),
 		`UPDATE reseller_plans SET ad=?, aciklama=?, max_domain=?, max_disk_mb=?, max_trafik_mb=?,
-		   mail_max_email=?, mail_saatlik_limit=?, mail_kutu_kota_mb=?, fiyat_kurus=?, asim_ilkesi=?, asim_bildirim=?, fazla_satis=?, varsayilan=? WHERE id=?`,
+		   mail_max_email=?, mail_saatlik_limit=?, mail_kutu_kota_mb=?, fiyat_kurus=?, asim_ilkesi=?, asim_bildirim=?, fazla_satis=?, varsayilan=?,
+		   kaynak_cpu_cekirdek=?, kaynak_ram_mb=?, kaynak_io_agirlik=? WHERE id=?`,
 		req.Ad, strings.TrimSpace(req.Aciklama), req.MaxDomain, req.MaxDiskMB, req.MaxTrafikMB,
 		req.MailMaxEmail, req.MailSaatlikLimit, req.MailKutuKotaMB,
 		req.FiyatKurus, asimNormalize(req.AsimIlkesi), b01(req.AsimBildirim), b01(req.FazlaSatis),
-		v, id); err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "güncellenemedi: "+err.Error())
+		v, req.CPUCekirdek, req.RAMMB, req.IOAgirlik, id); err != nil {
+		httpx.Denetim(h.DB, r, uid, kul, "bayi_paketi.guncelle", req.Ad, paketDetay(req), 0, false)
+		if strings.Contains(err.Error(), "Duplicate") { // PaketOlustur ile aynı (ham SQL metni dönmez)
+			httpx.WriteError(w, http.StatusConflict, "bu isimde paket zaten var")
+			return
+		}
+		log.Printf("reseller: paket %d güncellenemedi: %v", id, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "güncellenemedi")
 		return
 	}
+	httpx.Denetim(h.DB, r, uid, kul, "bayi_paketi.guncelle", req.Ad, paketDetay(req), 0, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -241,11 +298,32 @@ func (h *Handlers) PaketSil(w http.ResponseWriter, r *http.Request) {
 			"bu pakete bağlı "+strconv.Itoa(n)+" bayi var; önce onları başka pakete taşıyın")
 		return
 	}
+	var ad string
+	if err := h.DB.QueryRowContext(r.Context(), `SELECT ad FROM reseller_plans WHERE id=?`, id).Scan(&ad); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httpx.WriteError(w, http.StatusNotFound, "bayi paketi bulunamadı")
+			return
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, "paket okunamadı")
+		return
+	}
+	uid, kul := middleware.Aktor(r)
 	if _, err := h.DB.ExecContext(r.Context(), `DELETE FROM reseller_plans WHERE id=?`, id); err != nil {
+		httpx.Denetim(h.DB, r, uid, kul, "bayi_paketi.sil", ad, "", 0, false)
 		httpx.WriteError(w, http.StatusInternalServerError, "silinemedi: "+err.Error())
 		return
 	}
+	httpx.Denetim(h.DB, r, uid, kul, "bayi_paketi.sil", ad, "", 0, true)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// paketDetay: bayi paketi denetim açıklaması (yalnız sayısal limitler; açıklama/ad metni YOK).
+func paketDetay(r paketReq) string {
+	d := fmt.Sprintf("domain=%d disk=%d trafik=%d", r.MaxDomain, r.MaxDiskMB, r.MaxTrafikMB)
+	if r.Varsayilan {
+		d += " varsayilan=true"
+	}
+	return d
 }
 
 // paketLimitleri: paket id -> limitler (bayi olustururken/guncellenirken kopyalanir).
@@ -259,6 +337,17 @@ func (h *Handlers) paketLimitleri(r *http.Request, paketID int64) (maxDomain int
 		return 0, 0, 0, false
 	}
 	return maxDomain, diskMB, trafikMB, true
+}
+
+// paketKaynak: paketin CPU/RAM/G-Ç havuzu (bayiye KOPYALANIR — anlık-görüntü modeli).
+func (h *Handlers) paketKaynak(r *http.Request, paketID int64) (cpu float64, ramMB int64, io int) {
+	if paketID <= 0 {
+		return 0, 0, 0
+	}
+	_ = h.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(kaynak_cpu_cekirdek,0), COALESCE(kaynak_ram_mb,0), COALESCE(kaynak_io_agirlik,0)
+		   FROM reseller_plans WHERE id=?`, paketID).Scan(&cpu, &ramMB, &io)
+	return cpu, ramMB, io
 }
 
 // asimNormalize: bilinmeyen/boş değerde güvenli varsayilan ('disk_trafik' —
@@ -288,13 +377,15 @@ func (h *Handlers) PaketDetay(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(p.mail_max_email,0), COALESCE(p.mail_saatlik_limit,0), COALESCE(p.mail_kutu_kota_mb,0),
 		        p.fiyat_kurus, p.asim_ilkesi, p.asim_bildirim, p.fazla_satis, p.varsayilan,
 		        (SELECT COUNT(*) FROM users u WHERE u.reseller_plan_id=p.id AND u.role='reseller'),
-		        COALESCE(DATE_FORMAT(p.created_at,'%Y-%m-%d'),'')
+		        COALESCE(DATE_FORMAT(p.created_at,'%Y-%m-%d'),''),
+		        COALESCE(p.kaynak_cpu_cekirdek,0), COALESCE(p.kaynak_ram_mb,0), COALESCE(p.kaynak_io_agirlik,0)
 		   FROM reseller_plans p WHERE p.id=?`, id).
 		// 🔴 mail_* alanları EKSİKTİ → düzenleme sayfası bunları 0 gösterip
 		// kaydedince plandaki mail tavanlarını SIFIRLIYORDU (veri kaybı).
 		Scan(&x.ID, &x.Ad, &x.Aciklama, &x.MaxDomain, &x.MaxDiskMB, &x.MaxTrafikMB,
 			&x.MailMaxEmail, &x.MailSaatlikLimit, &x.MailKutuKotaMB,
-			&x.FiyatKurus, &x.AsimIlkesi, &bild, &fs, &vars, &x.BayiSayisi, &x.Olusturulma)
+			&x.FiyatKurus, &x.AsimIlkesi, &bild, &fs, &vars, &x.BayiSayisi, &x.Olusturulma,
+			&x.CPUCekirdek, &x.RAMMB, &x.IOAgirlik)
 	if err != nil {
 		httpx.WriteError(w, http.StatusNotFound, "paket bulunamadı")
 		return

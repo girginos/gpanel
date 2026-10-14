@@ -1,4 +1,4 @@
-// Package logs: per-domain nginx log dosyalari + SSE canli tail.
+// Package logs: per-domain nginx log dosyalari + hesabin PHP-FPM gunlugu + SSE canli tail.
 //
 // Log hedefi: bir hosting hesabinin ana alan adi, ek (addon) alan adlari ve alt
 // alanlari ayni hesap kimligi altinda secilebilir. Hedef sunucuda COZULUR: istemci
@@ -30,6 +30,13 @@ import (
 // LogDizin: nginx vhost'larinin access/error log dizini (testte degistirilir).
 var LogDizin = "/var/log/nginx"
 
+// PHPLogKok: kiraci PHP-FPM gunluk dizinlerinin koku — /var/log/php-fpm-<sk>/tenant.log
+// (provisioner.tenantPerSkLogFile ile AYNI yol). Testte degistirilir.
+var PHPLogKok = "/var/log"
+
+// skRe: panel sistem kullanicisi (c_ oneki; kucuk harf/rakam/alt cizgi).
+var skRe = regexp.MustCompile(`^c_[a-z0-9_]{1,60}$`)
+
 const (
 	azamiOkumaB   = 8 << 20 // tek istekte dosya sonundan en cok bu kadar bayt okunur
 	azamiSatirSay = 2000
@@ -41,7 +48,7 @@ type Handlers struct {
 }
 
 type LogDosya struct {
-	Anahtar string `json:"anahtar"` // "access" | "error"
+	Anahtar string `json:"anahtar"` // "access" | "error" | "php"
 	Etiket  string `json:"etiket"`
 	BoyutB  int64  `json:"boyut_b"`
 	Degisme string `json:"degisme"`
@@ -93,6 +100,35 @@ func DosyaYolu(alanAdi, anahtar string) (string, error) {
 	return p, nil
 }
 
+// PHPDosyaYolu: hesabin PHP-FPM gunlugu (/var/log/php-fpm-<sk>/tenant.log).
+//
+// NEDEN: PHP uygulama hatalari (Fatal/Warning/Notice — catch_workers_output ile
+// "child N said into stderr") ve FPM uyarilari (max_children doldu, execution timed
+// out, takili sendmail/postdrop) BURAYA duser; nginx error.log'da GORUNMEZ. 2026-10-12
+// .180'de WHMCS "site cokuyor" (mail()'de asili isci) yalniz bu dosyadan anlasildi.
+// Gunluk HESAP duzeyidir (ana/ek/alt alan adlarinin hepsi ayni kiraci havuzunda).
+// Dizin systemd LogsDirectory (root sahipli): kiraci yazamaz/bag koyamaz; okuma yine
+// guvenliAc ile (Lstat + SameFile) yapilir.
+func PHPDosyaYolu(sk string) (string, error) {
+	if !skRe.MatchString(sk) {
+		return "", errYol
+	}
+	kok := filepath.Clean(PHPLogKok)
+	dizin := filepath.Join(kok, "php-fpm-"+sk)
+	if filepath.Dir(dizin) != kok {
+		return "", errYol
+	}
+	return filepath.Join(dizin, "tenant.log"), nil
+}
+
+// dosyaYolu: istekteki dosya anahtari -> okunacak dosya ("php" hedeften bagimsiz, hesap duzeyi).
+func dosyaYolu(alanAdi, sk, anahtar string) (string, error) {
+	if anahtar == "php" {
+		return PHPDosyaYolu(sk)
+	}
+	return DosyaYolu(alanAdi, anahtar)
+}
+
 // dosyaBilgi: sembolik bagi TAKIP ETMEDEN (Lstat) salt-okuma bilgi. Sembolik bag ya da
 // duz dosya olmayan = yok sayilir.
 func dosyaBilgi(p string) (os.FileInfo, bool) {
@@ -131,36 +167,36 @@ type hataKodlu struct {
 
 func (e *hataKodlu) Error() string { return e.msg }
 
-// cozum: hedefin alan adi (ve hesap SK'si) ya da hata.
-func (h *Handlers) cozum(r *http.Request) (alanAdi string, err error) {
+// cozum: hedefin alan adi + hesabin sistem kullanicisi (PHP gunlugu icin) ya da hata.
+func (h *Handlers) cozum(r *http.Request) (alanAdi, sistemKul string, err error) {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	var ana, sk string
 	var isDemo int
 	e := h.DB.QueryRowContext(r.Context(),
 		`SELECT alan_adi, sistem_kullanici, is_demo FROM domains WHERE id=?`, id).Scan(&ana, &sk, &isDemo)
 	if errors.Is(e, sql.ErrNoRows) {
-		return "", &hataKodlu{http.StatusNotFound, "abonelik bulunamadı"}
+		return "", "", &hataKodlu{http.StatusNotFound, "abonelik bulunamadı"}
 	}
 	if e != nil {
-		return "", &hataKodlu{http.StatusInternalServerError, "log hedefi çözülemedi"}
+		return "", "", &hataKodlu{http.StatusInternalServerError, "log hedefi çözülemedi"}
 	}
 	if isDemo == 1 {
-		return "", &hataKodlu{http.StatusForbidden, "demo aboneliğin logları yönetilemez"}
+		return "", "", &hataKodlu{http.StatusForbidden, "demo aboneliğin logları yönetilemez"}
 	}
 	hedef := strings.TrimSpace(r.URL.Query().Get("hedef"))
 	if sidStr := chi.URLParam(r, "sid"); sidStr != "" {
 		if hedef != "" {
-			return "", &hataKodlu{http.StatusBadRequest, "geçersiz log hedefi"}
+			return "", "", &hataKodlu{http.StatusBadRequest, "geçersiz log hedefi"}
 		}
 		hedef = "alt:" + sidStr
 	}
 	if hedef == "" || hedef == "ana" {
-		return ana, nil
+		return ana, sk, nil
 	}
 	tur, num, ok := strings.Cut(hedef, ":")
 	n, perr := strconv.ParseInt(num, 10, 64)
 	if !ok || perr != nil || n <= 0 || (tur != "ek" && tur != "alt") {
-		return "", &hataKodlu{http.StatusBadRequest, "geçersiz log hedefi"}
+		return "", "", &hataKodlu{http.StatusBadRequest, "geçersiz log hedefi"}
 	}
 	q := `SELECT alan_adi FROM ek_alan_adlari WHERE id=? AND domain_id=?`
 	if tur == "alt" {
@@ -170,12 +206,12 @@ func (h *Handlers) cozum(r *http.Request) (alanAdi string, err error) {
 	e = h.DB.QueryRowContext(r.Context(), q, n, id).Scan(&ad)
 	if errors.Is(e, sql.ErrNoRows) || (e == nil && ad == "") {
 		// başka hesabın kimliği = olmayanla aynı yanıt (IDOR)
-		return "", &hataKodlu{http.StatusNotFound, "log hedefi bulunamadı"}
+		return "", "", &hataKodlu{http.StatusNotFound, "log hedefi bulunamadı"}
 	}
 	if e != nil {
-		return "", &hataKodlu{http.StatusInternalServerError, "log hedefi çözülemedi"}
+		return "", "", &hataKodlu{http.StatusInternalServerError, "log hedefi çözülemedi"}
 	}
-	return ad, nil
+	return ad, sk, nil
 }
 
 func hataYaz(w http.ResponseWriter, err error) {
@@ -254,7 +290,7 @@ func (h *Handlers) hedefSatiri(t LogHedefi) LogHedefi {
 }
 
 func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
-	alanAdi, err := h.cozum(r)
+	alanAdi, sk, err := h.cozum(r)
 	if err != nil {
 		hataYaz(w, err)
 		return
@@ -263,9 +299,10 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 	for _, k := range []struct{ Anahtar, Etiket string }{
 		{"access", "Erişim (access)"},
 		{"error", "Hata (error)"},
+		{"php", "PHP (yazılım hataları)"},
 	} {
 		entry := LogDosya{Anahtar: k.Anahtar, Etiket: k.Etiket}
-		if p, perr := DosyaYolu(alanAdi, k.Anahtar); perr == nil {
+		if p, perr := dosyaYolu(alanAdi, sk, k.Anahtar); perr == nil {
 			if st, ok := dosyaBilgi(p); ok {
 				entry.Mevcut = true
 				entry.BoyutB = st.Size()
@@ -279,7 +316,7 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
 
 // Son N satiri okur (default 200, max 2000)
 func (h *Handlers) Read(w http.ResponseWriter, r *http.Request) {
-	alanAdi, err := h.cozum(r)
+	alanAdi, sk, err := h.cozum(r)
 	if err != nil {
 		hataYaz(w, err)
 		return
@@ -288,7 +325,7 @@ func (h *Handlers) Read(w http.ResponseWriter, r *http.Request) {
 	if anahtar == "" {
 		anahtar = "access"
 	}
-	p, perr := DosyaYolu(alanAdi, anahtar)
+	p, perr := dosyaYolu(alanAdi, sk, anahtar)
 	if perr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz dosya anahtarı")
 		return
@@ -319,7 +356,7 @@ func (h *Handlers) Read(w http.ResponseWriter, r *http.Request) {
 
 // SSE canli tail: log dosyasinin sonuna seek, yeni satirlari "data: ..." ile pushlar
 func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
-	alanAdi, err := h.cozum(r)
+	alanAdi, sk, err := h.cozum(r)
 	if err != nil {
 		hataYaz(w, err)
 		return
@@ -328,7 +365,7 @@ func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
 	if anahtar == "" {
 		anahtar = "access"
 	}
-	p, perr := DosyaYolu(alanAdi, anahtar)
+	p, perr := dosyaYolu(alanAdi, sk, anahtar)
 	if perr != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz dosya anahtarı")
 		return
@@ -344,7 +381,7 @@ func (h *Handlers) Tail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, ": tail %s baslatildi\n\n", anahtar) //nolint:gosec // G705 FP: Content-Type text/event-stream (HTML DEGIL); anahtar yalniz {access,error} allowlist (aksi halde ustte 400) - tarayici govdeyi HTML yorumlamaz.
+	_, _ = fmt.Fprintf(w, ": tail %s baslatildi\n\n", anahtar) //nolint:gosec // G705 FP: Content-Type text/event-stream (HTML DEGIL); anahtar yalniz {access,error,php} allowlist (aksi halde ustte 400) - tarayici govdeyi HTML yorumlamaz.
 	flusher.Flush()
 
 	f, err := guvenliAc(p)

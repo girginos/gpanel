@@ -111,6 +111,10 @@ const EKL_EN: Record<string, string> = {
   "Lisans kaldırılamadı": "Failed to remove license",
   "Lisans kaldırıldı.": "License removed.",
   "Lisans var, eklenti kapalı": "Licensed, add-on off",
+  "Paket doğrulanamadı": "Package not verified",
+  "Yeniden Kur": "Reinstall",
+  "Eklenti kapalı": "Add-on is off",
+  "Eklenti paketi, kurulumda kaydedilen imzalı paketle eşleşmediği için kapatıldı (çoğunlukla panel güncellemesinden sonra olur). Yeniden Kur, paketin imzasını ve lisansınızı doğrulayıp kaydı yeniler; ayarlarınız ve verileriniz silinmez.": "The add-on was turned off because its package does not match the signed package recorded at install time (usually after a panel update). Reinstall verifies the package signature and your license and renews the record; your settings and data are not deleted.",
   "Lisanslı ve etkin": "Licensed and active",
   "Lisanssız": "Unlicensed",
   "Lisansı Doğrula": "Verify License",
@@ -588,7 +592,12 @@ export default function EklentilerPage() {
     try {
       const { data } = await api.post(`/eklenti/${k.eklenti_ad}/lisans-dogrula`, {})
       // 🔴 "belirsiz" (ağ hatası) BAŞARI DEĞİLDİR — ayrı gösterilir.
-      if (data?.karar === 'gecerli') {
+      if (data?.karar === 'gecerli' && data?.aktif === false) {
+        // Lisans geçerli ama eklenti başka bir sebeple (ör. paket doğrulaması) kapalı.
+        const m = data.mesaj || cevir("Eklenti kapalı")
+        setIslemHata(m)
+        toast.uyari(cevir("Eklenti kapalı"), m)
+      } else if (data?.karar === 'gecerli') {
         const m = data.mesaj || cevir("Lisans geçerli.")
         setBasari(m)
         toast.basari(m)
@@ -921,6 +930,10 @@ function Rozet({ k }: { k: Kart }) {
   if (k.aktif && k.lisans.var) {
     return <Etiket renk="emerald">{k.lisans.deneme ? cevir('Deneme sürümü etkin') : cevir("Lisanslı ve etkin")}</Etiket>
   }
+  // 🔴 Bütünlük izleyicisinin kapattığı eklenti "lisans var, kapalı" DEĞİLDİR:
+  // sebep lisans değil paket doğrulaması; kurtarma yolu "Yeniden Kur".
+  if (!k.aktif && k.saglik === 'kurcalanmis')
+    return <Etiket renk="rose">{cevir("Paket doğrulanamadı")}</Etiket>
   if (k.lisans.var && !k.aktif)
     return <Etiket renk="amber">{cevir("Lisans var, eklenti kapalı")}</Etiket>
   if (k.kurulu && !k.aktif)
@@ -971,14 +984,27 @@ function Eylem({ k, mesgul, onLisans, onKaldir, onDogrula, onKur }: { k: Kart } 
   // kalmaz. Bilinçli olarak ÇEKİRDEK ile sınırlandırıldı: aynı kapıyı mail'e
   // açmak, onun kurulumunun yeniden çalıştırılabilir olduğunu KANITSIZ
   // varsaymak olurdu.
-  const kurulabilir = k.kurulur && (!k.kurulu || (!k.aktif && !!k.cekirdek))
+  //
+  // Üçüncü koşul: bütünlük izleyicisinin kapattığı (kurcalanmis) ücretli eklenti.
+  // "Kur" akışı paketin Ed25519 imzasını ve lisansı lisans sunucusunda yeniden
+  // doğrular, kaydı yeniler; kurcalanmış paket imzadan geçemez. Güncelleme
+  // sonrası otomatik kayıt yenileme (guncelleme_kayit.go) aynı akışı çalıştırır,
+  // yani kurulum burada da yeniden çalıştırılabilir. Bu dal olmadan kart yalnız
+  // "Lisansı Doğrula" gösteriyordu ve kullanıcının geri dönüş yolu yoktu.
+  const kurcalanmis = !k.aktif && k.saglik === 'kurcalanmis'
+  const kurulabilir = k.kurulur && (!k.kurulu || (!k.aktif && !!k.cekirdek) || kurcalanmis)
 
   if (kapsamda && kurulabilir) {
     return (
       <div className="flex flex-wrap gap-2">
         <Button color="primary" boyut="sm" ikon={k.kurulu ? I.onay : I.oynat} onClick={onKur} yukleniyor={mesgul}>
-          {mesgul ? cevir('Kuruluyor…') : (k.kurulu ? cevir("Yeniden Etkinleştir") : cevir("Kur"))}
+          {mesgul ? cevir('Kuruluyor…') : (kurcalanmis ? cevir("Yeniden Kur") : (k.kurulu ? cevir("Yeniden Etkinleştir") : cevir("Kur")))}
         </Button>
+        {kurcalanmis && (
+          <p className="w-full text-xs text-slate-500 dark:text-slate-400">
+            {cevir("Eklenti paketi, kurulumda kaydedilen imzalı paketle eşleşmediği için kapatıldı (çoğunlukla panel güncellemesinden sonra olur). Yeniden Kur, paketin imzasını ve lisansınızı doğrulayıp kaydı yeniler; ayarlarınız ve verileriniz silinmez.")}
+          </p>
+        )}
       </div>
     )
   }

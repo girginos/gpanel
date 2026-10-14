@@ -218,7 +218,7 @@ func TestSSLIlerleme_PostaUyarilari_HamYalnizYoneticiye(t *testing.T) {
 			d.kur()
 			si_temizle(t, id)
 			_, db := si_db()
-			(&Handlers{DB: db}).sslBaslat(id, "bayialan.test", "c_bayialan", "8.3", "php-fpm", "letsencrypt", true, nil)
+			(&Handlers{DB: db}).sslBaslat(id, "bayialan.test", "c_bayialan", "8.3", "php-fpm", "letsencrypt", true, nil, nil)
 			si_isBekle(t, id)
 			ids := strconv.FormatInt(id, 10)
 

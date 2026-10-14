@@ -27,6 +27,31 @@ warn() { echo -e "  ${c_y}!${c_0} $*"; }
 err()  { echo -e "  ${c_r}✗${c_0} $*" >&2; }
 
 # Yollar: GOSP_* yalnız kum havuzu testleri içindir (varsayılanlar gerçek sistem yolları).
+# Usage text (English). The Turkish header comment above is developer documentation.
+kullanim() {
+  cat <<'KULLANIM'
+girginospanel-erisim — manage the panel access mode over SSH.
+
+The panel can be reached in two ways:
+  web        the panel port is OPEN to the outside in the firewall; any browser can connect.
+  desktop    the panel port is CLOSED to the outside. Only the GirginOS AI desktop app can
+             reach the panel, through a tunnel over SSH (22). The strictest setup: the panel
+             UI is never exposed to the internet. (alias: masaustu)
+When role gates are installed, the "panel port" is the ADMIN gate: desktop mode only closes
+the admin surface; the reseller/customer gates stay open.
+
+Usage:
+  girginospanel-erisim [durum | status]
+  girginospanel-erisim web
+  girginospanel-erisim desktop            (masaustu is the same command)
+  girginospanel-erisim baglanti-linki [host]    print a girginospanel:// link for the panel
+  girginospanel-erisim -h | --help
+
+nft/firewalld/iptables is selected automatically; the panel's own table `inet girginos_fw`
+is preferred.
+KULLANIM
+}
+
 DURUM_DOSYA=${GOSP_ERISIM_MODU:-/etc/girginospanel/erisim-modu}
 
 KAPI_AYAR=${GOSP_KAPI_AYAR:-/etc/girginospanel/kapi.json}
@@ -63,23 +88,23 @@ kapi_zorlama_olc() { # -> 0 yalnız zorlama KANITLI açıksa
   local bayrak mp kod b_ac=0 b_kapali=0 u_ac=0 u_kapali=0 bd ud
   bayrak=$(head -c 32 "$KAPI_ZORLAMA" 2>/dev/null | tr -d '[:space:]')
   case "$bayrak" in
-    acik)   b_ac=1;     bd="bayrak: acik" ;;
-    kapali) b_kapali=1; bd="bayrak: KAPALI ($KAPI_ZORLAMA)" ;;
-    "")     bd="bayrak okunamadı ($KAPI_ZORLAMA yok — panel ölçümü bitmedi ya da eski sürüm)" ;;
-    *)      bd="bayrak tanınmadı ('${bayrak//[!a-zA-Z0-9_-]/?}')" ;;
+    acik)   b_ac=1;     bd="flag: on" ;;
+    kapali) b_kapali=1; bd="flag: OFF ($KAPI_ZORLAMA)" ;;
+    "")     bd="flag unreadable ($KAPI_ZORLAMA missing — panel measurement not finished or old version)" ;;
+    *)      bd="flag not recognized ('${bayrak//[!a-zA-Z0-9_-]/?}')" ;;
   esac
   mp=$(kapi_portu musteri)
   if [ -z "$mp" ]; then
-    ud="müşteri kapı portu $KAPI_AYAR içinde yok — giriş ucu ölçülemedi"
+    ud="customer gate port missing in $KAPI_AYAR — login endpoint could not be measured"
   else
     kod=$(curl -sk -m 5 -o /dev/null -w '%{http_code}' -X POST \
           -H 'Content-Type: application/json' --data '{}' \
           "https://127.0.0.1:$mp/api/v1/auth/login" 2>/dev/null)
     case "$kod" in
-      404)         u_ac=1;     ud="müşteri kapısı :$mp yönetici girişi: 404 (uç yok)" ;;
-      400|401|200) u_kapali=1; ud="müşteri kapısı :$mp yönetici girişi: HTTP $kod — uç AÇIK" ;;
-      ""|000)      ud="müşteri kapısı :$mp bağlanılamadı — giriş ucu ölçülemedi" ;;
-      *)           ud="müşteri kapısı :$mp HTTP $kod — giriş ucu ölçülemedi" ;;
+      404)         u_ac=1;     ud="customer gate :$mp admin login: 404 (endpoint absent)" ;;
+      400|401|200) u_kapali=1; ud="customer gate :$mp admin login: HTTP $kod — endpoint OPEN" ;;
+      ""|000)      ud="customer gate :$mp could not connect — login endpoint could not be measured" ;;
+      *)           ud="customer gate :$mp HTTP $kod — login endpoint could not be measured" ;;
     esac
   fi
   KAPI_ZORLAMA_OLCUM="$bd · $ud"
@@ -115,7 +140,7 @@ fw_backend() {
     echo "firewalld"; return
   fi
   command -v iptables >/dev/null 2>&1 && { echo "iptables"; return; }
-  echo "yok"
+  echo "none"
 }
 
 YORUM_ONEK="gpanel-erisim kapali"
@@ -259,7 +284,7 @@ nginx_listen_ayarla() { # port mod
     fi
   done
   if ! nginx -t >/dev/null 2>&1; then
-    err "nginx -t BAŞARISIZ — değişiklik geri alınıyor"
+    err "nginx -t FAILED — rolling the change back"
     nginx -t 2>&1 | tail -3 >&2
     nginx_geri_al "$ts"
     return 1
@@ -270,7 +295,7 @@ nginx_listen_ayarla() { # port mod
   # (Belirti: config'te 127.0.0.1:9443 yazar ama `ss -tlnp` hâlâ 0.0.0.0:9443
   #  gösterir ve port dışarıdan yanıt vermeye devam eder.)
   if ! systemctl restart nginx >/dev/null 2>&1; then
-    err "nginx restart başarısız — geri alınıyor"; nginx_geri_al "$ts"
+    err "nginx restart failed — rolling back"; nginx_geri_al "$ts"
     systemctl restart nginx >/dev/null 2>&1
     return 1
   fi
@@ -279,7 +304,7 @@ nginx_listen_ayarla() { # port mod
   local beklenen
   if [ "$mod" = "loopback" ]; then beklenen="127.0.0.1:$port"; else beklenen="0.0.0.0:$port"; fi
   if ! ss -tln 2>/dev/null | grep -F "$beklenen" >/dev/null; then
-    err "soket beklenen adrese ($beklenen) bağlanmadı — geri alınıyor"
+    err "socket did not bind to the expected address ($beklenen) — rolling back"
     nginx_geri_al "$ts"; systemctl restart nginx >/dev/null 2>&1
     return 1
   fi
@@ -299,7 +324,7 @@ ssh_portu() {
   echo "${p:-22}"
 }
 
-kayitli_mod() { [ -f "$DURUM_DOSYA" ] && cat "$DURUM_DOSYA" || echo "bilinmiyor"; }
+kayitli_mod() { [ -f "$DURUM_DOSYA" ] && cat "$DURUM_DOSYA" || echo "unknown"; }
 mod_yaz() { mkdir -p "$(dirname "$DURUM_DOSYA")"; echo "$1" > "$DURUM_DOSYA"; }
 
 dis_ip() {
@@ -311,139 +336,139 @@ dis_ip() {
 cmd_durum() {
   local port sshp be kapi=0 zorlama_acik=0
   port=$(panel_portu); sshp=$(ssh_portu); be=$(fw_backend)
-  say "${c_b}GirginOSPanel erişim durumu${c_0}"
+  say "${c_b}GirginOSPanel access status${c_0}"
   if [ -n "$(kapi_portu admin)" ]; then
     kapi=1
-    say "  rol kapıları    : admin $port · bayi $(kapi_portu bayi) · müşteri $(kapi_portu musteri) (bayi/müşteri bu moddan etkilenmez)"
-    [ -n "$(kapi_eski_portlari)" ] && warn "eski kapı açık: $(kapi_eski_portlari)— yönetici girişi oradan da mümkün"
+    say "  role gates      : admin $port · reseller $(kapi_portu bayi) · customer $(kapi_portu musteri) (reseller/customer are not affected by this mode)"
+    [ -n "$(kapi_eski_portlari)" ] && warn "old gate open: $(kapi_eski_portlari)— admin login is possible there too"
     # 🔴 SON-OPS-5: kapı modunda "masaustu" sonucu zorlamaya BAĞLI — zorlama kapalıyken
     # bayi/müşteri/eski kapıların her biri yönetici girişini de kabul eder (RK-OPS-06).
     if kapi_zorlama_olc; then
       zorlama_acik=1
-      ok "kapı zorlaması  : AÇIK (ölçüldü: $KAPI_ZORLAMA_OLCUM)"
+      ok "gate enforcement: ON (measured: $KAPI_ZORLAMA_OLCUM)"
     elif [ "$KAPI_ZORLAMA_DURUM" = "kapali" ]; then
-      warn "kapı zorlaması  : KAPALI — rol ayrımı yok, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir ($KAPI_ZORLAMA_OLCUM)"
+      warn "gate enforcement: OFF — no role separation, admin login is also accepted on the reseller/customer/old gates ($KAPI_ZORLAMA_OLCUM)"
     else
-      warn "kapı zorlaması  : ÖLÇÜLEMEDİ — rol ayrımı doğrulanmadı ($KAPI_ZORLAMA_OLCUM)"
+      warn "gate enforcement: COULD NOT MEASURE — role separation not verified ($KAPI_ZORLAMA_OLCUM)"
     fi
   fi
-  say "  panel portu     : $port"
-  say "  SSH portu       : $sshp"
-  say "  firewall arka uç: $be"
+  say "  panel port      : $port"
+  say "  SSH port        : $sshp"
+  say "  firewall backend: $be"
   # 1) nginx dinleme adresi (en belirleyici katman)
   if nginx_loopback_mi "$port"; then
-    ok "nginx dinleme : ${c_b}127.0.0.1:$port${c_0} — servis dışarıda HİÇ dinlemiyor"
+    ok "nginx listen  : ${c_b}127.0.0.1:$port${c_0} — the service does NOT listen externally at all"
   else
-    warn "nginx dinleme : 0.0.0.0:$port — servis tüm arayüzlerde dinliyor"
+    warn "nginx listen  : 0.0.0.0:$port — the service listens on all interfaces"
   fi
   # 2) firewall
-  if [ "$be" = "yok" ]; then
-    warn "firewall      : yok"
+  if [ "$be" = "none" ]; then
+    warn "firewall      : none"
   elif port_acik_mi "$port"; then
-    warn "firewall      : port $port DIŞARI AÇIK"
+    warn "firewall      : port $port OPEN to the outside"
   else
-    ok "firewall      : port $port DIŞARI KAPALI"
+    ok "firewall      : port $port CLOSED to the outside"
   fi
   # 3) gerçek sonuç
   if nginx_loopback_mi "$port" || ! port_acik_mi "$port"; then
     if [ "$kapi" = 0 ]; then
-      ok "SONUÇ → mod: ${c_b}masaustu${c_0} (panele yalnız SSH tüneliyle girilir)"
+      ok "RESULT → mode: ${c_b}desktop${c_0} (the panel is reachable only through an SSH tunnel)"
     elif [ "$zorlama_acik" = 1 ]; then
-      ok "SONUÇ → mod: ${c_b}masaustu${c_0} (yönetici yüzeyine yalnız SSH tüneliyle girilir; bayi/müşteri kapıları açık — zorlama ölçüldü)"
+      ok "RESULT → mode: ${c_b}desktop${c_0} (the admin surface is reachable only through an SSH tunnel; reseller/customer gates are open — enforcement measured)"
     else
-      warn "SONUÇ → mod: ${c_b}masaustu${c_0} (yalnız admin kapısı loopback'te; zorlama KAPALI/ölçülemedi — yönetici girişi bayi/müşteri/eski kapılarda açık olabilir)"
+      warn "RESULT → mode: ${c_b}desktop${c_0} (only the admin gate is on loopback; enforcement OFF/not measurable — admin login may be open on the reseller/customer/old gates)"
     fi
   else
-    ok "SONUÇ → mod: ${c_b}web${c_0} (tarayıcıdan girilebilir)"
+    ok "RESULT → mode: ${c_b}web${c_0} (reachable from a browser)"
   fi
-  say "  kayıtlı mod     : $(kayitli_mod)"
+  say "  saved mode      : $(kayitli_mod)"
   say ""
-  say "  Değiştirmek için:  girginospanel-erisim web   |   girginospanel-erisim desktop"
+  say "  To change:  girginospanel-erisim web   |   girginospanel-erisim desktop"
 }
 
 cmd_web() {
   local port; port=$(panel_portu)
-  say "${c_b}Mod: web${c_0} — panel portu dışarı açılıyor"
+  say "${c_b}Mode: web${c_0} — opening the panel port to the outside"
   if nginx_loopback_mi "$port"; then
-    if nginx_listen_ayarla "$port" genel; then ok "nginx tüm arayüzlerde dinliyor (0.0.0.0:$port)"; else exit 1; fi
+    if nginx_listen_ayarla "$port" genel; then ok "nginx listens on all interfaces (0.0.0.0:$port)"; else exit 1; fi
   else
-    ok "nginx zaten tüm arayüzlerde dinliyor"
+    ok "nginx already listens on all interfaces"
   fi
-  if port_ac "$port"; then ok "firewall: port $port/tcp açıldı"; else err "port açılamadı (firewall arka uç: $(fw_backend))"; exit 1; fi
+  if port_ac "$port"; then ok "firewall: port $port/tcp opened"; else err "could not open the port (firewall backend: $(fw_backend))"; exit 1; fi
   mod_yaz web
-  ok "panel adresi: https://$(dis_ip):$port"
-  warn "Panel arayüzü artık internete açık. Sadece masaüstü uygulamasından yönetmek istersen: girginospanel-erisim desktop"
+  ok "panel address: https://$(dis_ip):$port"
+  warn "The panel UI is now open to the internet. To manage it only from the desktop app: girginospanel-erisim desktop"
 }
 
 cmd_masaustu() {
   local port sshp; port=$(panel_portu); sshp=$(ssh_portu)
-  say "${c_b}Mod: masaustu${c_0} — panel portu dışarı kapatılıyor"
+  say "${c_b}Mode: desktop${c_0} — closing the panel port to the outside"
   # 🔴 SSH kapalıysa kapatma: panele HİÇBİR yoldan erişilemez hale gelir.
   if ! port_acik_mi "$sshp"; then
-    if [ "$(fw_backend)" = "yok" ]; then
-      warn "firewall yok — SSH kontrolü atlandı"
+    if [ "$(fw_backend)" = "none" ]; then
+      warn "no firewall — SSH check skipped"
     else
-      err "SSH portu ($sshp) firewall'da açık GÖRÜNMÜYOR."
-      err "Panel portunu kapatırsam sunucuya erişim tamamen kesilebilir — İŞLEM DURDURULDU."
-      err "Önce SSH erişimini doğrula, sonra tekrar dene."
+      err "SSH port ($sshp) does NOT appear to be open in the firewall."
+      err "If the panel port is closed, access to the server could be cut off completely — OPERATION STOPPED."
+      err "Verify SSH access first, then try again."
       exit 1
     fi
   fi
   # 1) KATMAN: nginx'i loopback'e bağla — port dışarıda HİÇ dinlenmez.
   #    API de aynı vhost'ta olduğu için ona da dışarıdan erişilemez.
   if nginx_listen_ayarla "$port" loopback; then
-    ok "nginx artık yalnız 127.0.0.1:$port dinliyor (dış arayüzlerde kapalı)"
+    ok "nginx now listens only on 127.0.0.1:$port (closed on external interfaces)"
   else
-    err "nginx dinleme adresi değiştirilemedi — İŞLEM DURDURULDU"; exit 1
+    err "the nginx listen address could not be changed — OPERATION STOPPED"; exit 1
   fi
   # 2) KATMAN: firewall (derinlemesine savunma)
-  if port_kapat "$port"; then ok "firewall: port $port/tcp kapatıldı"; else warn "firewall kuralı eklenemedi (nginx katmanı yeterli)"; fi
+  if port_kapat "$port"; then ok "firewall: port $port/tcp closed"; else warn "the firewall rule could not be added (the nginx layer is sufficient)"; fi
   mod_yaz masaustu
   # 3) DOĞRULA: dışarıdan gerçekten kapalı mı, içeriden hâlâ açık mı?
   # Soket adresi TEK GÜVENİLİR ölçü: sunucudan kendi dış IP'sine yapılan
   # istek `lo` üzerinden gider, firewall kuralı atlanır (yanlış-pozitif).
   if ss -tln 2>/dev/null | grep -E "(0\\.0\\.0\\.0|\\[::\\]):$port " >/dev/null; then
-    err "UYARI: nginx hâlâ TÜM arayüzlerde dinliyor — elle kontrol et!"
+    err "WARNING: nginx STILL listens on ALL interfaces — check manually!"
     ss -tlnp 2>/dev/null | grep ":$port " >&2
   else
-    ok "doğrulandı: soket yalnız 127.0.0.1:$port — dış arayüzlerde dinleme YOK"
+    ok "verified: the socket is only 127.0.0.1:$port — NO listening on external interfaces"
   fi
   if dis_erisim_var_mi "$port"; then
-    warn "not: sunucunun kendi içinden dış IP'ye erişim var (lo üzerinden — normal)"
+    warn "note: the server can reach its own external IP from the inside (via lo — normal)"
   fi
   if curl -sk -m 4 -o /dev/null "https://127.0.0.1:$port/" 2>/dev/null; then
-    ok "doğrulandı: sunucu içinden (SSH tüneli yolu) erişim VAR"
+    ok "verified: access from inside the server (the SSH tunnel path) WORKS"
   else
-    err "UYARI: panel içeriden de yanıt vermiyor — SSH tüneli çalışmayabilir!"
+    err "WARNING: the panel does not answer from inside either — the SSH tunnel may not work!"
   fi
   if [ -z "$(kapi_portu admin)" ]; then
-    ok "Panele artık yalnız GirginOS AI masaüstü uygulaması erişebilir (SSH tüneli)."
+    ok "Only the GirginOS AI desktop app can reach the panel now (SSH tunnel)."
   else
     # 🔴 Kapı modunda başarı iddiası ÖLÇÜME bağlı (RK-OPS-06): zorlama kapalıyken
     # bayi/müşteri/eski kapılar root girişini de kabul eder.
     if kapi_zorlama_olc; then
-      ok "Yönetici yüzeyine artık yalnız GirginOS AI masaüstü uygulaması erişebilir (SSH tüneli)."
-      ok "bayi (:$(kapi_portu bayi)) ve müşteri (:$(kapi_portu musteri)) kapıları AÇIK kalır — yalnız yönetici yüzeyi kapandı"
-      ok "zorlama ölçüldü: $KAPI_ZORLAMA_OLCUM"
+      ok "Only the GirginOS AI desktop app can reach the admin surface now (SSH tunnel)."
+      ok "the reseller (:$(kapi_portu bayi)) and customer (:$(kapi_portu musteri)) gates stay OPEN — only the admin surface was closed"
+      ok "enforcement measured: $KAPI_ZORLAMA_OLCUM"
     else
       if [ "$KAPI_ZORLAMA_DURUM" = "kapali" ]; then
-        err "UYARI: zorlama kapalı: yönetici girişi bayi/müşteri portlarında açık olabilir"
+        err "WARNING: enforcement is off: admin login may be open on the reseller/customer ports"
       else
-        err "UYARI: zorlama DOĞRULANAMADI: yönetici girişi bayi/müşteri portlarında açık olabilir"
+        err "WARNING: enforcement COULD NOT BE VERIFIED: admin login may be open on the reseller/customer ports"
       fi
-      err "  ölçüm: $KAPI_ZORLAMA_OLCUM"
-      err "  Yönetici yüzeyi KAPANMIŞ SAYILMAZ: admin kapısı loopback'te, ancak zorlama açılana dek"
-      err "  bayi (:$(kapi_portu bayi)), müşteri (:$(kapi_portu musteri)) ve eski kapılar yönetici girişini de kabul eder."
-      err "  Neden için: journalctl -u girginospanel | grep kapi   ·   girginospanel-dogrula (Role gates)"
+      err "  measurement: $KAPI_ZORLAMA_OLCUM"
+      err "  The admin surface does NOT COUNT AS CLOSED: the admin gate is on loopback, but until enforcement is on"
+      err "  the reseller (:$(kapi_portu bayi)), customer (:$(kapi_portu musteri)) and old gates also accept admin login."
+      err "  For the cause: journalctl -u girginospanel | grep kapi   ·   girginospanel-dogrula (Role gates)"
     fi
     if [ -n "$(kapi_eski_portlari)" ]; then
-      warn "eski kapı ($(kapi_eski_portlari)) geçiş süresince her rolü, yöneticiyi de kabul eder."
-      warn "yönetici yüzeyini tamamen kapatmak için: girginospanel-server kapi eski-kapat"
+      warn "the old gate ($(kapi_eski_portlari)) accepts every role, including admin, during the transition."
+      warn "to close the admin surface completely: girginospanel-server kapi eski-kapat"
     fi
   fi
   say ""
-  say "  Masaüstü uygulamasında:  gPanel → +  → 'SSH tüneli ile bağlan' işaretle"
-  say "  Sunucu: $(dis_ip)   Panel portu: $port   SSH portu: $sshp"
+  say "  In the desktop app:  gPanel → +  → tick 'Connect via SSH tunnel'"
+  say "  Server: $(dis_ip)   Panel port: $port   SSH port: $sshp"
 }
 
 cmd_link() {
@@ -457,6 +482,6 @@ case "${1:-durum}" in
   masaustu|desktop|kapali) cmd_masaustu ;;
   baglanti-linki|link)   shift || true; cmd_link "${1:-}" ;;
   -h|--help|yardim)
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) err "bilinmeyen komut: $1"; say "  girginospanel-erisim [durum|web|desktop|baglanti-linki]"; exit 1 ;;
+    kullanim ;;
+  *) err "unknown command: $1"; say "  girginospanel-erisim [durum|web|desktop|baglanti-linki]"; exit 1 ;;
 esac

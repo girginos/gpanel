@@ -175,3 +175,9 @@ test('yardimci: parola kurali panelle ayni (12+, harf+rakam, satir sonu yok)', f
     dogru(Yardimci::parolaHatasi(str_repeat('a1', 65)) !== null);
     dogru(Yardimci::parolaHatasi('') !== null);
 });
+
+test('meta: tum urun ayarlari basit modda gorunur (SimpleMode) — gizli Urun tipi bayi urununu hosting acıyordu', function () {
+    foreach (gpanel_ConfigOptions() as $ad => $sec) {
+        esit(true, $sec['SimpleMode'] ?? false, $ad);
+    }
+});

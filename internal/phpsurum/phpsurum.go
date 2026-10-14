@@ -101,7 +101,7 @@ type Surum struct {
 // kullanıcı kurulabilir bir sürümü kurmak isteyince YANLIŞ "EOL/yok" 409'u alıyordu.
 var (
 	availMu     sync.Mutex
-	availCache  = map[string]bool{} // pkg -> KESİNLEŞMİŞ kurulabilir mi (yalnız checked=true değerler yazılır)
+	availCache  = map[string]bool{} // pkg -> KESİNLEŞMİŞ kurulabilir mi (yalnız KESİN değerler yazılır: dnf yanıtı ya da diskte kurulu ikili)
 	sweeperOnce sync.Once
 
 	// dnfProbe: arka-plan sweep sondası (display cache'i doldurur). Test için enjekte edilebilir.
@@ -113,10 +113,20 @@ var (
 	dnfCanliProbe = func(pkg string) (available bool, checked bool) {
 		return dnfProbeCekirdek(pkg, dnfAuthTimeout)
 	}
+
+	// phpKuruluMu: sürümün PHP ikilisi diskte var mı — Discover'daki "Yuklu" ile AYNI tanım (dosyaVar).
+	// sweepOnce kurulu sürümler için dnf'e HİÇ sormaz. Test için enjekte edilebilir.
+	phpKuruluMu = func(m SurumMeta) bool {
+		_, _, _, bin := yollar(m)
+		return dosyaVar(bin)
+	}
+	// sweepUyku: sweepLoop'un turlar arası beklemesi. Test için enjekte edilebilir.
+	sweepUyku = time.Sleep
 )
 
 const (
-	availTTL       = 10 * time.Minute // arka-plan sweep periyodu
+	availTTL       = 10 * time.Minute // dnf'e SORULAMAYAN (checked=false) bir turdan sonra yeniden deneme aralığı
+	availKesinTTL  = time.Hour        // her paket için KESİN değer alınan turdan sonraki aralık (salt görüntüleme ipucu; Remi'de paket durumu günler-aylar ölçeğinde değişir)
 	dnfTimeout     = 25 * time.Second // sweep sondası per-paket üst sınırı (3s→25s: dnf yavaş/metadata ilk yüklerken 3s çok kısaydı → sürekli yanlış-negatif)
 	dnfAuthTimeout = 30 * time.Second // install-gate canlı otoriter sondası üst sınırı
 )
@@ -140,22 +150,34 @@ func warmMetadata() {
 	_ = exec.CommandContext(ctx, "dnf", "-q", "makecache").Run()
 }
 
-// sweepLoop: açılışta bir kez + her availTTL'de bir tüm Remi paketlerinin kurulabilirliğini
-// dnf ile tarar ve availCache'i günceller. İstek path'inden BAĞIMSIZ çalışır.
+// sweepLoop: açılışta bir kez + her turdan sonra sweepAraligi kadar bekleyip tüm Remi paketlerinin
+// kurulabilirliğini tarar ve availCache'i günceller. İstek path'inden BAĞIMSIZ çalışır.
 func sweepLoop() {
-	sweepOnce()
-	t := time.NewTicker(availTTL)
-	defer t.Stop()
-	for range t.C {
-		sweepOnce()
+	for {
+		kesin := sweepOnce()
+		sweepUyku(sweepAraligi(kesin))
 	}
 }
 
-// sweepOnce: tek bir dnf tarama turu.
+// sweepAraligi: bir sonraki turdan önce beklenecek süre. Tur KESİN bittiyse (her paket ya diskte
+// kurulu görüldü ya da dnf net yanıt verdi) değerler yavaş değişir → availKesinTTL. En az bir paket
+// için dnf'e SORULAMADIYSA (kilit/timeout) eksik kalan değeri tamamlamak için availTTL'de yeniden dene.
+func sweepAraligi(hepsiKesin bool) time.Duration {
+	if hepsiKesin {
+		return availKesinTTL
+	}
+	return availTTL
+}
+
+// sweepOnce: tek bir dnf tarama turu. Dönüş: her paket için KESİN değer elde edildi mi
+// (sweepAraligi bir sonraki turun zamanını buna göre seçer).
 // 🔴 ATOMİK-WIPE YOK: yalnızca dnf'in KESİN yanıt verdiği (checked=true) paketleri günceller;
 // "sorulamadı" (checked=false: timeout/kilit) paketlerde ÖNCEKİ cache değerini KORUR. Böylece
 // geçici bir başarısız tur, önceki doğru true'ları false'a ÇEVİRMEZ (son-bilinen-iyi korunur).
-func sweepOnce() {
+// 🔴 PERF: PHP ikilisi diskte olan (kurulu) sürümler için dnf'e HİÇ sorulmaz — dnfProbeCekirdek'in
+// "kurulu" yolu da aynı sonucu (kesin VAR) verirdi, ama her tur sürüm başına bir dnf süreci
+// (rpmdb + metadata yüklemesi) demekti: 8 sürümlü sunucuda günde ~1.300 dnf çağrısı.
+func sweepOnce() (hepsiKesin bool) {
 	// Mevcut cache'in kopyasıyla başla — checked=false olanlar bu değerlerinde kalır.
 	availMu.Lock()
 	yeni := make(map[string]bool, len(availCache))
@@ -164,6 +186,7 @@ func sweepOnce() {
 	}
 	availMu.Unlock()
 
+	hepsiKesin = true
 	seen := map[string]bool{}
 	for _, m := range DesteklenenSurumler {
 		if m.Kaynak != "remi" {
@@ -174,16 +197,24 @@ func sweepOnce() {
 			continue
 		}
 		seen[pkg] = true
+		if phpKuruluMu(m) {
+			yeni[pkg] = true // ikili diskte → kurulu → kesin VAR; dnf'e sorma
+			continue
+		}
 		available, checked := dnfProbe(pkg)
 		if checked {
 			yeni[pkg] = available // kesin sonuç → yaz
+		} else {
+			// yeni[pkg] önceki değerinde KALIR (varsa); yoksa yine bilinmiyor. Tur kesin sayılmaz
+			// → sweepLoop kısa aralıkla (availTTL) yeniden dener.
+			hepsiKesin = false
 		}
-		// checked=false → yeni[pkg] önceki değerinde KALIR (varsa); yoksa yine bilinmiyor.
 	}
 
 	availMu.Lock()
 	availCache = yeni
 	availMu.Unlock()
+	return hepsiKesin
 }
 
 // dnfProbeCekirdek: TEK paket için ÜÇ DURUMLU dnf sondası. Dönüş (available, checked):
@@ -256,6 +287,13 @@ func kurulabilirlikDenetle(m SurumMeta) (available bool, checked bool) {
 	return dnfCanliProbe(pkg)
 }
 
+// dosyaVar: yol diskte var mı. "PHP sürümü kurulu mu" (Discover.Yuklu) ile sweepOnce'ın "dnf'e sorma"
+// kısayolu AYNI tanımı paylaşsın diye tek yerde.
+func dosyaVar(yol string) bool {
+	_, err := os.Stat(yol)
+	return err == nil
+}
+
 // Yollar(meta): yuklenmis olsa olsa nerede olur
 func yollar(m SurumMeta) (poolDir, sockDir, service, phpBin string) {
 	if m.Kaynak == "appstream" {
@@ -273,7 +311,7 @@ func Discover(m SurumMeta) Surum {
 	s := Surum{SurumMeta: m}
 	s.PoolDir, s.SockDir, s.Service, s.PHPBin = yollar(m)
 	// PHP binary varsa yüklü kabul
-	if _, err := os.Stat(s.PHPBin); err == nil {
+	if dosyaVar(s.PHPBin) {
 		s.Yuklu = true
 		// Modül sayısı + gerçek sürüm
 		if out, err := exec.Command(s.PHPBin, "-v").Output(); err == nil {

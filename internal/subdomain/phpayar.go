@@ -274,6 +274,13 @@ func (h *Handlers) PHPAyarPut(w http.ResponseWriter, r *http.Request) {
 	surum := strings.TrimSpace(req.PHPSurum)
 	if surum == "" {
 		surum = mevcutPHP
+	} else if v, err := provisioner.PHPSurumDogrula(surum); err != nil {
+		// Doğrulanmamış sürüm DB'ye ve vhost'a ham yazılıyordu (ana hostingdeki
+		// PUT /domains/{id}/php ile aynı kural). Hiçbir şey kaydedilmeden 400.
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	} else {
+		surum = v
 	}
 	if err := php.SaveSub(r.Context(), h.DB, sid, req.Ayarlar); err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "kaydedilemedi")

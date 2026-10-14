@@ -193,7 +193,7 @@ func DeleteEkZone(ctx context.Context, db *sql.DB, alanAdi string) error {
 
 // ekZoneIncludeAdlari — kaydı olan ek alan adlarının bölge adları. Tablo yoksa
 // (0160 koşmamış) boş döner.
-func ekZoneIncludeAdlari(ctx context.Context, db *sql.DB) ([]string, error) {
+func ekZoneIncludeAdlari(ctx context.Context, db sorgucu) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT e.alan_adi FROM ek_alan_adlari e
 	  WHERE EXISTS (SELECT 1 FROM ek_dns_kayitlari r WHERE r.ek_alan_id=e.id AND r.aktif=1) ORDER BY e.alan_adi`)
 	if err != nil {

@@ -2,29 +2,48 @@
 # girginospanel-redis-setup — per-tenant izole Redis (Valkey) altyapısını kurar.
 # Idempotent. Kurulumda çalıştırılır; panelin "Redis Cache aç" özelliği bunu gerektirir.
 set -uo pipefail
+
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-redis-setup
+
+Sets up the isolated per-tenant Redis (Valkey) infrastructure that the panel's
+"Redis Cache" feature needs: installs valkey and php-redis for every PHP
+version, generates the admin password (PANEL_REDIS_ADMIN_PASS in
+/etc/girginospanel/env), writes the ACL file, adds the cache tuning to
+valkey.conf (256 MB, allkeys-lru, no persistence), sets the SELinux boolean
+and a UMask=0027 drop-in, then enables and restarts valkey. Idempotent.
+Takes no options. Run as root.
+
+Exit codes: 0 valkey is active and the admin login works, 1 valkey did not start, 2 unknown option
+USAGE
+}
+case "${1:-}" in -h|--help) kullanim; exit 0 ;; esac
+[ $# -eq 0 ] || { echo "girginospanel-redis-setup: unknown option: $1 (takes no options; see --help)" >&2; exit 2; }
+[ "${GOSP_SECENEK_TEST:-}" = 1 ] && exit 0   # testler: seçenek denetiminden sonra dur (yan etki yok)
 log(){ printf '  %s\n' "$*"; }
 
-echo "════ Valkey + php-redis kurulumu ════"
+echo "════ Valkey + php-redis setup ════"
 PHP_REDIS_PKGS=""
 for v in php74 php80 php81 php82 php83 php84 php85; do
   [ -d "/etc/opt/remi/$v" ] && PHP_REDIS_PKGS="$PHP_REDIS_PKGS ${v}-php-pecl-redis6"
 done
 dnf install -y valkey php-pecl-redis6 $PHP_REDIS_PKGS >/tmp/redis-setup.log 2>&1 \
-  && log "valkey + php-redis kuruldu" || { log "kurulum uyarı (bazı paketler zaten olabilir)"; }
+  && log "valkey + php-redis installed" || { log "install warning (some packages may already be present)"; }
 
-echo "════ Admin parolası + ACL dosyası ════"
+echo "════ Admin password + ACL file ════"
 ENV=/etc/girginospanel/env
 ADMIN=$(grep -oP '^PANEL_REDIS_ADMIN_PASS=\K.*' "$ENV" 2>/dev/null)
 if [ -z "$ADMIN" ]; then
   ADMIN=$(openssl rand -hex 24)
   echo "PANEL_REDIS_ADMIN_PASS=${ADMIN}" >> "$ENV"
-  log "admin parolası üretildi ve env'e eklendi"
+  log "admin password generated and added to env"
 fi
 # users.acl'de default admin satırı yoksa yaz (mevcut tenant ACL'lerini KORU)
 ACLF=/etc/valkey/users.acl
 if [ ! -f "$ACLF" ] || ! grep -q '^user default ' "$ACLF"; then
   printf 'user default on >%s ~* &* +@all\n' "$ADMIN" > "$ACLF"
-  log "users.acl oluşturuldu"
+  log "users.acl created"
 fi
 chown valkey:valkey "$ACLF" 2>/dev/null; chmod 640 "$ACLF"
 
@@ -40,7 +59,7 @@ save ""
 appendonly no
 aclfile /etc/valkey/users.acl
 VK
-  log "valkey.conf tuning eklendi"
+  log "valkey.conf tuning added"
 fi
 sed -i '/^requirepass /d' "$CONF"   # aclfile ile çakışır
 
@@ -62,7 +81,7 @@ systemctl restart valkey; sleep 2
 if systemctl is-active --quiet valkey && REDISCLI_AUTH="$ADMIN" valkey-cli PING 2>/dev/null | grep -q PONG; then
   log "✓ valkey ACTIVE + admin auth OK"
 else
-  log "✗ valkey başlatılamadı — journalctl -u valkey"
+  log "✗ valkey did not start — journalctl -u valkey"
   exit 1
 fi
-echo "════════ ✓ Redis altyapısı hazır ════════"
+echo "════════ ✓ Redis infrastructure ready ════════"

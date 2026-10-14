@@ -601,6 +601,17 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, kod, mesaj)
 		return
 	}
+	// 🔴 php_surum DOĞRULAMASI (POST /domains ve PUT /domains/{id}/php ile AYNI doğrulayıcı):
+	// boş = sürüme dokunma; dolu ama yönetilen listede olmayan değer 400 (eskiden havuz
+	// sessizce 8.3'e düşer, DB ham değeri tutardı). Kurulu-mu denetimi aşağıda ayrıca durur.
+	if surumIstek != "" {
+		s, verr := provisioner.PHPSurumDogrula(surumIstek)
+		if verr != nil {
+			httpx.WriteError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		surumIstek = s
+	}
 	req := struct {
 		PHPSurum string
 		Ayarlar  Settings
@@ -686,6 +697,11 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	var socket string
 	if tenantFPMAktif(sk) {
 		s, err := tenantFPMUygula(h.DB, id, sk, surum)
+		if errors.Is(err, provisioner.ErrPHPKuruluDegil) {
+			// Birim kurulmadan önce denetlenir: hiçbir şeye dokunulmadı.
+			httpx.WriteError(w, http.StatusConflict, "PHP "+surum+" bu sunucuda kurulu değil")
+			return
+		}
 		if err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "per-tenant fpm: "+nginxset.SunucuHatasi(r, "php", id, err))
 			return
@@ -710,6 +726,12 @@ func (h *Handlers) PutAyarlar(w http.ResponseWriter, r *http.Request) {
 	if req.PHPSurum != "" {
 		_, _ = h.DB.ExecContext(kctx,
 			`UPDATE domains SET php_surum=? WHERE id=?`, surum, id)
+		// Per-tenant FPM'de alt alanlar hesabın TEK havuzunu kullanır: kayıtları gerçekte
+		// çalışan sürüme eşitle (arayüz alt alanda eski sürümü göstermesin).
+		if tenantFPMAktif(sk) {
+			_, _ = h.DB.ExecContext(kctx,
+				`UPDATE subdomanlar SET php_surum=? WHERE domain_id=?`, surum, id)
+		}
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

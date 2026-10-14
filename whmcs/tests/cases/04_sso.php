@@ -121,12 +121,13 @@ test('sso: ana bilgisayar adi "_" donen panel + Panel adresi YOK -> reddedilir, 
     icermez(json_encode($r), 'SSOKOD');
 });
 
-test('sso: bagli olmayan hizmet hata; bayi urununde SSO yok, musteri duz baglanti (panel adresi varsa)', function () {
+test('sso: bagli olmayan hizmet hata; ESKI panelde (bayi SSO ucu yok) bayi musterisi duz baglanti (panel adresi varsa)', function () {
     $p = yeni();
     $r = gpanel_ServiceSingleSignOn(params());
     esit(false, $r['success']);
     icerir($r['errorMsg'], 'bağlı değil');
     $b = bagliBayi($p);
+    $p->bayiSsoModu = '404';
     $pr = params(['configoption1' => 'bayi']);
     $r = gpanel_ServiceSingleSignOn($pr);
     esit(false, $r['success'], 'bayi icin adres girilmemis');
@@ -136,6 +137,7 @@ test('sso: bagli olmayan hizmet hata; bayi urununde SSO yok, musteri duz baglant
     esit(true, $r['success']);
     esit('https://bayi.example.test:9444/', $r['redirectTo']);
     esit(0, $p->sayac('POST /domains/{id}/sso'));
+    dogru($p->sayac('POST /resellers/{id}/sso') >= 1, 'once bayi SSO ucu denenir');
 });
 
 test('admin link: Sunucular sayfasi formu HTML kacisli', function () {

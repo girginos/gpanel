@@ -72,9 +72,9 @@ grep -qiE "AlmaLinux|Rocky|Red Hat|CentOS" /etc/os-release || warn "AlmaLinux/RH
 _os_major="$(. /etc/os-release 2>/dev/null; printf %s "${VERSION_ID:-}" | cut -d. -f1)"
 if [ "$_os_major" != "10" ]; then
   if [ "${GOSP_FORCE_OS:-0}" = "1" ]; then
-    warn "OS major surumu 10 degil (${_os_major:-bilinmiyor}) — GOSP_FORCE_OS=1 ile devam ediliyor"
+    warn "OS major version is not 10 (${_os_major:-unknown}) — continuing because GOSP_FORCE_OS=1"
   else
-    die "AlmaLinux/RHEL 10 gerekli (bulunan major: ${_os_major:-bilinmiyor}); GOSP_FORCE_OS=1 ile atlanabilir"
+    die "AlmaLinux/RHEL 10 required (found major: ${_os_major:-unknown}); can be skipped with GOSP_FORCE_OS=1"
   fi
 fi
 
@@ -420,7 +420,7 @@ if [ -d "$A/eklentiler" ]; then
   for _u in mail calistirici; do
     for _b in /opt/girginospanel/src/eklentiler/$_u /opt/girginospanel/eklentiler/$_u; do
       if [ -f "$_b/girginospanel-eklenti-$_u" ]; then
-        rm -f "$_b/girginospanel-eklenti-$_u" && echo "  temizlendi (kacak/artik duz ucretli ikili): $_b/girginospanel-eklenti-$_u"
+        rm -f "$_b/girginospanel-eklenti-$_u" && echo "  removed (stray plaintext paid-plugin binary): $_b/girginospanel-eklenti-$_u"
       fi
     done
   done
@@ -1149,7 +1149,7 @@ echo -e "  antivirus: $AV_D   ·   freshclam $(systemctl is-active clamav-freshc
 echo -e "  ssh isolation(jail): $JAIL_D   ·   backend port helper: $PSW_D"
 echo -e "  wp-cli (WordPress): ${WPCLI_DURUM:-?}"
 echo -e "  isolation: plan-driven resource limits (cgroup slice) + per-tenant PHP-FPM (CageFS equivalent) READY   ·   bubblewrap $(command -v bwrap >/dev/null && echo ✓ || echo ✗)"
-echo -e "  ${c_y}Firewall:${c_0} ag durusu artik panel guvenlik duvarina (nftables) bagli — firewalld durduruldu/mask'landi."
+echo -e "  ${c_y}Firewall:${c_0} network exposure is now tied to the panel firewall (nftables) — firewalld stopped and masked."
 echo -e "          panel tablosu varsayilani GELEN IZINLI (policy-accept); portlari panelden yonetin (Guvenlik duvari arayuzu)."
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1188,13 +1188,13 @@ echo
 echo -e "${c_g}═══════════════════════════════════════════════${c_0}"
 echo -e "${c_g} ✓ GirginOSPanel installation complete${c_0}"
 if _kb=$("$KAPI_CLI" kapi port bayi 2>/dev/null) && _km=$("$KAPI_CLI" kapi port musteri 2>/dev/null); then
-  echo -e "   Administrator: ${c_b}https://${IP:-SUNUCU_IP}:$PPORT${c_0}   ← keep this address PRIVATE"
-  echo -e "   Reseller:      ${c_b}https://${IP:-SUNUCU_IP}:$_kb${c_0}"
-  echo -e "   Customer:      ${c_b}https://${IP:-SUNUCU_IP}:$_km${c_0}"
+  echo -e "   Administrator: ${c_b}https://${IP:-SERVER_IP}:$PPORT${c_0}   ← keep this address PRIVATE"
+  echo -e "   Reseller:      ${c_b}https://${IP:-SERVER_IP}:$_kb${c_0}"
+  echo -e "   Customer:      ${c_b}https://${IP:-SERVER_IP}:$_km${c_0}"
   echo -e "   ${c_y}!${c_0} If your cloud provider has a firewall, open these ports there too (TCP $PPORT, $_kb, $_km)."
-  "$KAPI_CLI" kapi durum 2>/dev/null | grep -E '^  eski' || true
+  "$KAPI_CLI" kapi durum 2>/dev/null | grep -E '^  (eski|old) ' || true
 else
-  echo -e "   Panel:  ${c_b}https://${IP:-SUNUCU_IP}:$PPORT${c_0}"
+  echo -e "   Panel:  ${c_b}https://${IP:-SERVER_IP}:$PPORT${c_0}"
 fi
 echo -e "   Username: ${c_b}root${c_0}   Password: ${c_b}this server's root password${c_0}"
 echo -e "   (panel admin login verifies the server root password against the /etc/shadow hash)"

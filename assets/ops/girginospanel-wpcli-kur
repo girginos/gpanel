@@ -15,6 +15,27 @@
 # güncellemede çağrılır.
 set -uo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-wpcli-kur [--force]
+
+Installs or repairs wp-cli (/usr/local/bin/wp). Idempotent: if the installed
+wp-cli already runs, nothing is touched. The download is tried from the
+project mirror first (sha256-verified), then from GitHub, and is only
+installed after it has actually been run successfully. Called by the
+installer and by every update. Run as root.
+
+Options:
+  --force        Reinstall even if the current wp-cli works
+  -h, --help     Show this help
+
+Environment: GOSP_TABAN overrides the mirror base URL.
+Exit codes: 0 wp-cli works / was installed, 1 php missing, download failed or
+the downloaded file does not run (the existing wp-cli is kept)
+USAGE
+}
+for a in "$@"; do case "$a" in -h|--help) kullanim; exit 0 ;; esac; done
+
 HEDEF=/usr/local/bin/wp
 TABAN=${GOSP_TABAN:-https://surum.girginos.io/panel}
 FORCE=0
@@ -25,18 +46,18 @@ ok(){   echo -e "  ${c_g}✓${c_0} $*"; }
 uyar(){ echo -e "  ${c_y}!${c_0} $*"; }
 hata(){ echo -e "  ${c_r}✗${c_0} $*" >&2; }
 
-command -v php >/dev/null || { hata "php yok — wp-cli kurulamaz"; exit 1; }
+command -v php >/dev/null || { hata "php not found — wp-cli cannot be installed"; exit 1; }
 
 # Çalışıyor mu? "Dosya var" YETMEZ: 0 baytlık veya yarım inmiş bir phar da
 # dosya olarak vardır. Tek geçerli kanıt, gerçekten çalıştırmaktır.
 calisiyor() { [ -f "$1" ] && php "$1" --version --allow-root >/dev/null 2>&1; }
 
 if [ "$FORCE" = 0 ] && calisiyor "$HEDEF"; then
-  ok "wp-cli zaten çalışıyor ($(php "$HEDEF" --version --allow-root 2>/dev/null | head -1))"
+  ok "wp-cli is already working ($(php "$HEDEF" --version --allow-root 2>/dev/null | head -1))"
   exit 0
 fi
 
-GEC=$(mktemp -d /tmp/wpcli.XXXXXX) || { hata "geçici dizin açılamadı"; exit 1; }
+GEC=$(mktemp -d /tmp/wpcli.XXXXXX) || { hata "could not create a temporary directory"; exit 1; }
 trap 'rm -rf "$GEC"' EXIT
 
 # ── Kaynak 1: kendi aynamız (sha256 doğrulamalı) ────────────────────
@@ -48,11 +69,11 @@ aynadan() {
   if [ -n "$bek" ]; then
     ger=$(sha256sum "$GEC/wp.phar" | cut -d' ' -f1)
     if [ "$ger" != "$bek" ]; then
-      hata "ayna sha256 tutmadı (beklenen ${bek:0:16}…, gelen ${ger:0:16}…)"
+      hata "mirror sha256 mismatch (expected ${bek:0:16}…, got ${ger:0:16}…)"
       return 1
     fi
   else
-    uyar "ayna sha256 bilgisi okunamadı — yalnız çalışma testine güveniliyor"
+    uyar "could not read the mirror's sha256 — relying on the run test only"
   fi
   return 0
 }
@@ -65,7 +86,7 @@ githubdan() {
   for u in "https://github.com/wp-cli/wp-cli/releases/latest/download/wp-cli.phar" \
            "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"; do
     if curl -fsSL --max-time 600 -o "$GEC/wp.phar" "$u" 2>/dev/null; then
-      echo "  kaynak: $u"
+      echo "  source: $u"
       return 0
     fi
   done
@@ -76,8 +97,8 @@ KAYNAK=""
 if aynadan; then KAYNAK="$TABAN"
 elif githubdan; then KAYNAK="github"
 else
-  hata "wp-cli hiçbir kaynaktan indirilemedi (ayna + GitHub denendi)"
-  hata "WordPress özellikleri ÇALIŞMAZ. Ağ/DNS kontrol edip tekrar deneyin:"
+  hata "wp-cli could not be downloaded from any source (mirror + GitHub tried)"
+  hata "WordPress features will NOT work. Check network/DNS and try again:"
   hata "  girginospanel-wpcli-kur"
   exit 1
 fi
@@ -85,11 +106,11 @@ fi
 # 🔴 İndirilen dosyayı ÇALIŞTIRARAK doğrula. Yarım inen veya HTML hata
 # sayfası kaydedilmiş bir dosya da "indirildi" görünür.
 if ! calisiyor "$GEC/wp.phar"; then
-  hata "indirilen dosya çalışmıyor — kurulmadı (mevcut $HEDEF korundu)"
+  hata "the downloaded file does not run — not installed (existing $HEDEF kept)"
   hata "  $(php "$GEC/wp.phar" --version --allow-root 2>&1 | head -1)"
   exit 1
 fi
 
-install -m 0755 "$GEC/wp.phar" "$HEDEF" || { hata "$HEDEF yazılamadı"; exit 1; }
-calisiyor "$HEDEF" || { hata "kurulum sonrası $HEDEF çalışmıyor"; exit 1; }
-ok "wp-cli kuruldu: $(php "$HEDEF" --version --allow-root 2>/dev/null | head -1)  [$KAYNAK]"
+install -m 0755 "$GEC/wp.phar" "$HEDEF" || { hata "could not write $HEDEF"; exit 1; }
+calisiyor "$HEDEF" || { hata "$HEDEF does not run after installation"; exit 1; }
+ok "wp-cli installed: $(php "$HEDEF" --version --allow-root 2>/dev/null | head -1)  [$KAYNAK]"

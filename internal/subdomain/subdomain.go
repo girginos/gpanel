@@ -134,7 +134,21 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	}
 	phpSurum := strings.TrimSpace(req.PHPSurum)
 	if phpSurum == "" {
-		phpSurum = parentPHP
+		phpSurum = strings.TrimSpace(parentPHP)
+	} else {
+		// Hosting yolundaki kuralla aynı (PHPSurumDogrula): desteklenmeyen değer ham yazılmasın.
+		v, verr := provisioner.PHPSurumDogrula(phpSurum)
+		if verr != nil {
+			httpx.WriteError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		phpSurum = v
+	}
+	// Per-tenant FPM'de alt alan hesabın TEK havuzunu kullanır: farklı sürüm istenemez
+	// (eskiden kaydedilip hosting sürümüyle çalışıyordu). Arayüz sürüm göndermez.
+	if tenantFPMAktif(sk) && phpSurum != strings.TrimSpace(parentPHP) {
+		httpx.WriteError(w, http.StatusConflict, tenantAltAlanPHPIletisi(parentPHP))
+		return
 	}
 	tamAd := altAd + "." + alanAdi
 	if err := provisioner.ValidateDomain(tamAd); err != nil {

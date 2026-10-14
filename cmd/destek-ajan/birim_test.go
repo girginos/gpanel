@@ -86,7 +86,7 @@ func TestGuncellemeSirasiAjanSaglikliPaneldenSonra(t *testing.T) {
 	g := oku(t, "assets/ops/girginospanel-update")
 	saglik := strings.Index(g, "if saglik_bekle; then HEALTHY=1; fi")
 	basla := strings.Index(g, "systemctl restart girginospanel-destek-ajan")
-	hasarli := strings.Index(g, "yeni sürüm sağlıklı başlamadı")
+	hasarli := strings.Index(g, "the new version did not start healthy")
 	if saglik < 0 || basla < 0 || hasarli < 0 {
 		t.Fatalf("güncelleme betiği beklenen noktaları içermiyor: %d %d %d", saglik, basla, hasarli)
 	}

@@ -15,6 +15,30 @@
 # Kullanım: girginospanel-ioncube [--force] [--restart]
 set -uo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-ioncube [--force] [--restart]
+
+Installs the ionCube Loader for every installed PHP version (remi
+/etc/opt/remi/php*/ and the system PHP), needed by WHMCS and other encoded
+PHP scripts. The loader is written to 00-ioncube.ini so it loads before
+OPcache. Idempotent: an installed loader is not downloaded again and the .ini
+is re-checked on every run. Fail-soft: a failure never aborts an install or
+update. Run as root.
+
+Options:
+  --force        Re-download and re-install the loader even if it is present
+  --restart      Restart the PHP-FPM services (including per-tenant pools) so
+                 the new .ini takes effect
+  -h, --help     Show this help
+
+Exit codes: 0 (problems are reported as warnings), 2 unknown option
+USAGE
+}
+for a in "$@"; do case "$a" in -h|--help) kullanim; exit 0 ;; esac; done
+for a in "$@"; do case "$a" in --force|--restart) ;; *) echo "girginospanel-ioncube: unknown option: $a (see --help)" >&2; exit 2 ;; esac; done
+[ "${GOSP_SECENEK_TEST:-}" = 1 ] && exit 0   # testler: seçenek denetiminden sonra dur (yan etki yok)
+
 IC_URL="https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz"
 FORCE=0; RESTART=0
 for a in "$@"; do
@@ -39,7 +63,7 @@ if [ -d /etc/php.d ] && command -v php >/dev/null 2>&1; then
   sysv=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
   [ -n "$sysv" ] && SURUMLER+=("$sysv|/usr/lib64/php/modules|/etc/php.d|php-fpm")
 fi
-[ ${#SURUMLER[@]} -gt 0 ] || { uyar "kurulu PHP bulunamadı"; exit 0; }
+[ ${#SURUMLER[@]} -gt 0 ] || { uyar "no installed PHP found"; exit 0; }
 
 # 2) Eksik olan var mı? (varsa TEK indirme yapılır)
 IC_TMP=""; indirildi=0
@@ -47,10 +71,10 @@ indir() {
   [ -n "$IC_TMP" ] && return 0
   IC_TMP=$(mktemp -d) || return 1
   if ! curl -fsSL --max-time 180 -o "$IC_TMP/ic.tgz" "$IC_URL"; then
-    uyar "ionCube indirilemedi (ağ/erişim) — atlandı"; rm -rf "$IC_TMP"; IC_TMP=""; return 1
+    uyar "could not download ionCube (network/access) — skipped"; rm -rf "$IC_TMP"; IC_TMP=""; return 1
   fi
   if ! tar xzf "$IC_TMP/ic.tgz" -C "$IC_TMP"; then
-    uyar "ionCube arşivi açılamadı — atlandı"; rm -rf "$IC_TMP"; IC_TMP=""; return 1
+    uyar "could not extract the ionCube archive — skipped"; rm -rf "$IC_TMP"; IC_TMP=""; return 1
   fi
   indirildi=1; return 0
 }
@@ -65,7 +89,7 @@ for satir in "${SURUMLER[@]}"; do
     indir || { atlanan=$((atlanan+1)); continue; }
     src="$IC_TMP/ioncube/ioncube_loader_lin_${nokta}.so"
     if [ ! -f "$src" ]; then
-      uyar "PHP $nokta — ionCube bu sürümü henüz desteklemiyor (atlandı)"
+      uyar "PHP $nokta — ionCube does not support this version yet (skipped)"
       atlanan=$((atlanan+1)); continue
     fi
     mkdir -p "$modDir" || { atlanan=$((atlanan+1)); continue; }
@@ -95,5 +119,5 @@ if [ "$RESTART" = "1" ]; then
   done
 fi
 
-echo "  ionCube: $kurulan sürümde hazır, $atlanan atlandı"
+echo "  ionCube: ready for $kurulan version(s), $atlanan skipped"
 exit 0

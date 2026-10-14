@@ -17,7 +17,7 @@ import (
 )
 
 // ErrCiktiVar — çıktı dosyası zaten var (üzerine yazılmaz).
-var ErrCiktiVar = errors.New("çıktı dosyası zaten var; başka ad verin")
+var ErrCiktiVar = errors.New("the output file already exists; choose another name")
 
 // VarsayilanCikti — "x.tar.gz.age" → "x.tar.gz"; .age değilse ".cozuldu" eklenir.
 func VarsayilanCikti(girdi string) string {
@@ -30,7 +30,7 @@ func VarsayilanCikti(girdi string) string {
 func anahtarAc(yol string) (*os.File, error) {
 	fi, err := os.Stat(yol)
 	if err != nil {
-		return nil, fmt.Errorf("anahtar dosyası okunamadı: %w", err)
+		return nil, fmt.Errorf("could not read the key file: %w", err)
 	}
 	if fi.Size() > 1<<20 {
 		return nil, ErrAnahtarOkunamadi
@@ -83,7 +83,7 @@ func DosyaCoz(girdi, anahtarYol, cikti string) error {
 	defer k.Close()
 	in, err := os.Open(girdi)
 	if err != nil {
-		return fmt.Errorf("şifreli dosya açılamadı: %w", err)
+		return fmt.Errorf("could not open the encrypted file: %w", err)
 	}
 	defer in.Close()
 	return ciktiAtomik(cikti, func(w io.Writer) error { return Coz(w, bufio.NewReaderSize(in, 256<<10), k) })
@@ -135,7 +135,7 @@ func (i *Isci) IndirVeCoz(ctx context.Context, isID int64, anahtarYol, cikti str
 		return "", err
 	}
 	if got := hex.EncodeToString(hs.Sum(nil)); got != shaS {
-		return "", errors.New("indirilen dosyanın özeti manifestle uyuşmuyor (uzak kopya bozuk)")
+		return "", errors.New("the downloaded file's digest does not match the manifest (the remote copy is corrupt)")
 	}
 	k, err := anahtarAc(anahtarYol)
 	if err != nil {
@@ -156,7 +156,7 @@ func (i *Isci) IndirVeCoz(ctx context.Context, isID int64, anahtarYol, cikti str
 	}
 	if got := hex.EncodeToString(duz.Sum(nil)); got != shaD {
 		_ = os.Remove(cikti)
-		return "", errors.New("çözülen yedeğin özeti manifestle uyuşmuyor")
+		return "", errors.New("the decrypted backup's digest does not match the manifest")
 	}
 	return cikti, nil
 }

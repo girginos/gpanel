@@ -14,6 +14,31 @@
 # doğrulanır; çözülmüyorsa değişiklik UYGULANMAZ.
 set -uo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-panelhost [durum|ayarla [hostname]|sifirla]
+
+Controls which host names the panel's nginx vhost answers to. Unknown names
+get a catch-all block that closes the connection (444), so scanning bots
+cannot find the panel by bare IP. Must be run as root.
+
+Commands:
+  durum              Show the current server_name and catch-all status (default)
+  ayarla [hostname]  Bind the panel vhost to <hostname>. DNS must resolve to this
+                     server, otherwise nothing is changed (lockout protection).
+                     Without a hostname, access by IP stays open.
+  sifirla            Restore the newest nginx config backup (_panel.conf.yedek.*)
+
+Notes:
+  localhost and 127.0.0.1 always stay allowed, so a wrong name can be fixed
+  through: ssh -L <panel-port>:127.0.0.1:<panel-port> <server>
+  A failed nginx -t, reload or health check rolls the change back.
+
+Exit codes: 0 success, 1 failure / warning (panel rolled back or unmeasured) or bad usage
+USAGE
+}
+case "${1:-}" in -h|--help|help) kullanim; exit 0 ;; esac
+
 # 🔴 AYRIŞTIRMA İÇİN LC_ALL=C ZORUNLU (dogrula/update/repair/gpanel ile aynı kural).
 # tr_TR collation'ında `a-z` aralığı `i` harfini KAPSAMAZ: kapi_zincir_olc'un
 # grep -oE '"tip":"[a-z]+"' ayrıştırması "yonetim"/"musteri"de kesilir → tip boş →
@@ -62,8 +87,8 @@ ok(){ echo -e "  ${c_g}✓${c_0} $*"; }
 uyar(){ echo -e "  ${c_y}!${c_0} $*"; }
 dur(){ echo -e "  ${c_r}✗ $*${c_0}"; exit 1; }
 
-[ "$(id -u)" = 0 ] || dur "root gerekli"
-[ -f "$PANEL_CONF" ] || dur "$PANEL_CONF yok"
+[ "$(id -u)" = 0 ] || dur "must be run as root"
+[ -f "$PANEL_CONF" ] || dur "$PANEL_CONF not found"
 
 sunucu_ipleri() {
   # Genel (public) IPv4/IPv6 — loopback ve link-local hariç.
@@ -94,20 +119,20 @@ mevcut_isimler() {
 }
 
 durum() {
-  echo "Panel vhost isim yapılandırması"
+  echo "Panel vhost name configuration"
   echo "──────────────────────────────────"
   echo "  server_name : $(mevcut_isimler)"
   if grep -q "default_server" "$PANEL_CONF"; then
-    uyar "panel bloğu HÂLÂ default_server — bilinmeyen isimlere de cevap veriyor"
+    uyar "panel block is STILL default_server — it answers unknown names too"
   else
-    ok "panel bloğu default_server DEĞİL"
+    ok "panel block is NOT default_server"
   fi
   if [ -f "$CATCH_CONF" ]; then
-    ok "yakala-hepsi bloğu kurulu (bilinmeyen isim → 444)"
+    ok "catch-all block installed (unknown name → 444)"
   else
-    uyar "yakala-hepsi bloğu YOK"
+    uyar "catch-all block MISSING"
   fi
-  echo "  sunucu IP'leri: $(sunucu_ipleri | tr '\n' ' ')"
+  echo "  server IPs: $(sunucu_ipleri | tr '\n' ' ')"
   echo
   echo "  Test:"
   echo "    curl -sk -o /dev/null -w '%{http_code}\\n' https://127.0.0.1:${PANEL_PORT}/ --resolve panel.test:${PANEL_PORT}:127.0.0.1"
@@ -150,26 +175,26 @@ ayarla() {
     # DNS bu sunucuya mı çözülüyor? Değilse kilitlenirsin.
     # 🔴 KAMU DNS'ten çöz (getent yerel/bayat cache 127.0.0.1 döndürüp yanlış bloke ediyordu).
     local coz; coz=$(kamu_coz "$istenen")
-    [ -n "$coz" ] || dur "'$istenen' DNS'te çözülmüyor — ayarlanmadı (kilitlenme riski)"
+    [ -n "$coz" ] || dur "'$istenen' does not resolve in DNS — not applied (lockout risk)"
     local eslesme=0
     for ip in $(sunucu_ipleri); do echo "$coz" | grep -qx "$ip" && eslesme=1; done
     if [ "$eslesme" = 0 ]; then
-      dur "'$istenen' bu sunucuya çözülmüyor (çözülen: $(echo $coz | tr '\n' ' ')) — ayarlanmadı"
+      dur "'$istenen' does not resolve to this server (resolved: $(echo $coz | tr '\n' ' ')) — not applied"
     fi
     # Fix: hostname + IP birlikte — IP ile yedek erişim (DNS sorunu recovery)
     izinli="$istenen $(sunucu_ipleri | tr "
 " " ")$izinli"
-    ok "'$istenen' bu sunucuya çözülüyor"
+    ok "'$istenen' resolves to this server"
   else
     # İsim verilmediyse IP'lerle çalış (panel IP ile erişilebilir kalır).
     izinli="$(sunucu_ipleri | tr '\n' ' ')$izinli"
-    uyar "panel hostname verilmedi — IP ile erişim AÇIK kalıyor (tarayan botlar paneli görebilir)"
-    uyar "kapatmak için: girginospanel-panelhost ayarla panel.alanadiniz.com"
+    uyar "no panel hostname given — access by IP stays OPEN (scanning bots can see the panel)"
+    uyar "to close it: girginospanel-panelhost ayarla panel.example.com"
   fi
 
   local yedek="$PANEL_CONF.yedek.$(date +%s)"
   cp -a "$PANEL_CONF" "$yedek"
-  ok "yedek: $yedek"
+  ok "backup: $yedek"
 
   # 1) panel bloğundan default_server'ı kaldır (her genel portta), 2) server_name'i yaz.
   local p
@@ -182,10 +207,10 @@ ayarla() {
   if ! nginx -t >/tmp/nginx-test.log 2>&1; then
     cat /tmp/nginx-test.log
     cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"
-    dur "nginx -t başarısız — DEĞİŞİKLİK GERİ ALINDI"
+    dur "nginx -t failed — CHANGE ROLLED BACK"
   fi
-  ok "nginx -t geçti"
-  systemctl reload nginx || { cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"; nginx -t && systemctl reload nginx; dur "reload başarısız — geri alındı"; }
+  ok "nginx -t passed"
+  systemctl reload nginx || { cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"; nginx -t && systemctl reload nginx; dur "reload failed — rolled back"; }
 
   # 🔴 DOĞRULA, İDDİA ETME. reload sonrası eski işçiler bir süre daha
   # yanıt verebiliyor; "uygulandı" demek yeterli değil, DAVRANIŞI ölç.
@@ -197,14 +222,14 @@ ayarla() {
   if [ "$izinli_kod" != "200" ]; then
     cp -a "$yedek" "$PANEL_CONF"; rm -f "$CATCH_CONF"
     nginx -t >/dev/null 2>&1 && systemctl reload nginx
-    dur "panel ERİŞİLEMEZ oldu (localhost=$izinli_kod) — GERİ ALINDI"
+    dur "panel became UNREACHABLE (localhost=$izinli_kod) — ROLLED BACK"
   fi
   if [ "$bilinmeyen" = "200" ]; then
-    uyar "bilinmeyen isim hâlâ 200 dönüyor — beklenen 000/444. Yapılandırmayı kontrol et."
+    uyar "unknown name still returns 200 — expected 000/444. Check the configuration."
   else
-    ok "doğrulandı: bilinmeyen isim kapanıyor (kod=$bilinmeyen), panel açık (200)"
+    ok "verified: unknown name is closed (code=$bilinmeyen), panel is up (200)"
   fi
-  ok "uygulandı → server_name: $izinli"
+  ok "applied → server_name: $izinli"
 }
 
 # kapi_portu <rol>: kapi.json'dan rol portu. Panel ikilisi ÇALIŞTIRILMAZ (erisim/dogrula
@@ -216,12 +241,12 @@ kapi_portu() { grep -oE "\"$1\": *[0-9]+" "$KAPI_JSON" 2>/dev/null | grep -oE '[
 # aldığı) yeter — panelin Heal'i de portu böyle "yönetiliyor" sayar (kapi.Uzlastir).
 kapi_eksikleri() {
   local conf="$1" rol p
-  grep -q 'proxy_set_header X-GP-Kapi ' "$conf" 2>/dev/null || echo "X-GP-Kapi başlığı"
+  grep -q 'proxy_set_header X-GP-Kapi ' "$conf" 2>/dev/null || echo "X-GP-Kapi header"
   for rol in admin bayi musteri; do
     p=$(kapi_portu "$rol")
     [ -n "$p" ] || continue
     grep -qE "listen[[:space:]]+([^[:space:];]*:)?${p}([[:space:];]|\$)" "$conf" 2>/dev/null \
-      || echo "$rol kapısı listen :$p"
+      || echo "$rol gate listen :$p"
   done
 }
 
@@ -237,7 +262,7 @@ kapi_zincir_olc() {
   local kr rol bek p tip i kopuk="" olcsuz=""
   for kr in admin:yonetim bayi:yonetim musteri:musteri; do
     rol=${kr%%:*}; bek=${kr#*:}; p=$(kapi_portu "$rol")
-    if [ -z "$p" ]; then olcsuz="$olcsuz $rol(port yok)"; continue; fi
+    if [ -z "$p" ]; then olcsuz="$olcsuz $rol(no port)"; continue; fi
     tip=""
     for i in 1 2 3 4 5; do
       tip=$(curl -sk --max-time 5 "https://127.0.0.1:$p/api/v1/kapi" 2>/dev/null \
@@ -246,11 +271,11 @@ kapi_zincir_olc() {
       [ "$i" = 5 ] || sleep 2
     done
     if [ "$tip" = "$bek" ]; then continue; fi
-    if [ -n "$tip" ]; then kopuk="$kopuk $rol :$p=$tip(beklenen $bek)"; else olcsuz="$olcsuz $rol :$p(yanıt yok)"; fi
+    if [ -n "$tip" ]; then kopuk="$kopuk $rol :$p=$tip(expected $bek)"; else olcsuz="$olcsuz $rol :$p(no response)"; fi
   done
   if [ -n "$kopuk" ]; then _kz_zincir=kopuk; _kz_zincir_ayr="${kopuk# }${olcsuz:+ ·${olcsuz}}"; return 1; fi
   if [ -n "$olcsuz" ]; then _kz_zincir=olculemedi; _kz_zincir_ayr="${olcsuz# }"; return 1; fi
-  _kz_zincir=tamam; _kz_zincir_ayr="3/3 kapı kendi tipini dönüyor"
+  _kz_zincir=tamam; _kz_zincir_ayr="3/3 gates return their own type"
   return 0
 }
 
@@ -261,14 +286,14 @@ kapi_zincir_olc() {
 kapi_giris_olc() {
   local mp kod
   mp=$(kapi_portu musteri)
-  [ -n "$mp" ] || { echo "olculemedi (müşteri kapısı portu yok)"; return 0; }
+  [ -n "$mp" ] || { echo "olculemedi (customer gate port missing)"; return 0; }
   kod=$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' -X POST \
         -H 'Content-Type: application/json' --data '{}' \
         "https://127.0.0.1:$mp/api/v1/auth/login" 2>/dev/null) || true
   case "$kod" in
-    404)         echo "acik (müşteri kapısı :$mp yönetici girişi 404)" ;;
-    400|401|200) echo "kapali (müşteri kapısı :$mp yönetici girişi HTTP $kod — uç AÇIK)" ;;
-    *)           echo "olculemedi (müşteri kapısı :$mp HTTP ${kod:-000})" ;;
+    404)         echo "acik (customer gate :$mp admin login 404)" ;;
+    400|401|200) echo "kapali (customer gate :$mp admin login HTTP $kod — endpoint OPEN)" ;;
+    *)           echo "olculemedi (customer gate :$mp HTTP ${kod:-000})" ;;
   esac
 }
 
@@ -281,11 +306,11 @@ kapi_giris_olc() {
 # yalnız operatör CLI'ı çağırıyor.
 kapi_yeniden_uygula() {
   if ! systemctl is-active --quiet girginospanel; then
-    uyar "panel çalışmıyor — kapı düzeni bir sonraki açılışta uygulanır (panel kapalıyken kimse kilitlenmez)"
+    uyar "panel is not running — the gate layout is applied at the next start (nobody is locked out while the panel is down)"
     return 0
   fi
   if ! systemctl restart girginospanel; then
-    uyar "panel yeniden başlatılamadı — kapıyı elle uygula: systemctl restart girginospanel"
+    uyar "could not restart the panel — apply the gate layout manually: systemctl restart girginospanel"
     return 1
   fi
   # 🔴 ÖNCE Heal'in BİTMESİNİ bekle (SON-OPS-3). Açılış Heal'i provisioner.Init içinde,
@@ -298,8 +323,8 @@ kapi_yeniden_uygula() {
   son=$((SECONDS + SAGLIK_SN))
   until curl -fsS --max-time 5 -o /dev/null "$PANEL_HEALTH" 2>/dev/null; do
     if [ "$SECONDS" -ge "$son" ]; then
-      uyar "panel yeniden başlatıldı ama /healthz ${SAGLIK_SN} sn içinde yanıt vermedi ($PANEL_HEALTH) — açılış uzlaştırması bitmedi, kapı düzeni ÖLÇÜLEMEDİ"
-      uyar "bak: journalctl -u girginospanel -n 40   ·   sonra: girginospanel-dogrula (Role gates)"
+      uyar "panel restarted but /healthz did not answer within ${SAGLIK_SN} s ($PANEL_HEALTH) — startup reconciliation not finished, gate layout COULD NOT BE MEASURED"
+      uyar "see: journalctl -u girginospanel -n 40   ·   then: girginospanel-dogrula (Role gates)"
       return 1
     fi
     sleep 2
@@ -307,11 +332,11 @@ kapi_yeniden_uygula() {
   # 🔴 ÖLÇ, İDDİA ETME: Heal bitti — dosyayı BİR KEZ denetle.
   eksik=$(kapi_eksikleri "$PANEL_CONF")
   if [ -n "$eksik" ]; then
-    uyar "panel açıldı ama kapı düzeni _panel.conf'ta eksik: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
-    uyar "panel bu durumda kapı kurallarını KAPATIR (tek-port davranışı) — bak: journalctl -u girginospanel -n 40"
+    uyar "panel is up but the gate layout is missing in _panel.conf: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
+    uyar "in this state the panel DISABLES the gate rules (single-port behavior) — see: journalctl -u girginospanel -n 40"
     rc=1
   else
-    ok "kapı düzeni yeniden uygulandı (panel açılış uzlaştırması tamamlandı)"
+    ok "gate layout re-applied (panel startup reconciliation finished)"
   fi
   # 🔴 OPS-3: BAYRAĞA TEK BAŞINA GÜVENME. Açılış Heal'i bayrağı uçtan uca ölçümden ÖNCE
   # iyimser "acik" yazar; panelin ölçümü (KapiDogrulaBaslat) ListenAndServe'den SONRA
@@ -320,9 +345,9 @@ kapi_yeniden_uygula() {
   # kaymış → tip "karma") da "AÇIK" + rc=0 veriyordu. Zinciri ve zorlamayı BURADA ölç.
   if ! kapi_zincir_olc; then
     if [ "$_kz_zincir" = kopuk ]; then
-      uyar "kapı zinciri KOPUK: $_kz_zincir_ayr — panel ölçümü zorlamayı KAPATIR (≈1 dk): rol ayrımı olmaz, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir (neden: journalctl -u girginospanel | grep kapi)"
+      uyar "gate chain BROKEN: $_kz_zincir_ayr — the panel measurement DISABLES enforcement (≈1 min): no role separation, admin login is also accepted on the reseller/customer/old gates (reason: journalctl -u girginospanel | grep kapi)"
     else
-      uyar "kapı zinciri ÖLÇÜLEMEDİ: $_kz_zincir_ayr — rol ayrımı doğrulanmadı (sonra: girginospanel-dogrula → Role gates)"
+      uyar "gate chain COULD NOT BE MEASURED: $_kz_zincir_ayr — role separation not verified (then: girginospanel-dogrula → Role gates)"
     fi
     return 1
   fi
@@ -330,18 +355,18 @@ kapi_yeniden_uygula() {
   giris=$(kapi_giris_olc)
   case "$bayrak:${giris%% *}" in
     acik:acik)
-      ok "kapı zorlaması: AÇIK — ölçüldü: $_kz_zincir_ayr · ${giris#* } · panel bayrağı acik" ;;
+      ok "gate enforcement: ON — measured: $_kz_zincir_ayr · ${giris#* } · panel flag acik" ;;
     kapali:*|*:kapali)
-      uyar "kapı zorlaması: KAPALI — rol ayrımı yok, yönetici girişi bayi/müşteri/eski kapılarda da kabul edilir (bayrak: ${bayrak:-yok} · ${giris#* }; neden: journalctl -u girginospanel | grep kapi)"
+      uyar "gate enforcement: OFF — no role separation, admin login is also accepted on the reseller/customer/old gates (flag: ${bayrak:-none} · ${giris#* }; reason: journalctl -u girginospanel | grep kapi)"
       rc=1 ;;
     :*)
-      uyar "kapı zorlaması: ÖLÇÜLEMEDİ ($KAPI_ZORLAMA yok/okunamadı · ${giris#* }) — rol ayrımı doğrulanmadı"
+      uyar "gate enforcement: COULD NOT BE MEASURED ($KAPI_ZORLAMA missing/unreadable · ${giris#* }) — role separation not verified"
       rc=1 ;;
     acik:*)
-      uyar "kapı zorlaması: ÖLÇÜLEMEDİ (bayrak acik ama ${giris#* }) — rol ayrımı doğrulanmadı"
+      uyar "gate enforcement: COULD NOT BE MEASURED (flag is acik but ${giris#* }) — role separation not verified"
       rc=1 ;;
     *)
-      uyar "kapı zorlaması: bayrak tanınmadı ('${bayrak//[!a-zA-Z0-9_-]/?}') — rol ayrımı doğrulanmadı"
+      uyar "gate enforcement: flag not recognized ('${bayrak//[!a-zA-Z0-9_-]/?}') — role separation not verified"
       rc=1 ;;
   esac
   return "$rc"
@@ -349,7 +374,7 @@ kapi_yeniden_uygula() {
 
 sifirla() {
   local son; son=$(ls -t "$PANEL_CONF".yedek.* 2>/dev/null | head -1)
-  [ -n "$son" ] || dur "geri alınacak yedek yok"
+  [ -n "$son" ] || dur "no backup to restore"
   # 🔴 KAPI MODU (ADR-GP-001): yedek rol kapısı geçişinden ÖNCE alınmışsa rol listen'ları
   # ve X-GP-Kapi satırı içermez. Yalnız geri yükleyip bıraksaydık panel belleğindeki
   # zorlama AÇIK kalırdı → bakım uzlaştırmasına dek (≤15 dk) giriş 404, API 401: TÜM
@@ -361,13 +386,13 @@ sifirla() {
     kapi=1
     eksik=$(kapi_eksikleri "$son")
     if [ -n "$eksik" ]; then
-      uyar "yedek rol kapısı düzeninden ÖNCE alınmış — eksik: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
-      uyar "kapı düzeni kapi.json'dan hemen yeniden uygulanacak (panel açılış uzlaştırması)"
+      uyar "the backup predates the role-gate layout — missing: $(printf '%s\n' "$eksik" | paste -sd, - | sed 's/,/, /g')"
+      uyar "the gate layout will be re-applied right away from kapi.json (panel startup reconciliation)"
     fi
   fi
   cp -a "$son" "$PANEL_CONF"; rm -f "$CATCH_CONF"
-  nginx -t >/dev/null 2>&1 || dur "nginx -t başarısız"
-  systemctl reload nginx && ok "eski yapılandırmaya dönüldü ($son)"
+  nginx -t >/dev/null 2>&1 || dur "nginx -t failed"
+  systemctl reload nginx && ok "reverted to the previous configuration ($son)"
   local rc=$?
   # reload düşse bile uygula: dosya artık yedek; bir sonraki herhangi bir reload onu yükler.
   if [ "$kapi" = 1 ]; then
@@ -380,5 +405,5 @@ case "${1:-durum}" in
   durum)   durum ;;
   ayarla)  ayarla "${2:-}" ;;
   sifirla) sifirla ;;
-  *) echo "Kullanım: girginospanel-panelhost {durum|ayarla [hostname]|sifirla}"; exit 1 ;;
+  *) echo "Usage: girginospanel-panelhost {durum|ayarla [hostname]|sifirla}"; exit 1 ;;
 esac

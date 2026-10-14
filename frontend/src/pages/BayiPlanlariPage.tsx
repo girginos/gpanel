@@ -12,10 +12,12 @@ import { useDialog } from '@/components/Dialog'
 import { useToast } from '@/components/Toast'
 import { Button } from '@/components/ui'
 import { I } from '@/components/Ikon'
+import { kaynakOzet } from '@/lib/kaynakOzet'
 
 type Paket = {
   id: number; ad: string; aciklama: string
   max_domain: number; max_disk_mb: number; max_trafik_mb: number
+  cpu_cekirdek?: number; ram_mb?: number; io_agirlik?: number
   fiyat_kurus: number; varsayilan: boolean; bayi_sayisi: number; olusturulma: string
 }
 
@@ -131,6 +133,7 @@ export default function BayiPlanlariPage() {
                   <th className={T.baslik}>Hosting</th>
                   <th className={T.baslik}>{cevir("Disk")}</th>
                   <th className={T.baslik}>{cevir("Trafik")}</th>
+                  <th className={T.baslik}>{cevir("CPU / RAM")}</th>
                   <th className={T.baslik}>{cevir("Fiyat")}</th>
                   <th className={T.baslik}>{cevir("Bayi")}</th>
                   <th className={`${T.baslik} text-right`}>{cevir("İşlemler")}</th>
@@ -147,6 +150,7 @@ export default function BayiPlanlariPage() {
                     <td className={T.hucre} data-etiket="Hosting"><span className="font-mono text-sm text-slate-700 dark:text-slate-300">{p.max_domain > 0 ? p.max_domain : '∞'}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Disk")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtMB(p.max_disk_mb)}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Trafik")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtMB(p.max_trafik_mb)}</span></td>
+                    <td className={T.hucre} data-etiket={cevir("CPU / RAM")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{kaynakOzet(p.cpu_cekirdek, p.ram_mb)}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Fiyat")}><span className="font-mono text-xs text-slate-600 dark:text-slate-400">{fmtFiyat(p.fiyat_kurus)}</span></td>
                     <td className={T.hucre} data-etiket={cevir("Bayi")}><span className="text-slate-700 dark:text-slate-300">{p.bayi_sayisi}</span></td>
                     <td className={`${T.hucreAksiyon} lg:text-right`}>

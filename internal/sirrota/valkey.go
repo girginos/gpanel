@@ -59,7 +59,7 @@ func respOku(r *bufio.Reader) (string, error) {
 	}
 	satir = strings.TrimRight(satir, "\r\n")
 	if satir == "" {
-		return "", errors.New("boş RESP yanıtı")
+		return "", errors.New("empty RESP reply")
 	}
 	switch satir[0] {
 	case '+', ':':
@@ -69,7 +69,7 @@ func respOku(r *bufio.Reader) (string, error) {
 	case '$':
 		n, err := strconv.Atoi(satir[1:])
 		if err != nil || n < -1 || n > 1<<20 {
-			return "", errors.New("geçersiz RESP uzunluğu")
+			return "", errors.New("invalid RESP length")
 		}
 		if n == -1 {
 			return "", nil
@@ -80,7 +80,7 @@ func respOku(r *bufio.Reader) (string, error) {
 		}
 		return string(buf[:n]), nil
 	default:
-		return "", fmt.Errorf("beklenmeyen RESP yanıtı türü %q", satir[0])
+		return "", fmt.Errorf("unexpected RESP reply type %q", satir[0])
 	}
 }
 
@@ -118,7 +118,7 @@ func (v ValkeyTCP) Dogrula(ctx context.Context, parola string) error {
 // env'deki yeni parola tutmaz.
 func (v ValkeyTCP) ParolaDegistir(ctx context.Context, eski, yeni string) error {
 	if yeni == "" || strings.ContainsAny(yeni, " \r\n") {
-		return errors.New("geçersiz yeni parola")
+		return errors.New("invalid new password")
 	}
 	b, err := v.bag(ctx)
 	if err != nil {
@@ -126,7 +126,7 @@ func (v ValkeyTCP) ParolaDegistir(ctx context.Context, eski, yeni string) error 
 	}
 	defer b.kapat()
 	if _, err := b.komut("AUTH", "default", eski); err != nil {
-		return fmt.Errorf("AUTH (eski parola): %v", err)
+		return fmt.Errorf("AUTH (old password): %v", err)
 	}
 	if _, err := b.komut("ACL", "SETUSER", "default", "resetpass", ">"+yeni); err != nil {
 		return fmt.Errorf("ACL SETUSER: %v", err)
@@ -134,9 +134,9 @@ func (v ValkeyTCP) ParolaDegistir(ctx context.Context, eski, yeni string) error 
 	if _, err := b.komut("ACL", "SAVE"); err != nil {
 		_, gerr := b.komut("ACL", "SETUSER", "default", "resetpass", ">"+eski)
 		if gerr != nil {
-			return fmt.Errorf("ACL SAVE: %v; bellek içi geri alma da başarısız: %v", err, gerr)
+			return fmt.Errorf("ACL SAVE: %v; the in-memory rollback also failed: %v", err, gerr)
 		}
-		return fmt.Errorf("ACL SAVE: %v (bellek içi değişiklik geri alındı)", err)
+		return fmt.Errorf("ACL SAVE: %v (in-memory change rolled back)", err)
 	}
 	return nil
 }

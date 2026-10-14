@@ -50,7 +50,9 @@ final class Modul
         };
         $tip = strtolower($g(self::SEC_TIP));
         return [
-            'tip' => $tip === 'bayi' ? Kayit::TUR_BAYI : Kayit::TUR_HOSTING,
+            // WHMCS ürün türü "Reseller Account" ise bayi: "Ürün tipi" seçilmemiş ya da varsayılanda
+            // (hosting) kalmış olsa da bayi ürünü HOSTING açmasın (müşteri sunucusunda görüldü, 2026-10-13).
+            'tip' => ($tip === 'bayi' || self::whmcsBayiUrunuMu($p)) ? Kayit::TUR_BAYI : Kayit::TUR_HOSTING,
             'plan' => $g(self::SEC_PLAN),
             'php' => $g(self::SEC_PHP),
             'paket' => $g(self::SEC_PAKET),
@@ -59,6 +61,27 @@ final class Modul
             'panelUrl' => $g(self::SEC_PANEL_URL),
             'mevcutBagla' => Yardimci::acik($g(self::SEC_MEVCUT_BAGLA)),
         ];
+    }
+
+    /**
+     * WHMCS ürün türü "Reseller Account" (reselleraccount) mı? Önce WHMCS'in verdiği
+     * `producttype`, yoksa ürün kaydı (tblproducts.type, `pid`).
+     *
+     * @param array<string,mixed> $p
+     */
+    private static function whmcsBayiUrunuMu(array $p): bool
+    {
+        $tur = strtolower(trim((string) ($p['producttype'] ?? '')));
+        $pid = (int) ($p['pid'] ?? 0);
+        if ($tur === '' && $pid > 0) {
+            try {
+                $r = Capsule::table('tblproducts')->where('id', $pid)->first();
+                $tur = strtolower((string) (is_object($r) ? ($r->type ?? '') : ($r['type'] ?? '')));
+            } catch (\Throwable $e) {
+                $tur = '';
+            }
+        }
+        return $tur === 'reselleraccount';
     }
 
     /** @param array<string,mixed> $p */
@@ -284,7 +307,8 @@ final class Modul
             $govde['plan_id'] = self::planId($c, $o);
         }
         if ($o['php'] !== '') {
-            $govde['php_surum'] = $o['php'];
+            // 1.0.4 öncesi serbest metin değerleri ("php81", "PHP 8.1") kanonik sürüme.
+            $govde['php_surum'] = Yardimci::phpSurum($o['php']);
         }
         if ($o['sql']) {
             $govde['sql_olustur'] = true;
@@ -401,7 +425,9 @@ final class Modul
         }
         $k = Kayit::oku($sid);
         if ($k !== null && $k['tur'] === Kayit::TUR_BAYI && $k['panel_id'] > 0) {
-            return; // idempotent
+            // idempotent (yeniden deneme): bayi bağlı; hostingi önceki denemede açılamadıysa şimdi aç.
+            self::bayiHostingOlustur($p, $o, $c, $k['panel_id']);
+            return;
         }
         $niyet = $k !== null && $k['tur'] === Kayit::TUR_BAYI && $k['panel_id'] === 0;
         $mevcut = self::bayiBul($c, $kullanici);
@@ -434,6 +460,70 @@ final class Modul
             throw new ModulHatasi(Ceviri::t('Panel bayiyi oluşturdu ama kimlik döndürmedi.'));
         }
         Kayit::yaz($sid, $id, Kayit::TUR_BAYI, $kullanici);
+        self::bayiHostingOlustur($p, $o, $c, $id);
+    }
+
+    /**
+     * Bayi siparişinin alan adı için BAYİYE AİT hosting (cPanel/WHM gibi: bayinin kendi sitesi;
+     * panelde POST /domains bayi_id). Alan adı boşsa yalnız bayi açılır. İdempotent: aynı bayiye ait
+     * hosting varsa yeniden açılmaz; alan adı başka bir hesaba aitse açık hata. Hosting parolası WHMCS
+     * hizmet parolasıdır (ftp.parola izni; yoksa panelin ürettiği kalır, giriş tek tıkla yapılır).
+     * WHMCS kullanıcı adı DEĞİŞMEZ: hizmetin kullanıcı adı bayinin adıdır.
+     *
+     * @param array<string,mixed> $p
+     * @param array<string,mixed> $o
+     */
+    private static function bayiHostingOlustur(array $p, array $o, ApiIstemci $c, int $bayiId): void
+    {
+        $alan = strtolower(trim((string) ($p['domain'] ?? '')));
+        if ($alan === '') {
+            return;
+        }
+        $m = self::hesapBul($c, $alan);
+        if ($m !== null) {
+            if ((int) ($m['reseller_id'] ?? 0) !== $bayiId) {
+                throw new ModulHatasi(Ceviri::t("Bayi açıldı ama '{0}' alan adı panelde başka bir hesaba ait; bayinin hostingi açılamadı.", [$alan]));
+            }
+            return;
+        }
+        $govde = ['alan_adi' => $alan, 'bayi_id' => $bayiId];
+        if ($o['plan'] !== '') {
+            $govde['plan_id'] = self::planId($c, $o);
+        }
+        if ($o['php'] !== '') {
+            $govde['php_surum'] = Yardimci::phpSurum($o['php']);
+        }
+        if ($o['sql']) {
+            $govde['sql_olustur'] = true;
+        }
+        $y = $c->hesapOlustur($govde);
+        $c->gizliEkle((string) ($y['olusturulan_parolalar']['ftp'] ?? ''));
+        $c->gizliEkle((string) ($y['olusturulan_parolalar']['db'] ?? ''));
+        $id = (int) ($y['id'] ?? 0);
+        $pw = (string) ($p['password'] ?? '');
+        if ($id > 0 && $pw !== '' && Yardimci::parolaHatasi($pw) === null) {
+            try {
+                $c->ftpParola($id, $pw);
+            } catch (ApiHatasi $e) {
+                // izin yok: panelin ürettiği parola kalır; bayi hostinge tek tıkla girer
+            }
+        }
+    }
+
+    /**
+     * Bayi hizmetinin kendi hostingi: siparişin alan adı VE bu bayiye ait; yoksa null.
+     *
+     * @param array<string,mixed> $p
+     * @return array<string,mixed>|null
+     */
+    private static function bayiHostingi(array $p, ApiIstemci $c, int $bayiId): ?array
+    {
+        $alan = strtolower(trim((string) ($p['domain'] ?? '')));
+        if ($alan === '' || $bayiId <= 0) {
+            return null;
+        }
+        $m = self::hesapBul($c, $alan);
+        return ($m !== null && (int) ($m['reseller_id'] ?? 0) === $bayiId) ? $m : null;
     }
 
     // ── Askiya al / ac / sil ─────────────────────────────────────────────
@@ -506,6 +596,11 @@ final class Modul
             if ($o['tip'] === Kayit::TUR_BAYI) {
                 $paket = self::adIdCoz($c->bayiPaketleri(), $o['paket'], Ceviri::t('Bayi paketi'), Ceviri::t('Bayi paketi'));
                 $c->bayiGuncelle($id, ['paket_id' => $paket]);
+                // Üründe hosting planı seçiliyse bayinin kendi hostingine de uygulanır.
+                $h = $o['plan'] !== '' ? self::bayiHostingi($p, $c, $id) : null;
+                if ($h !== null) {
+                    $c->planDegistir((int) $h['id'], self::planId($c, $o));
+                }
             } else {
                 // plan_id null panelde "plani kaldir" demek: bos secimde ASLA gonderme.
                 $c->planDegistir($id, self::planId($c, $o));
@@ -518,15 +613,36 @@ final class Modul
     {
         return self::calistir('ChangePassword', $p, static function () use ($p) {
             $o = self::secenekler($p);
-            if ($o['tip'] === Kayit::TUR_BAYI) {
-                throw new ModulHatasi(Ceviri::t('Bayi hesabının parolası panel API anahtarıyla değiştirilemez (panel kısıtı). Bayi parolayı panelden değiştirmeli.'));
-            }
             $pw = (string) ($p['password'] ?? '');
             $h = Yardimci::parolaHatasi($pw);
             if ($h !== null) {
                 throw new ModulHatasi($h);
             }
             $c = self::istemci($p, 'ChangePassword');
+            if ($o['tip'] === Kayit::TUR_BAYI) {
+                // Bayi panel parolası (kök anahtarında AYRI bayi.parola izni). Panel bayinin açık
+                // oturumlarını düşürür ve API anahtarlarını iptal eder. Eski panelde uç yok.
+                $bid = self::hesapId($p, $c, Kayit::TUR_BAYI);
+                try {
+                    $c->bayiParolaSifirla($bid, $pw);
+                } catch (ApiHatasi $e) {
+                    // Uç yok: panel düz metin "404 page not found" döner (JSON değil → panel mesajı boş).
+                    if ($e->durum === 404 && ($e->panelMesaji === '' || stripos($e->panelMesaji, 'page not found') !== false)) {
+                        throw new ModulHatasi(Ceviri::t('Bu gPanel sürümü bayi şifre sıfırlamayı desteklemiyor; paneli güncelleyin. Bayi şifresini panelde Profil sayfasından değiştirebilir.'));
+                    }
+                    throw $e;
+                }
+                // Aynı parola bayinin kendi hostingine (panel + FTP) de.
+                $h = self::bayiHostingi($p, $c, $bid);
+                if ($h !== null) {
+                    try {
+                        $c->ftpParola((int) $h['id'], $pw);
+                    } catch (ApiHatasi $e) {
+                        throw new ModulHatasi(Ceviri::t('Bayi parolası değişti ama hosting parolası değiştirilemedi: {0}', [$e->getMessage()]));
+                    }
+                }
+                return;
+            }
             $c->ftpParola(self::hesapId($p, $c, Kayit::TUR_HOSTING), $pw);
         });
     }
@@ -551,7 +667,7 @@ final class Modul
                 $eksik[] = 'plan:oku';
             }
             if ($eksik) {
-                return ['success' => false, 'error' => Ceviri::t('Bağlantı kuruldu ama API anahtarında izin eksik: {0} (isteğe bağlı: ftp.parola:yaz, sso, bayi).', [implode(', ', $eksik)])];
+                return ['success' => false, 'error' => Ceviri::t('Bağlantı kuruldu ama API anahtarında izin eksik: {0} (isteğe bağlı: ftp.parola:yaz, sso, bayi, bayi.parola).', [implode(', ', $eksik)])];
             }
             // Eski kapı tespiti: panel kapı portlarını değiştirdiyse geçiş döneminde eski
             // port da çalışır ama sonra KAPANIR. /kapi/adres (her anahtara açık) yalnız eski
@@ -598,18 +714,33 @@ final class Modul
         try {
             $o = self::secenekler($p);
             $c = self::istemci($p, $eylem);
-            if ($o['tip'] === Kayit::TUR_BAYI) {
-                // Bayi icin SSO ucu yok: duz panel baglantisi.
-                return self::duzBaglanti($p, $o, $musteri, Ceviri::t('Bayi hesabı için tek tıkla giriş ucu yok.'));
+            // Bayi ürünü: bayi paneline tek tık giriş (POST /resellers/{id}/sso, kök anahtarı +
+            // sso + bayi:yaz). İsteğe bağlı hedef sayfa (?gp_hedef=profil) URL parçasına eklenir.
+            $bayi = $o['tip'] === Kayit::TUR_BAYI;
+            $hedef = $bayi && $musteri ? Yardimci::ssoHedef() : '';
+            $id = self::hesapId($p, $c, $bayi ? Kayit::TUR_BAYI : Kayit::TUR_HOSTING);
+            if ($hedef === 'hosting') {
+                // Bayi ürünü "Hosting paneline giriş": bayinin KENDİ hostingine (siparişin alan adı)
+                // müşteri paneli tek tık girişi. Ürünün 'Panel adresi' bayi kapısıdır: kullanılmaz,
+                // müşteri kapısı panelden öğrenilir.
+                $h = self::bayiHostingi($p, $c, $id);
+                if ($h === null) {
+                    return ['success' => false, 'errorMsg' => Ceviri::t('Bu bayi hizmetinin hosting hesabı yok.')];
+                }
+                $bayi = false;
+                $id = (int) $h['id'];
+                $o['tip'] = Kayit::TUR_HOSTING;
+                $o['panelUrl'] = '';
             }
-            $id = self::hesapId($p, $c, Kayit::TUR_HOSTING);
+            $yol = $hedef === 'profil' ? '/profil' : '';
             try {
-                $y = $c->sso($id);
+                $y = $bayi ? $c->bayiSso($id) : $c->sso($id);
             } catch (ApiHatasi $e) {
-                // Uc yok (404) ya da anahtarda izin yok (403): musteri alaninda duz baglantiya dus.
+                // Uc yok (404: eski panel) ya da anahtarda izin yok (403): musteri alaninda duz
+                // baglantiya dus.
                 $ucYok = $e->durum === 404 || ($e->durum === 403 && $e->kod === '');
                 if ($musteri && $ucYok) {
-                    return self::duzBaglanti($p, $o, true, $e->getMessage());
+                    return self::duzBaglanti($p, $o, true, $e->getMessage(), $yol);
                 }
                 return ['success' => false, 'errorMsg' => $e->getMessage()];
             }
@@ -617,6 +748,9 @@ final class Modul
             $url = self::ssoAdresi((string) ($y['url'] ?? ''), $p, $o, $hata);
             if ($hata !== null) {
                 return ['success' => false, 'errorMsg' => $hata];
+            }
+            if ($yol !== '') {
+                $url .= '&next=' . rawurlencode($yol);
             }
             return ['success' => true, 'redirectTo' => $url];
         } catch (ApiHatasi $e) {
@@ -688,17 +822,23 @@ final class Modul
      * @param array<string,mixed> $o
      * @return array{success:bool,redirectTo?:string,errorMsg?:string}
      */
-    private static function duzBaglanti(array $p, array $o, bool $musteri, string $neden): array
+    private static function duzBaglanti(array $p, array $o, bool $musteri, string $neden, string $yol = ''): array
     {
         $url = self::panelUrl($p, $o);
         if (!$musteri || $url === '') {
             return ['success' => false, 'errorMsg' => $neden];
         }
-        return ['success' => true, 'redirectTo' => $url];
+        return ['success' => true, 'redirectTo' => $yol !== '' ? rtrim($url, '/') . $yol : $url];
     }
 
-    /** Duz panel adresi: urundeki 'Panel adresi' ya da sunucu host:port. @param array<string,mixed> $p @param array<string,mixed> $o */
-    public static function panelUrl(array $p, array $o): string
+    /**
+     * Duz panel adresi: urundeki 'Panel adresi'; bos ise panelden ogrenilen kapi (hosting →
+     * musteri, bayi → bayi). $panelSor=false: panele SORMADAN (bagli olmayan hizmet).
+     *
+     * @param array<string,mixed> $p
+     * @param array<string,mixed> $o
+     */
+    public static function panelUrl(array $p, array $o, bool $panelSor = true): string
     {
         if ($o['panelUrl'] !== '') {
             $u = parse_url($o['panelUrl']);
@@ -707,11 +847,45 @@ final class Modul
             }
             return '';
         }
-        if ($o['tip'] === Kayit::TUR_BAYI) {
-            return ''; // bayi kapisi ayri port: adres elle girilmeli
-        }
+        // Adres girilmemiş: kapıyı panelden öğren — hosting ürünü → müşteri kapısı, bayi
+        // ürünü → bayi kapısı (GET /kapi/portlar, gPanel 0.3.0-20261013+). Sunucu ayarındaki
+        // ad korunur, yalnız port değişir.
         $a = Yardimci::sunucuAdresi($p);
+        $port = $panelSor ? (self::kapiPortlari($p)[$o['tip'] === Kayit::TUR_BAYI ? 'bayi' : 'musteri'] ?? 0) : 0;
+        if ($port > 0 && Yardimci::hostGecerli($a['host'])) {
+            return Yardimci::tabanUrl($a['host'], $port) . '/';
+        }
+        // Eski panel (uç yok): bayi kapısı ayrı port, adres elle girilmeli; hosting eski davranış.
+        if ($o['tip'] === Kayit::TUR_BAYI) {
+            return '';
+        }
         return Yardimci::hostGecerli($a['host']) && $a['port'] > 0 ? Yardimci::tabanUrl($a['host'], $a['port']) . '/' : '';
+    }
+
+    /**
+     * Panelin müşteri/bayi kapısı portları (GET /kapi/portlar; yönetici portu dönmez).
+     * Eski panelde uç yok ya da hata: boş dizi (çağıran eski davranışa düşer).
+     *
+     * @param array<string,mixed> $p
+     * @return array<string,int>
+     */
+    private static function kapiPortlari(array $p): array
+    {
+        $portlar = [];
+        try {
+            $o = self::secenekler($p);
+            $y = ApiIstemci::paramsdan($p, $o['tlsKapali'])->eylem('PanelAdresi')
+                ->gunlukcu([self::class, 'gunluge'])->istek('GET', '/kapi/portlar');
+            foreach (['musteri', 'bayi'] as $rol) {
+                $v = (int) ($y[$rol] ?? 0);
+                if ($v > 0 && $v < 65536) {
+                    $portlar[$rol] = $v;
+                }
+            }
+        } catch (\Throwable $e) {
+            // uç yok (eski panel), izin ya da ağ hatası: eski davranış
+        }
+        return $portlar;
     }
 
     // ── Kullanim guncelleme ──────────────────────────────────────────────
@@ -934,12 +1108,15 @@ final class Modul
             'cubuklar' => [],
             'olcerler' => [],
             'serviceid' => (int) ($p['serviceid'] ?? 0),
-            'panel_url' => self::panelUrl($p, $o),
+            'panel_url' => self::panelUrl($p, $o, false), // bagli degilse panele sorulmaz
+            'bayi_hosting' => null,
+            'havuz_olcerleri' => [],
             'token' => function_exists('generate_token') ? (string) \generate_token('plain') : '',
         ];
         try {
             $c = self::istemci($p, 'ClientArea');
             $id = self::hesapId($p, $c, $o['tip']);
+            $vars['panel_url'] = self::panelUrl($p, $o); // bagli: kapi panelden (musteri/bayi)
             if ($o['tip'] === Kayit::TUR_BAYI) {
                 foreach ($c->bayiler() as $b) {
                     if ((int) ($b['id'] ?? 0) === $id) {
@@ -952,6 +1129,13 @@ final class Modul
                         ];
                         $vars['disk'] = self::cubuk(Yardimci::kbToMb($b['disk_kullanim_kb'] ?? 0), (int) ($b['max_disk_mb'] ?? 0));
                         $vars['trafik'] = self::cubuk(0, (int) ($b['max_trafik_mb'] ?? 0));
+                        $vars['havuz_olcerleri'] = self::havuzOlcerleri($c, $id);
+                        $h = self::bayiHostingi($p, $c, $id);
+                        if ($h !== null) {
+                            $vars['bayi_hosting'] = ['alan' => (string) ($h['alan_adi'] ?? ''),
+                                'ftp_user' => (string) ($h['ftp_user'] ?? ($h['sistem_kullanici'] ?? '')),
+                                'ftp_host' => (string) ($h['ftp_host'] ?? '')];
+                        }
                     }
                 }
             } else {
@@ -984,16 +1168,56 @@ final class Modul
                 }
             }
         }
+        // Toplam alan adı ölçer olarak gösterilmez: "Hesap bilgileri"nde zaten "n / limit" satırı var.
         if ($o['tip'] === Kayit::TUR_BAYI && is_array($vars['hesap'])) {
-            $n = (int) $vars['hesap']['alan_sayisi'];
-            $m = (int) $vars['hesap']['max_domain'];
-            $y = $m > 0 ? (int) min(100, round($n * 100 / $m)) : 0;
-            $vars['olcerler'][] = [
-                'ad' => 'alan_sayisi', 'kullanim_metin' => (string) $n, 'limit_metin' => $m > 0 ? (string) $m : '',
-                'yuzde' => $y, 'limitli' => $m > 0, 'sinif' => self::esikSinifi($m > 0, $y),
-            ];
+            foreach ($vars['havuz_olcerleri'] as $hv) {
+                $vars['olcerler'][] = $hv;
+            }
         }
         return ['templatefile' => 'templates/clientarea', 'vars' => $vars];
+    }
+
+    /**
+     * Bayi kaynak havuzu ölçerleri (CPU, RAM: limit + anlık kullanım). Panel yanıt verdiyse ikisi
+     * de HER ZAMAN gösterilir: limit yoksa "Sınırsız" (panel havuzsuz bayide kullanım örneği
+     * almaz → "—"). Panel desteklemiyorsa (eski sürüm) ya da anahtarda izin yoksa boş: sayfa
+     * paket ölçerleriyle açılır. Havuz diski ayrıca gösterilmez: sınırı paket disk kotasıyla aynıdır.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private static function havuzOlcerleri(ApiIstemci $c, int $id): array
+    {
+        try {
+            $d = $c->bayiKaynak($id);
+        } catch (\Throwable $e) {
+            return [];
+        }
+        $h = is_array($d['havuz'] ?? null) ? $d['havuz'] : [];
+        $a = is_array($d['anlik'] ?? null) ? $d['anlik'] : [];
+        $out = [];
+        $cpuK = isset($a['cpu_milli']) && is_numeric($a['cpu_milli']) ? (int) $a['cpu_milli'] : null;
+        $cpuSinir = (int) round(((float) ($h['cpu_cekirdek'] ?? 0)) * 1000);
+        if ($cpuSinir > 0) {
+            $k = $cpuK ?? 0;
+            $y = (int) min(100, round($k * 100 / $cpuSinir));
+            $out[] = ['ad' => 'cpu', 'kullanim_metin' => Yardimci::cekirdekMetin($k), 'limit_metin' => Yardimci::cekirdekMetin($cpuSinir),
+                'yuzde' => $y, 'limitli' => true, 'sinif' => self::esikSinifi(true, $y)];
+        } else {
+            $out[] = ['ad' => 'cpu', 'kullanim_metin' => $cpuK === null ? '—' : Yardimci::cekirdekMetin($cpuK), 'limit_metin' => '',
+                'yuzde' => 0, 'limitli' => false, 'sinif' => ''];
+        }
+        $ramK = isset($a['ram_mb']) && is_numeric($a['ram_mb']) ? (int) $a['ram_mb'] : null;
+        $ramSinir = (int) ($h['ram_mb'] ?? 0);
+        if ($ramSinir > 0) {
+            $out[] = self::olcer('ram', self::cubuk($ramK ?? 0, $ramSinir));
+        } else {
+            $o = self::olcer('ram', self::cubuk($ramK ?? 0, 0));
+            if ($ramK === null) {
+                $o['kullanim_metin'] = '—';
+            }
+            $out[] = $o;
+        }
+        return $out;
     }
 
     /**

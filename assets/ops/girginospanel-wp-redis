@@ -10,22 +10,43 @@
 #   WP: WP_REDIS_PASSWORD=array(sk,pass) + phpredis + selective flush + drop-in elle kopya
 set -uo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-wp-redis <system_user> [off]
+
+Attaches (or detaches) an isolated per-tenant Redis (Valkey) object cache for
+all WordPress installs of one hosting account (public_html and one level
+below). Same recipe as the panel's "Redis Cache" feature: an ACL user limited
+to the key prefix <system_user>:*, the wp-config constants, the redis-cache
+plugin and the object-cache.php drop-in. Idempotent. Run as root; needs
+girginospanel-redis-setup to have run first (PANEL_REDIS_ADMIN_PASS).
+
+Arguments:
+  <system_user>  Hosting system user (c_...)
+  off            Detach: remove the drop-in, the wp-config constants, the ACL
+                 user and the panel DB record. Without it the cache is attached.
+
+Exit codes: 0 done, 1 invalid user, not root, Redis not set up or user not found
+USAGE
+}
+case "${1:-}" in -h|--help|help) kullanim; exit 0 ;; esac
+
 # 🔴 LC_ALL=C ZORUNLU: tr_TR'de `[[ =~ ^[a-z0-9_]... ]]` aralığı `i` harfini KAPSAMAZ →
 # içinde `i` geçen her sistem kullanıcısı (ör. girginos) "gecersiz kullanici adi" ile
 # reddediliyordu (kum havuzunda LANG=tr_TR.UTF-8 ile ölçüldü).
 export LC_ALL=C
 
-SK="${1:?kullanim: $0 <sistem_kullanici> [off]}"
+SK="${1:?usage: $0 <system_user> [off]}"
 ACTION="${2:-on}"
 HOST=127.0.0.1; PORT=6379
 ENV=/etc/girginospanel/env
 
 # --- guardlar ---
-if ! [[ "$SK" =~ ^[a-z0-9_]{1,32}$ ]]; then echo "gecersiz kullanici adi: $SK"; exit 1; fi
-[ "$(id -u)" = 0 ] || { echo "root gerekli"; exit 1; }
+if ! [[ "$SK" =~ ^[a-z0-9_]{1,32}$ ]]; then echo "invalid user name: $SK"; exit 1; fi
+[ "$(id -u)" = 0 ] || { echo "must be run as root"; exit 1; }
 ADMIN=$(grep -oP '^PANEL_REDIS_ADMIN_PASS=\K.*' "$ENV" 2>/dev/null)
-[ -z "$ADMIN" ] && { echo "PANEL_REDIS_ADMIN_PASS yok -> once: girginospanel-redis-setup"; exit 1; }
-id "$SK" >/dev/null 2>&1 || { echo "sistem kullanicisi yok: $SK"; exit 1; }
+[ -z "$ADMIN" ] && { echo "PANEL_REDIS_ADMIN_PASS missing -> run first: girginospanel-redis-setup"; exit 1; }
+id "$SK" >/dev/null 2>&1 || { echo "system user not found: $SK"; exit 1; }
 
 vc(){ REDISCLI_AUTH="$ADMIN" valkey-cli "$@"; }
 wpc(){ runuser -u "$SK" -- env HOME="/home/$SK" /usr/bin/php -d memory_limit=512M /usr/local/bin/wp "$@"; }
@@ -42,24 +63,24 @@ done
 
 # ================= OFF =================
 if [ "$ACTION" = "off" ]; then
-  echo "==== Redis cozuluyor: $SK ===="
+  echo "==== Detaching Redis: $SK ===="
   for dir in "${DIRS[@]}"; do
     runuser -u "$SK" -- rm -f "$dir/wp-content/object-cache.php"
     for k in WP_REDIS_HOST WP_REDIS_PORT WP_REDIS_USERNAME WP_REDIS_PASSWORD WP_REDIS_PREFIX \
              WP_REDIS_SELECTIVE_FLUSH WP_REDIS_CLIENT WP_CACHE; do
       wpc config delete "$k" --path="$dir" >/dev/null 2>&1
     done
-    say "cozuldu: $dir"
+    say "detached: $dir"
   done
   vc ACL DELUSER "$SK" >/dev/null; vc ACL SAVE >/dev/null
   [ -n "$DID" ] && mysql -u root panel -e "DELETE FROM cp_domain_redis WHERE domain_id=$DID;" 2>/dev/null
-  say "ACL + DB kaydi silindi"
+  say "ACL user + DB record deleted"
   exit 0
 fi
 
 # ================= ON =================
-echo "==== Redis baglaniyor: $SK ===="
-[ ${#DIRS[@]} -eq 0 ] && { echo "  UYARI: /home/$SK/public_html altinda WordPress bulunamadi"; }
+echo "==== Attaching Redis: $SK ===="
+[ ${#DIRS[@]} -eq 0 ] && { echo "  WARNING: no WordPress found under /home/$SK/public_html"; }
 
 # parola: mevcut DB kaydi varsa yeniden kullan, yoksa uret
 PASS=$(mysql -u root panel -N -e "SELECT redis_pass FROM cp_domain_redis WHERE domain_id='${DID:-0}' AND aktif=1;" 2>/dev/null)
@@ -69,12 +90,12 @@ PASS=$(mysql -u root panel -N -e "SELECT redis_pass FROM cp_domain_redis WHERE d
 vc ACL SETUSER "$SK" on ">$PASS" resetkeys "~$SK:*" resetchannels "&$SK:*" \
    +@all -@dangerous -@admin +info +dbsize +command +ping +echo "+client|no-evict" >/dev/null
 vc ACL SAVE >/dev/null
-say "ACL user hazir: $SK (~$SK:*)"
+say "ACL user ready: $SK (~$SK:*)"
 
 # 2) panel DB kaydi (panel 'aktif' gostersin)
 if [ -n "$DID" ]; then
   mysql -u root panel -e "INSERT INTO cp_domain_redis (domain_id, sk, redis_pass, aktif) VALUES ($DID,'$SK','$PASS',1)
-    ON DUPLICATE KEY UPDATE sk=VALUES(sk), redis_pass=VALUES(redis_pass), aktif=1;" 2>/dev/null && say "panel DB kaydi guncellendi (domain #$DID)"
+    ON DUPLICATE KEY UPDATE sk=VALUES(sk), redis_pass=VALUES(redis_pass), aktif=1;" 2>/dev/null && say "panel DB record updated (domain #$DID)"
 fi
 
 # 3) her WP kurulumu
@@ -98,13 +119,14 @@ for dir in "${DIRS[@]}"; do
 
   ST=$(wpc redis status --path="$dir" 2>&1)
   if grep -q "Connected" <<<"$ST"; then
-    say "  -> Connected (object cache aktif)"
+    say "  -> Connected (object cache active)"
     BAGLANAN=$((BAGLANAN+1))
   else
-    say "  -> BAGLANAMADI:"; grep -iE "status|error" <<<"$ST" | head -2 | sed 's/^/     /'
+    say "  -> COULD NOT CONNECT:"; grep -iE "status|error" <<<"$ST" | head -2 | sed 's/^/     /'
   fi
 done
 
-echo "==== Ozet ===="
-say "baglanan WP kurulumu: $BAGLANAN / ${#DIRS[@]}"
-say "kullanici=$SK  parola=$PASS  prefix=$SK:  sunucu=$HOST:$PORT"
+echo "==== Summary ===="
+say "connected WP installs: $BAGLANAN / ${#DIRS[@]}"
+# 🔴 Parola EKRANA YAZILMAZ (terminal geçmişi/kayıt dosyaları); wp-config.php ve panel DB'de durur.
+say "user=$SK  password=(hidden; stored in wp-config.php and the panel DB)  prefix=$SK:  server=$HOST:$PORT"

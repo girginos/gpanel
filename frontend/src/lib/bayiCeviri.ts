@@ -104,6 +104,7 @@ export const BAYI_EN: Record<string, string> = {
   'Tamam': 'OK',
   // Müşteri adına giriş
   'Müşteri paneline girilemedi': 'Could not sign in to the customer panel',
+  'Bayi paneline girilemedi': 'Could not sign in to the reseller panel',
   'Giriş bağlantısı geçersiz ya da süresi doldu': 'The sign-in link is invalid or has expired',
   'Sunucuya ulaşılamadı — bağlantınızı kontrol edin': 'Could not reach the server — check your connection',
   'Oturum açılıyor…': 'Signing in…',

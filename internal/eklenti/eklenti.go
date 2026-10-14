@@ -370,6 +370,8 @@ func (h *Handlers) SaglikTara(ctx context.Context) {
 		}
 		_, _ = h.DB.ExecContext(ctx,
 			`UPDATE cp_eklentiler SET saglik=?, son_kontrol=NOW() WHERE ad=?`, saglik, k.ad)
+		// Müşteri erişim bayrağı eklentinin kendi bildirimine bağlıdır (musteri_kapi.go).
+		h.musteriErisimUzlastir(ctx, k.ad, k.soket)
 	}
 }
 

@@ -156,7 +156,7 @@ func TestSelinuxTemel_DryRunHicbirSeyDegistirmez(t *testing.T) {
 			t.Fatalf("dry-run'da -n'siz restorecon: %q", satir)
 		}
 	}
-	if !strings.Contains(out, "httpd_enable_homedirs kapalı") {
+	if !strings.Contains(out, "httpd_enable_homedirs is off") {
 		t.Fatalf("dry-run neyin düzeltileceğini söylemeli:\n%s", out)
 	}
 }
@@ -185,7 +185,7 @@ func TestDocrootSelinux_UstDogruAltAgacYineOnarilir(t *testing.T) {
 	if !strings.Contains(lg, "restorecon -RFv "+ph) {
 		t.Fatalf("üst dizin doğru olsa da alt ağaç restorecon -RF'ten geçmeli:\n%s", lg)
 	}
-	if !strings.Contains(out, "alt ağaçta 1 dosya yanlış etiketliydi") {
+	if !strings.Contains(out, "1 file(s) in the subtree were mislabeled") {
 		t.Fatalf("düzeltilen dosya raporlanmalı:\n%s", out)
 	}
 	if strings.Contains(lg, "semanage fcontext -a") {
@@ -444,7 +444,7 @@ func TestDocrootSelinux_YalnizKullaniciAlaniFarkiSayilmaz(t *testing.T) {
 	o.dosya(t, "ls_label", "system_u:object_r:httpd_user_rw_content_t:s0")
 	o.dosya(t, "restorecon_out", "Relabeled "+ph+"/a.js from unconfined_u:object_r:httpd_user_rw_content_t:s0 to system_u:object_r:httpd_user_rw_content_t:s0\n")
 	out, _ := o.kos(t, 1, 1, 0, "sec_docroot_selinux")
-	if strings.Contains(out, "alt ağaçta") {
+	if strings.Contains(out, "in the subtree") {
 		t.Fatalf("yalnız kullanıcı alanı farkı düzeltme sayıldı:\n%s", out)
 	}
 }

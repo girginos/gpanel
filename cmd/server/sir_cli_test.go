@@ -96,8 +96,8 @@ func TestSirYenileCLI_GeriDonusDeSagliksizsaKritik(t *testing.T) {
 	if kod := sirYenileCLI(context.Background(), r, sv, []string{"--hepsi"}, &out, &hata); kod != 3 {
 		t.Fatalf("kod=%d", kod)
 	}
-	if !strings.Contains(hata.String(), "KRİTİK") {
-		t.Error("KRİTİK mesajı yok")
+	if !strings.Contains(hata.String(), "CRITICAL") {
+		t.Error("CRITICAL message missing")
 	}
 }
 

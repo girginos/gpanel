@@ -8,6 +8,28 @@
 #   girginospanel-optimize --dry-run      # sadece hesaplanan değerleri göster
 set -uo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-optimize [--no-restart] [--dry-run]
+
+Tunes MariaDB, nginx and PHP to the server's RAM and CPU count. Idempotent;
+every change is validated and rolled back on failure. Run as root.
+
+Options:
+  --no-restart   Write the config and apply the dynamic MariaDB settings with
+                 SET GLOBAL, but do NOT restart MariaDB (buffer pool, redo log
+                 and skip_name_resolve apply at the next restart)
+  --dry-run      Only print the computed values; change nothing
+  -h, --help     Show this help
+
+Writes: /etc/my.cnf.d/girginospanel-tuning.cnf, /etc/nginx/conf.d/00-girginospanel-perf.conf,
+PHP drop-ins (max_input_vars, OPcache) and the phpMyAdmin pool.
+
+Exit codes: 0 success, 1 MariaDB restart or nginx validation failed (rolled back)
+USAGE
+}
+for a in "$@"; do case "$a" in -h|--help) kullanim; exit 0 ;; esac; done
+
 NO_RESTART=0; DRY=0
 for a in "$@"; do case "$a" in --no-restart) NO_RESTART=1;; --dry-run) DRY=1;; esac; done
 
@@ -40,11 +62,11 @@ IO_THREADS=$CPU; [ "$IO_THREADS" -gt 8 ] && IO_THREADS=8; [ "$IO_THREADS" -lt 4 
 # ---------- nginx değerleri ----------
 NGX_CONN=4096; [ "$RAM_MB" -lt 2048 ] && NGX_CONN=2048
 
-echo "════════ Hesaplanan değerler (RAM=${RAM_MB}MB, CPU=${CPU}) ════════"
+echo "════════ Computed values (RAM=${RAM_MB}MB, CPU=${CPU}) ════════"
 log "MariaDB: buffer_pool=${BP_MB}M (${BP_PCT}%, ${BP_INST} instance) · redo_log=${LOG_MB}M · thread_cache=${THREAD_CACHE} · io_threads=${IO_THREADS}"
 log "MariaDB: flush_log_at_trx_commit=2 (perf) · io_capacity=1000/2000 (SSD) · skip_name_resolve=ON · utf8mb4"
 log "nginx: worker_connections=${NGX_CONN} · worker_rlimit_nofile=65535 · multi_accept+epoll · http tuning"
-[ "$DRY" = 1 ] && { echo "  (dry-run — değişiklik yapılmadı)"; exit 0; }
+[ "$DRY" = 1 ] && { echo "  (dry-run — no changes made)"; exit 0; }
 
 TS=$(date +%s)
 
@@ -105,7 +127,7 @@ collation-server                 = utf8mb4_unicode_ci
 query_cache_type                 = 0
 query_cache_size                 = 0
 CNF
-log "yazıldı: $MYSQL_CNF"
+log "written: $MYSQL_CNF"
 
 # Dinamik olanları HEMEN uygula (restart'sız kazanç; restart başarısız olsa bile aktif)
 mysql -u root 2>/dev/null <<SQL
@@ -121,7 +143,7 @@ SET GLOBAL wait_timeout                = 31536000;
 SET GLOBAL innodb_buffer_pool_dump_at_shutdown = ON;
 SET GLOBAL innodb_buffer_pool_load_at_startup  = ON;
 SQL
-log "dinamik ayarlar SET GLOBAL ile uygulandı (restart'sız)"
+log "dynamic settings applied via SET GLOBAL (no restart)"
 
 # systemd LimitNOFILE — open_files_limit=4294967295'in ETKİLİ olması için gerekli.
 # ⚠️ 'infinity' KULLANMA: MariaDB open_files_limit'i 64'e çökertir. Somut yüksek değer ver.
@@ -132,22 +154,22 @@ cat > "$LIMITS_DIR/girginospanel-limits.conf" <<LIM
 LimitNOFILE=1048576
 LIM
 systemctl daemon-reload
-log "systemd LimitNOFILE=1048576 (open_files_limit için)"
+log "systemd LimitNOFILE=1048576 (for open_files_limit)"
 
 if [ "$NO_RESTART" = 0 ]; then
   # restart: buffer_pool boyutu + redo_log + skip_name_resolve tam etki için gerekli
-  log "MariaDB yeniden başlatılıyor (buffer_pool/redo_log/skip_name_resolve aktivasyonu)…"
+  log "restarting MariaDB (to activate buffer_pool/redo_log/skip_name_resolve)…"
   if systemctl restart mariadb && sleep 3 && systemctl is-active --quiet mariadb && mysql -u root -e "SELECT 1" >/dev/null 2>&1; then
     log "✓ MariaDB restart OK ($(mysql -u root -N -e "SELECT CONCAT(ROUND(@@innodb_buffer_pool_size/1048576),'M buffer_pool, ',@@innodb_flush_log_at_trx_commit,' flush, skip_name_resolve=',@@skip_name_resolve)" 2>/dev/null))"
   else
-    hata "MariaDB restart BAŞARISIZ — tuning geri alınıyor"
+    hata "MariaDB restart FAILED — rolling the tuning back"
     rm -f "$MYSQL_CNF"; [ -f "${MYSQL_CNF}.bak.${TS}" ] && cp -a "${MYSQL_CNF}.bak.${TS}" "$MYSQL_CNF"
     systemctl restart mariadb; sleep 3
-    systemctl is-active --quiet mariadb && log "eski config ile geri döndü" || hata "MariaDB HÂLÂ DOWN — elle müdahale gerek!"
+    systemctl is-active --quiet mariadb && log "back up with the old config" || hata "MariaDB is STILL DOWN — manual intervention needed!"
     exit 1
   fi
 else
-  log "(--no-restart) config yazıldı; buffer_pool/redo_log/skip_name_resolve sonraki restart'ta aktif olur"
+  log "(--no-restart) config written; buffer_pool/redo_log/skip_name_resolve become active at the next restart"
 fi
 
 # ================= NGINX =================
@@ -200,11 +222,11 @@ NGX
 # 3) doğrula → başarısızsa geri al
 if nginx -t >/dev/null 2>&1; then
   systemctl reload nginx
-  log "✓ nginx -t OK, reload edildi (worker_connections=${NGX_CONN}, http tuning aktif)"
+  log "✓ nginx -t OK, reloaded (worker_connections=${NGX_CONN}, http tuning active)"
 else
-  hata "nginx -t BAŞARISIZ — geri alınıyor"
+  hata "nginx -t FAILED — rolling back"
   cp -a "${NGINX_CONF}.bak.${TS}" "$NGINX_CONF"; rm -f "$NGX_PERF"
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx && log "eski nginx config ile geri döndü" || hata "nginx config hâlâ bozuk!"
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx && log "back up with the old nginx config" || hata "nginx config is STILL broken!"
   exit 1
 fi
 
@@ -257,7 +279,7 @@ if [ "$PHP_RESTART" = 1 ]; then
   for svc in php-fpm php74-php-fpm php80-php-fpm php81-php-fpm php82-php-fpm php83-php-fpm php84-php-fpm php85-php-fpm; do
     systemctl is-active --quiet "$svc" 2>/dev/null && systemctl reload-or-restart "$svc" 2>/dev/null
   done
-  log "✓ PHP max_input_vars=10000 tüm sürümlere + phpMyAdmin'e uygulandı"
+  log "✓ PHP max_input_vars=10000 applied to all versions + phpMyAdmin"
 fi
 
-echo "════════ ✓ Optimizasyon tamamlandı ════════"
+echo "════════ ✓ Optimization complete ════════"

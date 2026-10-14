@@ -43,6 +43,39 @@ DBBK="${GOSP_DBBK:-/usr/local/bin/girginospanel-db-backup}"  # panel DB dump ara
 DBDIR="${GOSP_DBDIR:-/var/backups/girginospanel/db}"         # dump'ların yeri
 PREDUMP=""                                                    # onarım-öncesi dump (rollback'te geri yüklenir)
 
+# Usage text (English). The Turkish header comment above is developer documentation.
+kullanim() {
+  cat <<'KULLANIM'
+girginospanel-restore — REPAIRS the GirginOSPanel core files from the canonical release.
+
+Unlike girginospanel-update, this is not "upgrade to the latest version": it re-syncs the
+running version's damaged core files (0-byte frontend, deleted/corrupt binary, missing ops
+tools) with the canonical release. It is integrity-first: even if the release hash is the
+same, it restores when integrity is broken (empty/missing/not an ELF).
+
+Usage:
+  girginospanel-restore [--dry-run] [--branch <name>] [--no-db-dump] [--no-restart]
+
+Options:
+  --dry-run        diagnose only and show what would be done; touch nothing
+  --branch <name>  use a different branch (default: main)
+  --no-db-dump     skip the pre-restart DB dump (emergency only; CAUTION)
+  --no-restart     repair the files but do not restart the service
+  -h, --help       show this help
+
+Preserved (never touched): /etc/girginospanel/env (JWT/DB/Redis secrets), the MariaDB `panel`
+database and all customer data, /home/c_* sites, /var/backups/girginospanel/* (a NEW dump is
+only added for safety).
+
+Safety: frontend and binary are swapped atomically and integrity-verified; a broken or truncated
+download never touches the running files. Migrations run on service restart, so a FAIL-CLOSED DB
+dump is taken first; if the service does not start healthy it rolls back to the old binary and
+the pre-repair database.
+
+Exit codes: 0 = success, 1 = failure / rolled back, 2 = invalid argument.
+KULLANIM
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
@@ -50,8 +83,8 @@ while [ $# -gt 0 ]; do
     --branch=*) BRANCH="${1#*=}" ;;
     --no-db-dump) DODB=0 ;;
     --no-restart) DORESTART=0 ;;
-    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "bilinmeyen arg: $1" >&2; exit 2 ;;
+    -h|--help) kullanim; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
@@ -96,9 +129,9 @@ paket_gocleri() {
 # zaten fail-closed'dur ve defteri olmayan DB 0120'yi hiç görmemiştir.
 geri_donus_kapisi() {
   local uygulanan paket g eksik=""
-  command -v mysql >/dev/null 2>&1 || { warn "geri dönüş kapısı: mysql yok — sürüm tabanı denetlenemedi"; return 0; }
+  command -v mysql >/dev/null 2>&1 || { warn "downgrade guard: mysql not found — version floor could not be checked"; return 0; }
   uygulanan=$(mysql -N -e "SELECT dosya FROM \`$GOSP_DB_ADI\`.schema_migrations" 2>/dev/null) \
-    || { warn "geri dönüş kapısı: göç defteri okunamadı — sürüm tabanı denetlenemedi"; return 0; }
+    || { warn "downgrade guard: migration ledger could not be read — version floor could not be checked"; return 0; }
   paket=$(paket_gocleri "$1") || paket=""
   for g in $GERI_DONUSSUZ_GOCLER; do
     grep -qxF -- "$g" <<<"$uygulanan" || continue
@@ -107,10 +140,10 @@ geri_donus_kapisi() {
   done
   [ -z "$eksik" ] && return 0
   if [ "${GOSP_GERI_DONUS_ZORLA:-0}" = 1 ]; then
-    warn "🔴 GERİ DÖNÜŞ ZORLANDI (GOSP_GERI_DONUS_ZORLA=1): paket DB'de uygulanmış geri dönüşsüz göçleri içermiyor:$eksik — eski ikili hostinge özel limitleri GÖRMEZ; bu hostingler katalog planının limitlerine düşer"
+    warn "🔴 DOWNGRADE FORCED (GOSP_GERI_DONUS_ZORLA=1): the package does not contain the irreversible migrations already applied to the DB:$eksik — the older binary will NOT see per-hosting custom limits; those hostings fall back to their catalog plan limits"
     return 0
   fi
-  die "GERİ DÖNÜŞ REDDEDİLDİ: bu paket DB'de uygulanmış geri dönüşsüz göçleri içermiyor:$eksik — paket bu DB'den ESKİ. Eski ikili hostinge özel limitleri (hosting_limit_ust) görmez ve açılışta cgroup/FPM/kota/governor limitlerini katalog planına düşürür. Hiçbir şeye dokunulmadı. Güncel/yeni bir paket kurun; sonucu bilerek kabul ediyorsanız: GOSP_GERI_DONUS_ZORLA=1"
+  die "DOWNGRADE REFUSED: this package does not contain the irreversible migrations already applied to the DB:$eksik — the package is OLDER than this DB. The older binary cannot see per-hosting custom limits (hosting_limit_ust) and at startup would reset cgroup/FPM/quota/governor limits to the catalog plan. Nothing was touched. Install a current/newer package; to accept the consequences knowingly: GOSP_GERI_DONUS_ZORLA=1"
 }
 
 # yeni_tablolari_kenara_al <güncelleme öncesi dump.sql.gz> — geri dönüşte, dump GERİ
@@ -126,19 +159,19 @@ yeni_tablolari_kenara_al() {
   local onceki simdi ek t sayi=0 ts yedek dizin
   onceki=$(zcat "$1" 2>/dev/null | sed -n 's/^CREATE TABLE \(IF NOT EXISTS \)\{0,1\}`\([^`]*\)`.*/\2/p' | LC_ALL=C sort -u) || onceki=""
   if [ -z "$onceki" ]; then
-    warn "geri yükleme artığı denetlenemedi (dump'ta tablo listesi okunamadı) — yeni göç tabloları yerinde bırakıldı"
+    warn "rollback leftovers could not be checked (table list could not be read from the dump) — new migration tables left in place"
     return 1
   fi
   simdi=$(mysql -N -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$GOSP_DB_ADI' AND table_type='BASE TABLE'" 2>/dev/null | LC_ALL=C sort -u) \
-    || { warn "geri yükleme artığı denetlenemedi (tablo listesi okunamadı)"; return 1; }
+    || { warn "rollback leftovers could not be checked (table list could not be read)"; return 1; }
   ek=$(LC_ALL=C comm -13 <(printf '%s\n' "$onceki") <(printf '%s\n' "$simdi")) || ek=""
   [ -z "$ek" ] && return 0
   for t in $ek; do
-    case "$t" in *[!A-Za-z0-9_]*) warn "beklenmeyen tablo adı ($t) — geri yükleme artığı yerinde bırakıldı"; return 1 ;; esac
+    case "$t" in *[!A-Za-z0-9_]*) warn "unexpected table name ($t) — rollback leftovers left in place"; return 1 ;; esac
     sayi=$((sayi + 1))
   done
   if [ "$sayi" -gt 20 ]; then
-    warn "dump'ta olmayan $sayi tablo var (şüpheli çok) — hiçbiri kaldırılmadı; elle inceleyin"
+    warn "$sayi tables are not in the dump (suspiciously many) — none were removed; inspect manually"
     return 1
   fi
   ts=$(date +%Y%m%d%H%M%S)
@@ -148,14 +181,14 @@ yeni_tablolari_kenara_al() {
   # shellcheck disable=SC2086 # $ek tablo adları (yukarıda doğrulandı), ayrı argüman olmalı
   if ! mysqldump --single-transaction "$GOSP_DB_ADI" $ek 2>/dev/null | gzip > "$yedek"; then
     rm -f "$yedek" 2>/dev/null || true
-    warn "geri yükleme artığı yedeklenemedi — tablolar yerinde bırakıldı:" $ek
+    warn "rollback leftovers could not be backed up — tables left in place:" $ek
     return 1
   fi
   for t in $ek; do
     if mysql -e "SET FOREIGN_KEY_CHECKS=0; DROP TABLE \`$GOSP_DB_ADI\`.\`$t\`" 2>/dev/null; then
-      ok "geri alınan sürümün tablosu kaldırıldı: $t (yedek: $yedek)"
+      ok "table of the rolled-back version removed: $t (backup: $yedek)"
     else
-      warn "geri alınan sürümün tablosu kaldırılamadı: $t — elle: DROP TABLE $GOSP_DB_ADI.$t (yedek: $yedek)"
+      warn "table of the rolled-back version could not be removed: $t — manually: DROP TABLE $GOSP_DB_ADI.$t (backup: $yedek)"
     fi
   done
 }
@@ -163,11 +196,11 @@ yeni_tablolari_kenara_al() {
 
 is_elf() { head -c4 "$1" 2>/dev/null | grep -q $'\x7fELF'; }
 
-[ "$(id -u)" = 0 ] || die "root gerekli (sudo girginospanel-restore)"
-command -v curl >/dev/null || die "curl gerekli"
-command -v tar  >/dev/null || die "tar gerekli"
+[ "$(id -u)" = 0 ] || die "root required (sudo girginospanel-restore)"
+command -v curl >/dev/null || die "curl required"
+command -v tar  >/dev/null || die "tar required"
 
-step "GirginOSPanel core onarım (github.com/$REPO@$BRANCH)$([ $DRY = 1 ] && echo '  [DRY-RUN]')"
+step "GirginOSPanel core repair (github.com/$REPO@$BRANCH)$([ $DRY = 1 ] && echo '  [DRY-RUN]')"
 
 # ───────────────────────────────────────────────────────────────────────────
 # a) Canonical release'i getir → $A (assets dizini).
@@ -175,20 +208,20 @@ step "GirginOSPanel core onarım (github.com/$REPO@$BRANCH)$([ $DRY = 1 ] && ech
 # ───────────────────────────────────────────────────────────────────────────
 if [ -n "${GOSP_ASSETS_OVERRIDE:-}" ]; then
   A="$GOSP_ASSETS_OVERRIDE"
-  [ -d "$A" ] || die "GOSP_ASSETS_OVERRIDE dizini yok: $A"
-  warn "TEST/OFFLINE: indirme atlandı, yerel assets kullanılıyor ($A)"
+  [ -d "$A" ] || die "GOSP_ASSETS_OVERRIDE directory not found: $A"
+  warn "TEST/OFFLINE: download skipped, using local assets ($A)"
 else
-  echo "  indiriliyor…"
+  echo "  downloading…"
   TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" | tar xz -C "$TMP" \
-    || die "indirme başarısız — repo public mi / '$BRANCH' dalı var mı?"
+    || die "download failed — is the repo public / does the '$BRANCH' branch exist?"
   SRC=$(find "$TMP" -maxdepth 1 -type d -name "*-$BRANCH" | head -1)
-  [ -n "$SRC" ] || die "indirilen arşiv boş/beklenmedik yapı — onarım iptal"
+  [ -n "$SRC" ] || die "downloaded archive is empty/unexpected layout — repair aborted"
   A="$SRC/assets"
 fi
-[ -d "$A" ] || die "assets/ bulunamadı ($A) — repo yapısı beklenenden farklı"
+[ -d "$A" ] || die "assets/ not found ($A) — repo layout differs from expected"
 NEWBIN="$A/girginospanel-server"
-[ -f "$NEWBIN" ] || die "$NEWBIN yok — canonical release bozuk/eksik, onarım iptal"
+[ -f "$NEWBIN" ] || die "$NEWBIN missing — canonical release is broken/incomplete, repair aborted"
 # 🔴 GERİ DÖNÜŞ KAPISI: canonical dal bu DB'den ESKİ olabilir (ör. DB daha yeni bir
 # kanaldan güncellendi) — onarım ikiliyi geri sarıp hostinge özel limitleri düşürmesin.
 geri_donus_kapisi "$A"
@@ -196,17 +229,17 @@ geri_donus_kapisi "$A"
 # ───────────────────────────────────────────────────────────────────────────
 # b) BÜTÜNLÜK TEŞHİSİ (önce göster — neyin bozuk olduğunu operatör görsün).
 # ───────────────────────────────────────────────────────────────────────────
-step "Mevcut kurulum teşhisi"
+step "Diagnosing the current installation"
 FE_BAD=0; BIN_BAD=0
 if [ -s "$FDIST/index.html" ] && ls "$FDIST"/assets/index-*.js >/dev/null 2>&1; then
-  ok "frontend-dist sağlam (index.html dolu + JS bundle var)"
+  ok "frontend-dist healthy (index.html non-empty + JS bundle present)"
 else
-  FE_BAD=1; warn "frontend-dist BOZUK/EKSİK (index.html boş ya da JS bundle yok) — onarılacak"
+  FE_BAD=1; warn "frontend-dist BROKEN/MISSING (index.html empty or JS bundle absent) — will be repaired"
 fi
 if [ -f "$BIN" ] && is_elf "$BIN" && [ -x "$BIN" ]; then
-  ok "server binary sağlam (ELF + çalıştırılabilir)"
+  ok "server binary healthy (ELF + executable)"
 else
-  BIN_BAD=1; warn "server binary BOZUK/EKSİK (yok / ELF değil / çalıştırılamaz) — onarılacak"
+  BIN_BAD=1; warn "server binary BROKEN/MISSING (absent / not ELF / not executable) — will be repaired"
 fi
 MISS_OPS=""
 if [ -d "$A/ops" ]; then
@@ -215,18 +248,18 @@ if [ -d "$A/ops" ]; then
     [ -x "$OPSBIN/$nm" ] || MISS_OPS="$MISS_OPS $nm"
   done
 fi
-if [ -n "$MISS_OPS" ]; then warn "eksik ops-tool'lar:$MISS_OPS — kurulacak"; else ok "ops-tool'lar tam"; fi
+if [ -n "$MISS_OPS" ]; then warn "missing ops tools:$MISS_OPS — will be installed"; else ok "ops tools complete"; fi
 
 if [ "$DRY" = 1 ]; then
-  step "DRY-RUN — onarılacaklar (uygulanmadı, HİÇBİR ŞEYE dokunulmadı)"
-  echo "  • $FDIST/  → canonical'den atomik+doğrulanmış swap (her koşulda yenilenir)"
-  echo "  • $BIN     → $([ $BIN_BAD = 1 ] && echo 'BOZUK: canonical binary ile değiştirilir' || echo 'canonical ile eşitlenir (farklıysa)') (+ $BIN.bak)"
-  echo "  • $SEED    → canonical seed-admin ile eşitlenir"
-  echo "  • $MIGR/   → yeni .sql EKLENİR (mevcutlar korunur)"
-  echo "  • $OPSBIN + $SCRIPTS → ops-tool'lar senkron"
-  echo "  • KORUNUR: /etc/girginospanel/env · panel DB · /home/c_* · /var/backups/girginospanel/*"
-  [ $DODB = 1 ] && echo "  • restart öncesi FAIL-CLOSED DB dump → $DBDIR (DRY-RUN'da ALINMAZ)"
-  [ $DORESTART = 1 ] && echo "  • systemctl restart $SVC + /healthz (sağlıksızsa binary+DB rollback)"
+  step "DRY-RUN — what would be repaired (nothing applied, NOTHING was touched)"
+  echo "  • $FDIST/  → atomic+verified swap from canonical (always refreshed)"
+  echo "  • $BIN     → $([ $BIN_BAD = 1 ] && echo 'BROKEN: replaced with the canonical binary' || echo 'synced with canonical (if different)') (+ $BIN.bak)"
+  echo "  • $SEED    → synced with the canonical seed-admin"
+  echo "  • $MIGR/   → new .sql files are ADDED (existing ones kept)"
+  echo "  • $OPSBIN + $SCRIPTS → ops tools synced"
+  echo "  • PRESERVED: /etc/girginospanel/env · panel DB · /home/c_* · /var/backups/girginospanel/*"
+  [ $DODB = 1 ] && echo "  • FAIL-CLOSED DB dump before restart → $DBDIR (NOT taken in DRY-RUN)"
+  [ $DORESTART = 1 ] && echo "  • systemctl restart $SVC + /healthz (binary+DB rollback if unhealthy)"
   exit 0
 fi
 
@@ -236,25 +269,25 @@ fi
 #    atomik mv. Bozuk/kesik extraction çalışan frontend'e ASLA dokunmaz.
 # ───────────────────────────────────────────────────────────────────────────
 if [ -f "$A/frontend-dist.tar.gz" ]; then
-  step "frontend-dist onarımı"
+  step "frontend-dist repair"
   FDNEW="${FDIST}.new.$$"
   rm -rf "$FDNEW"; mkdir -p "$FDNEW"
   fdist_abort() { rm -rf "$FDNEW" 2>/dev/null || true; die "$1"; }
   if ! tar xzf "$A/frontend-dist.tar.gz" -C "$FDNEW"; then
-    fdist_abort "frontend-dist extraction başarısız — MEVCUT frontend KORUNDU (dokunulmadı)"
+    fdist_abort "frontend-dist extraction failed — CURRENT frontend KEPT (untouched)"
   fi
   # bütünlük kapısı: index.html DOLU + en az bir JS bundle (0-byte/kesik tarball reddedilir)
   if [ ! -s "$FDNEW/index.html" ] || ! ls "$FDNEW"/assets/index-*.js >/dev/null 2>&1; then
-    fdist_abort "indirilen frontend-dist BOZUK (index.html/JS boş veya eksik) — MEVCUT frontend KORUNDU"
+    fdist_abort "downloaded frontend-dist is BROKEN (index.html/JS empty or missing) — CURRENT frontend KEPT"
   fi
   rm -rf "${FDIST}.old"
   [ -d "$FDIST" ] && mv "$FDIST" "${FDIST}.old"
   mkdir -p "$(dirname "$FDIST")"
   mv "$FDNEW" "$FDIST"
   sync   # reboot-güvenli: delayed-alloc veri kaybını (0-byte) önlemek için diske flush
-  ok "frontend-dist onarıldı (atomik doğrulanmış swap)"
+  ok "frontend-dist repaired (atomic verified swap)"
 else
-  warn "canonical'de frontend-dist.tar.gz yok — frontend atlandı"
+  warn "frontend-dist.tar.gz missing in canonical — frontend skipped"
 fi
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -262,27 +295,27 @@ fi
 #    ÇALIŞAN binary'yi cp -f ile EZME (TLS-EOF tuzağı): install(1) = atomik rename,
 #    çalışan process eski inode'u restart'a kadar tutar.
 # ───────────────────────────────────────────────────────────────────────────
-step "server binary onarımı"
-is_elf "$NEWBIN" || die "indirilen binary geçerli ELF değil — binary onarımı iptal (mevcut korundu)"
+step "server binary repair"
+is_elf "$NEWBIN" || die "downloaded binary is not a valid ELF — binary repair aborted (current kept)"
 NSZ=$(stat -c%s "$NEWBIN" 2>/dev/null || echo 0)
-[ "$NSZ" -gt 1048576 ] || die "indirilen binary şüpheli küçük ($NSZ bayt ≤1MB) — onarım iptal (mevcut korundu)"
+[ "$NSZ" -gt 1048576 ] || die "downloaded binary is suspiciously small ($NSZ bytes ≤1MB) — repair aborted (current kept)"
 mkdir -p "$(dirname "$BIN")"
 DO_BIN=1
 if [ "$BIN_BAD" = 0 ] && [ -f "$BIN" ] && cmp -s "$NEWBIN" "$BIN"; then
-  DO_BIN=0; ok "binary zaten canonical ile birebir aynı — değiştirilmedi"
+  DO_BIN=0; ok "binary is already identical to canonical — not changed"
 fi
 if [ "$DO_BIN" = 1 ]; then
-  [ -f "$BIN" ] && cp -f "$BIN" "$BIN.bak" && ok "mevcut binary yedeklendi ($BIN.bak)" || warn "yedeklenecek mevcut binary yok (ilk kurulum gibi)"
+  [ -f "$BIN" ] && cp -f "$BIN" "$BIN.bak" && ok "current binary backed up ($BIN.bak)" || warn "no current binary to back up (like a first install)"
   install -m 0755 "$NEWBIN" "$BIN"
-  ok "binary canonical'den devreye alındı (atomik)"
+  ok "binary activated from canonical (atomic)"
 fi
 if [ -f "$A/girginospanel-seed-admin" ]; then
   if is_elf "$A/girginospanel-seed-admin"; then
     [ -f "$SEED" ] && cp -f "$SEED" "$SEED.bak" 2>/dev/null || true
     install -m 0755 "$A/girginospanel-seed-admin" "$SEED"
-    ok "seed-admin eşitlendi"
+    ok "seed-admin synced"
   else
-    warn "canonical seed-admin ELF değil — atlandı"
+    warn "canonical seed-admin is not an ELF — skipped"
   fi
 fi
 
@@ -291,16 +324,16 @@ fi
 # ───────────────────────────────────────────────────────────────────────────
 if [ -f "$A/migrations.tar.gz" ]; then
   mkdir -p "$MIGR"; tar xzf "$A/migrations.tar.gz" -C "$MIGR"
-  ok "migration'lar senkron ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql, mevcutlar korundu)"
+  ok "migrations in sync ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql, existing ones kept)"
 elif [ -d "$A/migrations" ]; then
   mkdir -p "$MIGR"; cp -n "$A"/migrations/*.sql "$MIGR/" 2>/dev/null || true
-  ok "migration'lar senkron (dizinden)"
+  ok "migrations in sync (from directory)"
 fi
 if [ -d "$A/ops" ]; then
   mkdir -p "$OPSBIN" "$SCRIPTS"
   for t in "$A"/ops/*; do bn=$(basename "$t"); install -m 0755 "$t" "$OPSBIN/${bn%.sh}" 2>/dev/null || true; done
   cp "$A"/ops/* "$SCRIPTS/" 2>/dev/null || true
-  ok "ops-tool'lar + src/scripts senkron"
+  ok "ops tools + src/scripts in sync"
 fi
 command -v restorecon >/dev/null && restorecon -R "$(dirname "$BIN")" "$FDIST" >/dev/null 2>&1 || true
 
@@ -309,25 +342,25 @@ command -v restorecon >/dev/null && restorecon -R "$(dirname "$BIN")" "$FDIST" >
 #      FAIL-CLOSED DB dump. Sağlıksız başlarsa eski binary + onarım-öncesi DB'ye dön.
 # ───────────────────────────────────────────────────────────────────────────
 if [ "$DORESTART" = 0 ]; then
-  step "Onarım tamam — servis yeniden başlatılmadı (--no-restart)"
-  ok "core dosyalar canonical ile eşitlendi (env/DB/siteler/yedekler korundu)"
+  step "Repair complete — service not restarted (--no-restart)"
+  ok "core files synced with canonical (env/DB/sites/backups preserved)"
   exit 0
 fi
 
 if [ "$DODB" = 1 ]; then
-  step "Restart öncesi DB yedeği (FAIL-CLOSED)"
+  step "Pre-restart DB backup (FAIL-CLOSED)"
   if [ -x "$DBBK" ]; then
-    PREDUMP=$("$DBBK") || die "onarım-öncesi DB yedeği BAŞARISIZ — restart yapılmadı (dosyalar onarıldı, DB'ye dokunulmadı)"
-    [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ] || die "onarım-öncesi DB yedeği doğrulanamadı — restart yapılmadı"
+    PREDUMP=$("$DBBK") || die "pre-repair DB backup FAILED — no restart (files were repaired, DB untouched)"
+    [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ] || die "pre-repair DB backup could not be verified — no restart"
     ok "pre-repair dump: $PREDUMP ($(du -h "$PREDUMP" 2>/dev/null | cut -f1))"
   else
-    die "DB yedek aracı yok ($DBBK) — yedeksiz migration reddedildi. Acil: --no-db-dump ile atla (DİKKAT) veya --no-restart"
+    die "DB backup tool missing ($DBBK) — migration without a backup refused. Emergency: skip with --no-db-dump (CAUTION) or use --no-restart"
   fi
 else
-  warn "DB dump ATLANDI (--no-db-dump) — restart migration uygularsa geri dönüşü olmayabilir"
+  warn "DB dump SKIPPED (--no-db-dump) — if the restart applies a migration there may be no way back"
 fi
 
-step "Yeniden başlatılıyor"
+step "Restarting"
 systemctl restart "$SVC"
 HEALTHY=0
 for i in 1 2 3 4 5 6; do
@@ -338,22 +371,22 @@ done
 if [ "$HEALTHY" = 1 ]; then
   systemctl reload nginx >/dev/null 2>&1 || true
   ok "panel ACTIVE + /healthz OK"
-  echo -e "${c_g}══ Onarım tamam — core canonical'e getirildi (env/DB/siteler/yedekler korundu) ══${c_0}"
+  echo -e "${c_g}══ Repair complete — core brought to canonical (env/DB/sites/backups preserved) ══${c_0}"
 else
-  warn "onarım sonrası sağlıklı başlamadı — ESKİ binary'ye + onarım-öncesi DB'ye dönülüyor"
+  warn "did not start healthy after the repair — rolling back to the OLD binary + the pre-repair DB"
   [ -f "$BIN.bak" ] && install -m 0755 "$BIN.bak" "$BIN"
   [ -f "$SEED.bak" ] && install -m 0755 "$SEED.bak" "$SEED" 2>/dev/null || true
   command -v restorecon >/dev/null && restorecon "$BIN" >/dev/null 2>&1 || true
   systemctl stop "$SVC" >/dev/null 2>&1 || true
   if [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ]; then
-    if zcat "$PREDUMP" | mysql; then ok "DB onarım-öncesi yedeğe geri yüklendi ($PREDUMP)"
+    if zcat "$PREDUMP" | mysql; then ok "DB restored from the pre-repair backup ($PREDUMP)"
       yeni_tablolari_kenara_al "$PREDUMP" || true
-    else warn "DB geri yükleme BAŞARISIZ — elle: zcat '$PREDUMP' | mysql"; fi
+    else warn "DB restore FAILED — manually: zcat '$PREDUMP' | mysql"; fi
   fi
   systemctl restart "$SVC"; sleep 3
   if systemctl is-active --quiet "$SVC"; then
-    die "rollback yapıldı — panel ESKİ sürüm + ESKİ DB ile ayakta. Hata: journalctl -u $SVC -n 40"
+    die "rollback done — the panel is up on the OLD version + OLD DB. Error: journalctl -u $SVC -n 40"
   else
-    die "KRİTİK: rollback sonrası da panel kalkmadı — journalctl -u $SVC -n 40 (DB yedeği: $PREDUMP)"
+    die "CRITICAL: the panel did not come up after the rollback either — journalctl -u $SVC -n 40 (DB backup: $PREDUMP)"
   fi
 fi

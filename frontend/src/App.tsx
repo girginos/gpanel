@@ -8,6 +8,7 @@ import { bayiAbonelikID, bayiYoluIzinli, bayiYonlendirme, girisYolu, musteriDoma
 import { useBayiAbonelikSahibi } from '@/lib/bayiAbonelik'
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const AdinaGirisPage = lazy(() => import('@/pages/AdinaGirisPage'))
+const BayiSSOPage = lazy(() => import('@/pages/BayiSSOPage'))
 import DashboardLayout from '@/components/DashboardLayout'
 import KapiGiris from '@/components/KapiGiris'
 import SayfaKabugu, { KabukDisi, SayfaCercevesi } from '@/components/SayfaKabugu'
@@ -191,6 +192,8 @@ export default function App() {
       <Route path="/giris" element={<KapiGiris form="yonetim"><LoginPage /></KapiGiris>} />
       {/* Müşteri adına giriş kodu değişimi (kimliksiz; kod URL parçasında). */}
       <Route path="/adina" element={<AdinaGirisPage />} />
+      {/* Bayi paneline tek tık giriş (WHMCS bayi ürünü; kod URL parçasında, yalnız bayi kapısı). */}
+      <Route path="/sso" element={<KapiGiris form="yonetim"><BayiSSOPage /></KapiGiris>} />
         <Route path="/cp/giris" element={<KapiGiris form="musteri"><CPanelGirisPage /></KapiGiris>} />
         <Route path="/cp" element={<KapiGiris form="musteri"><CPanelGirisPage /></KapiGiris>} />
       <Route

@@ -115,9 +115,10 @@ export default function MusteriAnaSayfa() {
   }).filter((u) => !gizli.has(u.id))
 
   // Eklenti kapısı (SubscriptionDetailPage ile aynı desen; üst çubuk araması da aynı
-  // süzgeç — araclar.ts eklentiKapisi): liste gelmeden eklenti aracı çizilmez. Mail:
-  // aktifse araçlar; kurulu ama askıdaysa kategori açıklamayla durur. Çalıştırıcı:
-  // kuruluysa görünür, askı durumunu kendi sayfası (EklentiEkrani) söyler.
+  // süzgeç — araclar.ts eklentiKapisi): liste gelmeden eklenti aracı çizilmez. Liste
+  // müşteriye YALNIZ açılmış (musteri_erisim=1) eklentileri içerir. Mail ve Çalıştırıcı
+  // aynı kuralla: listede VE aktifse araçlar; mail kurulu ama askıdaysa kategori
+  // açıklamayla durur.
   const ekl = eklentiler.veri ?? []
   const mailKurulu = ekl.some((e) => e.ad === 'mail')
   const mailAktif = ekl.some((e) => e.ad === 'mail' && e.aktif)

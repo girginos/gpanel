@@ -105,7 +105,7 @@ goc_dizini_geri_al`)
 	if g := gdzOku(filepath.Join(m, "0001_a.sql")); g != "A" {
 		t.Errorf("dokunulmayan 0001 aynı kalmalı: %q", g)
 	}
-	if !strings.Contains(out, "1 yeni göç dosyası kaldırıldı") {
+	if !strings.Contains(out, "1 new migration file(s) removed") {
 		t.Errorf("rapor eksik: %s", out)
 	}
 }
@@ -138,7 +138,7 @@ echo BAK="[$MIGR_BAK]"`)
 	if err != nil {
 		t.Fatalf("düşmemeli: %v\n%s", err, out)
 	}
-	for _, bek := range []string{"WARN: göç dizini yedeklenemedi", "Y=1", "G=1", "BAK=[]"} {
+	for _, bek := range []string{"WARN: migration directory could not be backed up", "Y=1", "G=1", "BAK=[]"} {
 		if !strings.Contains(out, bek) {
 			t.Errorf("%q yok: %s", bek, out)
 		}
@@ -199,7 +199,7 @@ func TestUpdateGocDiziniCagriSirasi(t *testing.T) {
 	if temizle-saglikli > 400 {
 		t.Errorf("temizleme sağlıklı-başlangıç dalında olmalı (uzaklık=%d)", temizle-saglikli)
 	}
-	rb := idx(`yeni sürüm sağlıklı başlamadı`, 0)
+	rb := idx(`the new version did not start healthy`, 0)
 	dur := idx(`systemctl stop girginospanel`, rb)
 	geri := idx(`goc_dizini_geri_al && goc_dizini_temizle || true`, rb)
 	restart := idx(`systemctl restart girginospanel; sleep 3`, rb)

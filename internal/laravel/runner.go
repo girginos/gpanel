@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"girginospanel/internal/bayidilim"
 	"girginospanel/internal/kiraci"
 
 	"golang.org/x/sys/unix"
@@ -228,7 +229,7 @@ func systemdRunDetached(sk, cwd, unit, logPath string, argv ...string) error {
 		"--unit=" + unit,
 		"--uid=" + sk, "--gid=" + sk,
 		"--working-directory=" + real,
-		"--slice=girginos-" + sk + ".slice",
+		"--slice=" + bayidilim.AdiYedekli(sk),
 		"-p", "RuntimeMaxSec=1800",
 		"-p", "StandardOutput=append:" + logPath,
 		"-p", "StandardError=append:" + logPath,

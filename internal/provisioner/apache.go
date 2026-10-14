@@ -15,6 +15,17 @@ import (
 
 const ApacheUpstream = "127.0.0.1:10080"
 
+// apacheErisimLoguHedefi — Apache vhost'larının erişim günlüğü hedefi: /dev/null (günlük YAZILMAZ).
+//
+// İstekler edge'de (nginx) zaten kaydedilir; Apache'de de tutmak aynı veriyi iki kez diske yazar
+// (180: tek sitenin Apache günlüğü ~1 GB/hafta, sıkıştırmasız; /var/log/httpd 4,9 GB) ve panelin hiçbir
+// bölümü onu okumaz (trafik, istatistik, günlük görüntüleyici nginx günlüklerinden beslenir).
+// 🔴 `CustomLog` satırı HİÇ yazılmasa Apache ana sunucunun `CustomLog "logs/access_log" combined` satırını
+// MİRAS alır (RHEL httpd.conf) ve bütün siteler tek ortak dosyaya yazardı — günlük kapanmaz, sadece
+// birleşirdi. Bu yüzden satır vardır ve /dev/null'u gösterir. Kurulu vhost'ları açılışta
+// ApacheErisimLoguKapatOnStartup düzeltir.
+const apacheErisimLoguHedefi = "/dev/null"
+
 var apacheVhostTmpl = template.Must(template.New("a").Parse(`# {{.AlanAdi}} — GirginOSPanel Apache backend (nginx ön proxy)
 # Guvenlik notu: yanit guvenlik header'lari EDGE'de (nginx) uygulanir (cift-header
 # olmamasi icin). Apache katmani YURUTME/ERISIM politikasini uygular: CGI kapali,
@@ -66,7 +77,7 @@ var apacheVhostTmpl = template.Must(template.New("a").Parse(`# {{.AlanAdi}} — 
     RemoteIPInternalProxy 127.0.0.1
 
     ErrorLog /var/log/httpd/{{.AlanAdi}}.error.log
-    CustomLog /var/log/httpd/{{.AlanAdi}}.access.log combined
+    CustomLog ` + apacheErisimLoguHedefi + ` combined
 </VirtualHost>
 `))
 

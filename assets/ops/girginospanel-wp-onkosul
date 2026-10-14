@@ -11,6 +11,32 @@
 # mevcut sunucular kendini onarır.
 set -uo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-wp-onkosul [--dry-run] [--ayrinti]
+
+Makes sure the server meets WordPress's prerequisites. Idempotent: if
+everything is in place it exits within seconds with a single line.
+  1. SELinux: tenant directories (/home/c_*/public_html, /home/c_*/tmp) are
+     labeled httpd_user_rw_content_t so PHP can write there (plugin/theme installs)
+  2. imagick PHP module for the base PHP and every installed remi PHP version
+Called by the installer and the updater. Run as root.
+
+Options:
+  --dry-run      Show what would be done, change nothing
+  --ayrinti      Always print the full output (also GOSP_AYRINTI=1); by default
+                 only a one-line summary is printed when nothing changed
+  -h, --help     Show this help
+
+Exit codes: 0 prerequisites in place, 1 something is still missing, 2 unknown option
+USAGE
+}
+for a in "$@"; do case "$a" in -h|--help) kullanim; exit 0 ;; esac; done
+# Bilinmeyen seçenek REDDEDİLİR (eskiden yok sayılıp iş yapılıyordu: yazım hatası
+# "--dryrun" gerçek değişiklik yapardı).
+for a in "$@"; do case "$a" in --ayrinti|--dry-run) ;; *) echo "girginospanel-wp-onkosul: unknown option: $a (see --help)" >&2; exit 2 ;; esac; done
+[ "${GOSP_SECENEK_TEST:-}" = 1 ] && exit 0   # testler: seçenek denetiminden sonra dur (yan etki yok)
+
 # Sessiz mod: her şey yerindeyse TEK satır yazar. Bir şey kurulduysa/düzeltildiyse
 # ya da hata varsa tüm çıktı gösterilir. --ayrinti (veya GOSP_AYRINTI=1) = her zaman tam çıktı.
 # İç çağrı kendini WPON_ICERI=1 ile çalıştırıp çıktıyı yakalar; çıkış kodu aynen korunur.
@@ -22,7 +48,7 @@ if [ -z "${WPON_ICERI:-}" ]; then
     case "$CIKTI" in
       *"✔"*|*"(dry)"*|*"✗"*|*" ! "*) echo "$CIKTI" ;;
       *) if [ $RC -eq 0 ]; then
-           echo -e "  \e[32m✓\e[0m WordPress ön koşulları tamam (SELinux + imagick, değişiklik yok)"
+           echo -e "  \e[32m✓\e[0m WordPress prerequisites OK (SELinux + imagick, no changes)"
          else
            echo "$CIKTI"
          fi ;;
@@ -58,12 +84,12 @@ HATA=0
 # 🔴 TEK GENEL KURAL kullanıyoruz — kiracı başına ayrı kural yazmak
 # politikayı yüzlerce satırla şişirir ve yeni domainde unutulabilir.
 # ══════════════════════════════════════════════════════════════════
-echo "== 1/2 · SELinux kiracı dizin etiketleri =="
+echo "== 1/2 · SELinux tenant directory labels =="
 # 🔴 `getenforce` YOKSA "Disabled" VARSAYMA. Sistem gerçekte Enforcing
 # olabilir; varsayarsak tüm bölümü atlayıp yeşil yakarız (sabotaj
 # testinde tam olarak bu oldu). Aracı YOKSA bunu bilmediğimizi söyle.
 if ! command -v getenforce >/dev/null 2>&1; then
-  hata "getenforce yok — SELinux durumu BİLİNMİYOR, etiketler denetlenemedi"
+  hata "getenforce not found — SELinux state UNKNOWN, labels could not be checked"
   HATA=1
   SELDURUM="Bilinmiyor"
 else
@@ -72,9 +98,9 @@ fi
 if [ "$SELDURUM" = "Bilinmiyor" ]; then
   :
 elif [ "$SELDURUM" = "Disabled" ]; then
-  ok "SELinux kapalı — etiket gerekmiyor"
+  ok "SELinux is disabled — no labels needed"
 elif ! command -v semanage >/dev/null 2>&1; then
-  uyar "semanage yok (policycoreutils-python-utils) — kalıcı kural yazılamıyor"
+  uyar "semanage not found (policycoreutils-python-utils) — cannot write a persistent rule"
   HATA=1
 else
   SPEC='/home/c_[^/]+/(public_html|tmp)(/.*)?'
@@ -91,14 +117,14 @@ else
   # bir kat aşağıda. Kabuk-içi substring testi hiç boru kurmaz.
   case "$SEL_LISTE" in
     *"$SPEC"*)
-      ok "genel kural zaten tanımlı"
+      ok "the general rule is already defined"
       ;;
     *)
     act "semanage fcontext +httpd_user_rw_content_t  $SPEC"
     if [ $DRY -eq 0 ]; then
       semanage fcontext -a -t httpd_user_rw_content_t "$SPEC" 2>/dev/null \
         || semanage fcontext -m -t httpd_user_rw_content_t "$SPEC" 2>/dev/null \
-        || { hata "kural yazılamadı"; HATA=1; }
+        || { hata "could not write the rule"; HATA=1; }
     fi
       ;;
   esac
@@ -111,18 +137,18 @@ else
     n=$((n+1))
     mevcut=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
     case "$mevcut" in *httpd_user_rw_content_t*) continue ;; esac
-    act "restorecon -RF  $d  (şu an: ${mevcut##*:object_r:})"
+    act "restorecon -RF  $d  (now: ${mevcut##*:object_r:})"
     if [ $DRY -eq 0 ]; then
       restorecon -RF "$d" >/dev/null 2>&1
       sonra=$(ls -Zd "$d" 2>/dev/null | awk '{print $1}')
       case "$sonra" in
         *httpd_user_rw_content_t*) duzeltilen=$((duzeltilen+1)) ;;
-        *) hata "etiket değişmedi: $d"; HATA=1 ;;
+        *) hata "label unchanged: $d"; HATA=1 ;;
       esac
     fi
   done
-  [ "$n" -gt 0 ] && ok "$n kiracı dizini denetlendi ($duzeltilen düzeltildi)" \
-                 || ok "kiracı dizini yok"
+  [ "$n" -gt 0 ] && ok "$n tenant directories checked ($duzeltilen fixed)" \
+                 || ok "no tenant directories"
 fi
 
 # ══════════════════════════════════════════════════════════════════
@@ -133,7 +159,7 @@ fi
 # bazı formatlar hiç üretilmiyor).
 # Paket adlari: base → php-pecl-imagick · remi → phpXX-php-pecl-imagick-im7
 # ══════════════════════════════════════════════════════════════════
-echo "== 2/2 · imagick modülü =="
+echo "== 2/2 · imagick module =="
 kur() { # $1 = paket adi
   if rpm -q "$1" >/dev/null 2>&1; then return 0; fi
   act "dnf install $1"
@@ -148,12 +174,12 @@ kur() { # $1 = paket adi
 # koşulu yanlış yapar → imagick VARKEN "kurulamadı". grep -q'suz, >/dev/null.
 if command -v php >/dev/null 2>&1; then
   if php -m 2>/dev/null | grep -i '^imagick$' >/dev/null; then
-    ok "base PHP: imagick var"
+    ok "base PHP: imagick present"
   else
     kur php-pecl-imagick
     if [ $DRY -eq 0 ]; then
-      php -m 2>/dev/null | grep -i '^imagick$' >/dev/null && ok "base PHP: imagick kuruldu" \
-        || { uyar "base PHP: imagick kurulamadı"; HATA=1; }
+      php -m 2>/dev/null | grep -i '^imagick$' >/dev/null && ok "base PHP: imagick installed" \
+        || { uyar "base PHP: imagick could not be installed"; HATA=1; }
     fi
   fi
 fi
@@ -166,13 +192,13 @@ for dizin in /etc/opt/remi/php*; do
   [ -x "$bin" ] || bin="/opt/remi/$v/root/usr/bin/php"
   [ -x "$bin" ] || continue
   if "$bin" -m 2>/dev/null | grep -i '^imagick$' >/dev/null; then
-    ok "$v: imagick var"
+    ok "$v: imagick present"
     continue
   fi
   kur "${v}-php-pecl-imagick-im7"
   if [ $DRY -eq 0 ]; then
-    "$bin" -m 2>/dev/null | grep -i '^imagick$' >/dev/null && ok "$v: imagick kuruldu" \
-      || { uyar "$v: imagick kurulamadı (paket yok olabilir)"; HATA=1; }
+    "$bin" -m 2>/dev/null | grep -i '^imagick$' >/dev/null && ok "$v: imagick installed" \
+      || { uyar "$v: imagick could not be installed (the package may not exist)"; HATA=1; }
   fi
 done
 
@@ -192,8 +218,8 @@ echo
 # `girginospanel-wp-onkosul || warn "..."` ile çağırıyor. Her koşulda 0
 # dönersek o `|| warn` dalı ÖLÜ olur ve başarısızlık hiç duyulmaz.
 if [ "$HATA" -eq 0 ]; then
-  ok "WordPress ön koşulları tamam"
+  ok "WordPress prerequisites OK"
   exit 0
 fi
-uyar "bazı ön koşullar eksik kaldı (yukarı bak)"
+uyar "some prerequisites are still missing (see above)"
 exit 1

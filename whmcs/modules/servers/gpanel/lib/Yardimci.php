@@ -9,7 +9,10 @@ namespace GirginOSPanel\WHMCS;
 
 final class Yardimci
 {
-    public const SURUM = '1.0.3';
+    public const SURUM = '1.0.9';
+
+    /** Ürün ayarındaki PHP sürümü seçenekleri (panelin yönettiği kurulu sürümler). */
+    public const PHP_SURUMLERI = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5'];
 
     /** Degeri HER ZAMAN maskelenen alan adlari (kucuk harf). */
     private const GIZLI_ANAHTARLAR = [
@@ -265,6 +268,13 @@ final class Yardimci
     }
 
     /** MB -> okunakli metin: 1023 MB, 1 GB, 1.5 GB, 50 GB (GB'de en cok bir ondalik). */
+    /** Milli-çekirdek → "0.35 vCPU" / "2 vCPU" (dilden bağımsız birim). */
+    public static function cekirdekMetin(int $milli): string
+    {
+        $s = number_format(max(0, $milli) / 1000, 2, '.', '');
+        return rtrim(rtrim($s, '0'), '.') . ' vCPU';
+    }
+
     public static function boyutMetin(int $mb): string
     {
         $mb = max(0, $mb);
@@ -303,5 +313,32 @@ final class Yardimci
             }
         }
         return $L;
+    }
+
+    /**
+     * Ürün ayarındaki PHP sürümü yazımını kanonik "X.Y"ye indirger: "php81", "PHP 8.1",
+     * "php-8.1", "8.1.2", "81" → "8.1". Tanınmayan değer OLDUĞU GİBİ döner (panel açık
+     * iletiyle reddeder). Ayar 1.0.4'ten önce serbest metindi; eski panel sürümleri
+     * tanımadığı değeri SESSİZCE 8.3 yaptığı için modül de çevirir. Panel
+     * (provisioner.PHPSurumDogrula) AYNI kuralı uygular.
+     */
+    public static function phpSurum(string $v): string
+    {
+        $v = trim($v);
+        if (preg_match('/^(?:php[ _-]?)?(\d)\.?(\d)(?:\.\d+)?$/i', $v, $m) === 1) {
+            return $m[1] . '.' . $m[2];
+        }
+        return $v;
+    }
+
+    /**
+     * Bayi tek tık girişinin hedefi (?gp_hedef=…): 'hosting' = bayinin kendi hostingine müşteri
+     * paneli girişi; 'profil' = bayi panelinde Profil sayfası. Yalnız beyaz liste: başka değer yok
+     * sayılır (açık yönlendirme yok).
+     */
+    public static function ssoHedef(): string
+    {
+        $h = isset($_GET['gp_hedef']) && is_string($_GET['gp_hedef']) ? $_GET['gp_hedef'] : '';
+        return in_array($h, ['profil', 'hosting'], true) ? $h : '';
     }
 }

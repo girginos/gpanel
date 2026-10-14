@@ -3,6 +3,26 @@
 # Kimlik: root unix-socket (parolasız). Çıktı: üretilen dump yolunu stdout'a basar.
 set -euo pipefail
 
+kullanim() {
+  cat <<'USAGE'
+Usage: girginospanel-db-backup
+
+Dumps the panel database (mysqldump --single-transaction, with routines,
+triggers and events) to /var/backups/girginospanel/db/panel-<timestamp>.sql.gz
+(mode 600). Authenticates as root over the unix socket (no password). The dump
+is written to a temp file, checked with gzip -t and a minimum size, and only
+then moved into place; dumps older than 14 days are deleted. Called by the
+daily girginospanel-db-backup.timer and before every update. Run as root.
+Takes no options.
+
+Output: the path of the new dump on stdout (nothing else).
+Exit codes: 0 dump written, 2 unknown option, other non-zero mysqldump/gzip failed or the dump is too small
+USAGE
+}
+case "${1:-}" in -h|--help) kullanim; exit 0 ;; esac
+[ $# -eq 0 ] || { echo "girginospanel-db-backup: unknown option: $1 (takes no options; see --help)" >&2; exit 2; }
+[ "${GOSP_SECENEK_TEST:-}" = 1 ] && exit 0   # testler: seçenek denetiminden sonra dur (yan etki yok)
+
 DIR=/var/backups/girginospanel/db      # SADECE burası; kardeş dizinler domain yedeği → DOKUNMA
 TUT_GUN=14
 mkdir -p "$DIR"; chmod 700 "$DIR"
@@ -23,7 +43,7 @@ mysqldump --single-transaction --routines --triggers --events \
 
 # fail-closed: gzip sağlam mı + boş değil mi. Bozuksa dump BIRAKMA.
 gzip -t "$tmp"
-[ "$(stat -c%s "$tmp")" -gt 1000 ] || { rm -f "$tmp"; echo "HATA: dump şüpheli derecede küçük" >&2; exit 1; }
+[ "$(stat -c%s "$tmp")" -gt 1000 ] || { rm -f "$tmp"; echo "ERROR: dump is suspiciously small" >&2; exit 1; }
 
 mv -f "$tmp" "$son"       # atomik: yarım dump asla geçerli isim almaz
 chmod 600 "$son"

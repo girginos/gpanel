@@ -31,12 +31,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"girginospanel/internal/bayikaynak"
 	"girginospanel/internal/bildirim"
 	"girginospanel/internal/gizli"
 	"girginospanel/internal/hesaplar"
@@ -57,6 +59,27 @@ type devirSonuc struct {
 
 // ftpHostingOturumDusur: dikiş (testler gerçek pure-ftpd'ye dokunmaz).
 var ftpHostingOturumDusur = hesaplar.FTPHostingOturumlariDusur
+
+// bayiHavuzDevir: devirden sonra bayi kaynak havuzlarını (CPU/RAM dilimi, üyelik, FPM
+// drop-in'i) ve XFS proje atamasını (disk havuzu) yeni sahibe göre eşitler. Sunucuda
+// systemctl/xfs_quota çalıştırdığı ve ev ağacını gezebildiği için ARKA PLANDA koşar: devir
+// yanıtı bekletilmez; hata günlüğe düşer, 30 dakikalık uzlaştırma turu yeniden dener. Testler
+// bunu gerçek sunucu dosyalarına dokunmayan bir kancayla değiştirir.
+var bayiHavuzDevir = func(db *sql.DB, domainID int64) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("devir: bayi havuzu uzlaştırma PANIK: %v", r)
+			}
+		}()
+		ctx, iptal := context.WithTimeout(context.Background(), 4*time.Hour)
+		defer iptal()
+		bayikaynak.UzlastirTam(ctx, db, false)
+		if err := bayikaynak.HostingDisk(ctx, db, domainID); err != nil {
+			log.Printf("devir: bayi disk havuzu (domain %d): %v", domainID, err)
+		}
+	}()
+}
 
 // devret — bir domaini yeni sahibe geçirir ve eski sahibin TÜM erişim
 // artefaktlarını geçersiz kılar.
@@ -155,6 +178,19 @@ func (h *Handlers) devret(ctx context.Context, did int64, alanAdi, sk string, re
 		uyar("crontab boşaltılamadı (gözden geçirin): %v", err)
 	} else if n > 0 {
 		uyar("eski sahipten devralınan %d cron satırı ARŞİVLENDİ ve durduruldu (arşiv: %s/%s.crontab.*) — meşru olanları yeni sahip geri yükleyebilir", n, devirArsivKok, sk)
+	}
+
+	// ── 9b) Bayi kaynak havuzu ─────────────────────────────────────────────
+	// Sahip değiştiyse hosting eski bayinin havuzundan çıkar, yenisininkine girer (CPU/RAM
+	// dilimi yeniden adlanır, FPM yeniden başlayınca taşınır; disk projesi yeniden atanır).
+	// Yeni sahip bayi OLMAYABİLİR (doğrudan müşteri/yönetici): eski bayinin havuzundan çıkış da
+	// aynı yolla temizlenir (üyelik/dilim/proje) — 30 dakikalık tura bırakılmaz.
+	yeniBayi := int64(0)
+	if resellerID != nil {
+		yeniBayi = *resellerID
+	}
+	if yeniBayi != eskiRID.Int64 {
+		bayiHavuzDevir(h.DB, did)
 	}
 
 	// ── 10) Denetim kaydı ──────────────────────────────────────────────────

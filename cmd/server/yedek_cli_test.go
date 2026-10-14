@@ -39,10 +39,14 @@ func TestYedekCozCLI(t *testing.T) {
 	if g, _ := os.ReadFile(cikti); !bytes.Equal(g, duz) {
 		t.Error("çözülen içerik özgün değil")
 	}
+	// Başarı satırı (envanterde belgeli): "decrypted: <çıktı yolu>".
+	if !strings.Contains(out.String(), "decrypted: "+cikti) {
+		t.Errorf("başarı satırı beklenen biçimde değil: %q", out.String())
+	}
 	// var olan çıktı ezilmez
 	out.Reset()
 	errw.Reset()
-	if kod := yedekCozCLI([]string{dosya, "--anahtar", anahtar}, &out, &errw); kod != 1 || !strings.Contains(errw.String(), "zaten var") {
+	if kod := yedekCozCLI([]string{dosya, "--anahtar", anahtar}, &out, &errw); kod != 1 || !strings.Contains(errw.String(), "already exists") {
 		t.Errorf("var olan çıktı: %d %s", kod, errw.String())
 	}
 	// yanlış anahtar: çıkış 1, çıktı dosyası yok
@@ -52,7 +56,7 @@ func TestYedekCozCLI(t *testing.T) {
 	_ = os.WriteFile(yk, []byte(ym), 0o600)
 	c2 := filepath.Join(dir, "yanlis-cikti")
 	errw.Reset()
-	if kod := yedekCozCLI([]string{dosya, "--anahtar", yk, "--cikti", c2}, &out, &errw); kod != 1 || !strings.Contains(errw.String(), "yanlış anahtar") {
+	if kod := yedekCozCLI([]string{dosya, "--anahtar", yk, "--cikti", c2}, &out, &errw); kod != 1 || !strings.Contains(errw.String(), "wrong key") {
 		t.Errorf("yanlış anahtar: %d %s", kod, errw.String())
 	}
 	if _, err := os.Stat(c2); err == nil {

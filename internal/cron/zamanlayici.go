@@ -477,17 +477,17 @@ func gorevKomutu(ctx context.Context, sk string, g Gorev) (*exec.Cmd, error) {
 // görev bulunamaz/askıdaysa 0 (crond'a gürültü yok, stderr'e not).
 func CalistirCLI(args []string) int {
 	if len(args) != 2 || !kiraci.GecerliSK(args[0]) || !reKimlik.MatchString(args[1]) {
-		fmt.Fprintln(os.Stderr, "kullanım: cron-calistir <c_kullanici> <görev-kimliği>")
+		fmt.Fprintln(os.Stderr, "usage: cron-calistir <c_user> <task-id>")
 		return 2
 	}
 	sk, kimlik := args[0], args[1]
 	if askida(sk) {
-		fmt.Fprintf(os.Stderr, "cron: %s askıda — görev çalıştırılmadı\n", sk)
+		fmt.Fprintf(os.Stderr, "cron: %s is suspended — task not run\n", sk)
 		return 0
 	}
 	list, err := okuDosya(depoYolu(sk))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cron: %s: depo okunamadı: %v\n", sk, err)
+		fmt.Fprintf(os.Stderr, "cron: %s: could not read the task store: %v\n", sk, err)
 		return 1
 	}
 	for _, g := range list {
@@ -510,6 +510,6 @@ func CalistirCLI(args []string) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(os.Stderr, "cron: %s: %s kimlikli etkin görev yok (değişmiş/silinmiş)\n", sk, kimlik)
+	fmt.Fprintf(os.Stderr, "cron: %s: no active task with id %s (changed or deleted)\n", sk, kimlik)
 	return 0
 }

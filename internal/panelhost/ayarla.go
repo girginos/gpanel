@@ -63,8 +63,7 @@ func ayarlaKos(is *Is, hostname string) {
 		// Betik ANSI renk kodu kullanıyor — çıktıda kalabilir; UI'da yalın
 		// görünmesi için basit strip.
 		ln = ansiTemizle(ln)
-		basari := !strings.HasPrefix(ln, "✗") && !strings.Contains(strings.ToLower(ln), "başarısız") && !strings.Contains(strings.ToLower(ln), "hata")
-		is.AdimEkle(ln, basari)
+		is.AdimEkle(ln, adimBasarili(ln))
 	}
 
 	if err != nil {
@@ -72,6 +71,23 @@ func ayarlaKos(is *Is, hostname string) {
 		return
 	}
 	is.Bitir("")
+}
+
+// adimBasarili — betik çıktı satırının başarı mı hata mı olduğunu söyler.
+// Betik (girginospanel-panelhost) çıktısı İngilizce; "✗" öneki (dur) her zaman
+// hatadır. "failed"/"error" ve eski Türkçe ("başarısız"/"hata") sözcükleri,
+// henüz güncellenmemiş eski betik sürümleri için de tanınır.
+func adimBasarili(ln string) bool {
+	if strings.HasPrefix(ln, "✗") {
+		return false
+	}
+	k := strings.ToLower(ln)
+	for _, s := range []string{"failed", "error", "başarısız", "hata"} {
+		if strings.Contains(k, s) {
+			return false
+		}
+	}
+	return true
 }
 
 // ansiTemizle — ESC[...m renk dizilerini kaldır. Kaba ama yeter.

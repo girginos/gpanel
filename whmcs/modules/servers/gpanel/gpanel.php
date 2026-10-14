@@ -44,6 +44,10 @@ function gpanel_MetaData()
 /**
  * Ürün seçenekleri. SIRA configoption1..8 ile birebir (Modul::SEC_*).
  *
+ * Hepsi SimpleMode: WHMCS 8+ "basit modda" yalnız SimpleMode alanlarını gösterir ve KAYDEDER;
+ * 1.0.4'e kadar yalnız plan + bayi paketi işaretliydi → Ürün tipi gizli kalıyor, bayi ürünü
+ * hosting olarak açılıyordu (müşteri sunucusunda görüldü, 2026-10-13).
+ *
  * Plan/paket alanları 'Loader' ile panelden doldurulur (sunucu seçiliyse); Loader
  * desteklenmeyen sürümde alan düz metindir: plan ID'sini ya da tam adını yazın.
  *
@@ -74,55 +78,63 @@ function gpanel_ConfigOptions(array $params = [])
         'urun_tipi' => [
             'FriendlyName' => Ceviri::t('Ürün tipi'),
             'Type' => 'dropdown',
+            'SimpleMode' => true,
             'Options' => ['hosting' => Ceviri::t('Hosting hesabı'), 'bayi' => Ceviri::t('Bayi (reseller) hesabı')],
             'Default' => 'hosting',
-            'Description' => Ceviri::t('Bayi ürünü için API anahtarı KÖK kullanıcıya ait olmalı ve "bayi" iznine sahip olmalı.'),
+            'Description' => Ceviri::t('WHMCS ürün türü "Reseller Account" ise bu alan ne olursa olsun bayi hesabı açılır. Bayi ürünü için API anahtarı KÖK kullanıcıya ait olmalı ve "bayi" iznine sahip olmalı.'),
         ],
         'plan' => [
             'FriendlyName' => Ceviri::t('Panel planı (hosting)'),
             'Type' => 'text',
+            'SimpleMode' => true,
             'Size' => '25',
             'Loader' => static function (array $params) use ($yukle) {
                 return $yukle($params, 'plan');
             },
-            'SimpleMode' => true,
             'Description' => Ceviri::t('Plan ID ya da tam adı. Boşsa panelin varsayılan planı.'),
         ],
         'php' => [
             'FriendlyName' => Ceviri::t('PHP sürümü'),
-            'Type' => 'text',
-            'Size' => '8',
-            'Description' => Ceviri::t('Örn. 8.3. Boşsa plandan/panelden miras.'),
+            'Type' => 'dropdown',
+            'SimpleMode' => true,
+            'Options' => ['' => Ceviri::t('Plandan / panelden')]
+                + array_combine(Yardimci::PHP_SURUMLERI, Yardimci::PHP_SURUMLERI),
+            'Default' => '',
+            'Description' => Ceviri::t('Seçilmezse plandan/panelden miras.'),
         ],
         'bayi_paketi' => [
             'FriendlyName' => Ceviri::t('Bayi paketi (bayi ürünü)'),
             'Type' => 'text',
+            'SimpleMode' => true,
             'Size' => '25',
             'Loader' => static function (array $params) use ($yukle) {
                 return $yukle($params, 'paket');
             },
-            'SimpleMode' => true,
             'Description' => Ceviri::t('Bayi paketi ID ya da tam adı (yalnız Ürün tipi = Bayi).'),
         ],
         'sql_olustur' => [
             'FriendlyName' => Ceviri::t('Varsayılan veritabanı aç'),
             'Type' => 'yesno',
+            'SimpleMode' => true,
             'Description' => Ceviri::t('Hesapla birlikte bir MariaDB veritabanı oluştur.'),
         ],
         'tls_dogrulama_kapali' => [
             'FriendlyName' => Ceviri::t('TLS doğrulamasını KAPAT'),
             'Type' => 'yesno',
+            'SimpleMode' => true,
             'Description' => Ceviri::t('DİKKAT: kendi imzalı sertifikada araya girme (MITM) saldırısına açar; API anahtarı ele geçirilebilir. Yalnız güvenilir ağda ve geçici olarak kullanın. Sunucu ayarında Access Hash = tls-dogrulama-kapali de aynı işi yapar.'),
         ],
         'panel_adresi' => [
             'FriendlyName' => Ceviri::t('Panel adresi (isteğe bağlı)'),
             'Type' => 'text',
+            'SimpleMode' => true,
             'Size' => '40',
-            'Description' => Ceviri::t('https://panel.ornek.com:PORT/ — müşteri/bayi kapısı. SSO yokken düz bağlantı olarak kullanılır; bayi ürününde zorunludur.'),
+            'Description' => Ceviri::t('Boş bırakılabilir: adres panelden alınır — hosting ürününde müşteri kapısı, bayi ürününde bayi kapısı (gPanel 0.3.0-20261013+). Başka bir ad/port için https://panel.ornek.com:PORT/ girin.'),
         ],
         'mevcut_bagla' => [
             'FriendlyName' => Ceviri::t('Mevcut hesabı bağla'),
             'Type' => 'yesno',
+            'SimpleMode' => true,
             'Description' => Ceviri::t('Panelde zaten var olan alan adı/bayi bulunursa hizmete BAĞLA. Kapalıyken (önerilen) başka müşterinin hesabını devralma engellenir.'),
         ],
     ];

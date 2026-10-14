@@ -10,6 +10,7 @@ import { useBayiCevir } from '@/lib/bayiCeviri'
 import { useToast } from '@/components/Toast'
 import { Badge, Button, butonSinifi } from '@/components/ui'
 import { UyariKutusu } from '@/components/UyariKutusu'
+import KaynakGrafik from '@/components/bayi/KaynakGrafik'
 import { I, Ikon } from '@/components/Ikon'
 import { KART, ODAK, cx, mbYaz, tarihYaz, yuzde } from './ortak'
 import { KullanimHucre } from './Hucreler'
@@ -175,6 +176,11 @@ export default function BayiPano() {
       <PanoWidgetlari />
 
       {/* Son oluşturulan 10 alan adı */}
+      {/* Kaynak havuzu kullanım grafiği (CPU / RAM / disk) */}
+      <section className={cx(KART, 'p-5')}>
+        <KaynakGrafik yol="/reseller/kaynak/kullanim" />
+      </section>
+
       <section className={cx(KART, 'overflow-hidden')} aria-label={t('Son oluşturulan alan adları')}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-dark-600">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-dark-50">{t('Son oluşturulan alan adları')}</h2>

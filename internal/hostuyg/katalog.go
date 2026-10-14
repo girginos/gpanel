@@ -16,7 +16,7 @@ var Katalog = []Tarif{
 		Aciklama: "Kendi git deponuz — GitHub benzeri, hafif, Go binary tek dosya.",
 		Kategori: "gelistirme",
 		Ikon:     "🌿",
-		LogoURL:  "https://cdn.simpleicons.org/gitea/609926",
+		LogoURL:  "/simge/gitea.svg",
 		Surum:    "1.22.6",
 
 		IndirmeURL: "https://dl.gitea.com/gitea/1.22.6/gitea-1.22.6-linux-amd64",
@@ -86,7 +86,7 @@ DISABLE_REGISTRATION = true
 		Aciklama: "Modern web sunucu — otomatik HTTPS, HTTP/3, admin API, reverse proxy.",
 		Kategori: "web",
 		Ikon:     "🧱",
-		LogoURL:  "https://cdn.simpleicons.org/caddy/1F88C0",
+		LogoURL:  "/simge/caddy.svg",
 		Surum:    "2.8.4",
 
 		IndirmeURL: "https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_linux_amd64.tar.gz",
@@ -131,7 +131,7 @@ DISABLE_REGISTRATION = true
 		Aciklama: "Sunucular arası şifreli P2P dosya senkronizasyonu — hafif, self-hosted, web arayüz.",
 		Kategori: "depolama",
 		Ikon:     "🔄",
-		LogoURL:  "https://cdn.simpleicons.org/syncthing/0891D1",
+		LogoURL:  "/simge/syncthing.svg",
 		Surum:    "1.28.0",
 
 		IndirmeURL: "https://github.com/syncthing/syncthing/releases/download/v1.28.0/syncthing-linux-amd64-v1.28.0.tar.gz",
@@ -168,7 +168,7 @@ DISABLE_REGISTRATION = true
 		Aciklama: "Metrikler, loglar, izleme için görsel dashboard — Prometheus/InfluxDB/PostgreSQL uyumlu.",
 		Kategori: "izleme",
 		Ikon:     "📊",
-		LogoURL:  "https://cdn.simpleicons.org/grafana/F46800",
+		LogoURL:  "/simge/grafana.svg",
 		Surum:    "11.3.1",
 
 		IndirmeURL: "https://dl.grafana.com/oss/release/grafana-11.3.1.linux-amd64.tar.gz",
@@ -214,7 +214,7 @@ DISABLE_REGISTRATION = true
 		Aciklama: "Time-series metrik toplama + sorgulama — Grafana ile ideal eşleşme.",
 		Kategori: "izleme",
 		Ikon:     "🔥",
-		LogoURL:  "https://cdn.simpleicons.org/prometheus/E6522C",
+		LogoURL:  "/simge/prometheus.svg",
 		Surum:    "3.0.1",
 
 		IndirmeURL: "https://github.com/prometheus/prometheus/releases/download/v3.0.1/prometheus-3.0.1.linux-amd64.tar.gz",
@@ -272,7 +272,7 @@ scrape_configs:
 		Aciklama: "S3-compatible object storage — self-hosted, kendi bucket'ların, backup/artifact deposu.",
 		Kategori: "depolama",
 		Ikon:     "🪣",
-		LogoURL:  "https://cdn.simpleicons.org/minio/C72E49",
+		LogoURL:  "/simge/minio.svg",
 		Surum:    "2025-09-07",
 
 		IndirmeURL: "https://dl.min.io/server/minio/release/linux-amd64/minio",
@@ -321,7 +321,7 @@ scrape_configs:
 		Aciklama: "SFTP/FTP/WebDAV/S3/GCS server + web admin — multi-protokol dosya paylaşımı. Admin şifresi ilk açılışta yaratılır; sonradan web UI'dan değiştirilir (recipe secret'i etkisiz).",
 		Kategori: "depolama",
 		Ikon:     "📁",
-		LogoURL:  "https://cdn.simpleicons.org/filezilla/BF0000",
+		LogoURL:  "/simge/filezilla.svg",
 		Surum:    "2.7.5",
 
 		IndirmeURL: "https://github.com/drakkan/sftpgo/releases/download/v2.7.5/sftpgo_v2.7.5_linux_x86_64.tar.xz",
@@ -389,7 +389,7 @@ scrape_configs:
 		Aciklama: "Docker-siz WireGuard VPN — Tailscale açık-kaynak kontrol düzlemi. Kullanıcı client'ları Tailscale ile bağlanır.",
 		Kategori: "guvenlik",
 		Ikon:     "🔒",
-		LogoURL:  "https://cdn.simpleicons.org/tailscale/242424",
+		LogoURL:  "/simge/tailscale.svg",
 		Surum:    "0.29.3",
 
 		IndirmeURL: "https://github.com/juanfont/headscale/releases/download/v0.29.3/headscale_0.29.3_linux_amd64",
@@ -484,7 +484,7 @@ unix_socket_permission: "0770"
 		Aciklama: "Sesli iletişim sunucusu — 32 slot ücretsiz. Client'lar UDP 9987 voice portundan bağlanır.",
 		Kategori: "iletisim",
 		Ikon:     "🎧",
-		LogoURL:  "https://cdn.simpleicons.org/teamspeak/2580C3",
+		LogoURL:  "/simge/teamspeak.svg",
 		Surum:    "3.13.7",
 
 		IndirmeURL: "https://files.teamspeak-services.com/releases/server/3.13.7/teamspeak3-server_linux_amd64-3.13.7.tar.bz2",
@@ -548,7 +548,7 @@ unix_socket_permission: "0770"
 		Aciklama: "Servis uptime monitoring + status page — HTTP/TCP/UDP/ICMP check, Discord/Slack alarm.",
 		Kategori: "izleme",
 		Ikon:     "📈",
-		LogoURL:  "https://cdn.simpleicons.org/uptimekuma/5CDD8B",
+		LogoURL:  "/simge/uptimekuma.svg",
 		Surum:    "0.93.0",
 
 		IndirmeURL: "https://github.com/statping-ng/statping-ng/releases/download/v0.93.0/statping-linux-amd64.tar.gz",

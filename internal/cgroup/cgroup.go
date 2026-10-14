@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"girginospanel/internal/bayidilim"
 )
 
 // Kok: cgroup v2 bağlama noktası. Testler geçici bir sahte ağaca çevirir.
@@ -40,10 +42,19 @@ var reMajMin = regexp.MustCompile(`^[0-9]+:[0-9]+$`)
 //
 // Yol birleştirmeye "/", ".." ya da "-" giremez. systemd "-"yi hiyerarşi ayracı
 // sayar (girginos-c_x.slice → girginos.slice/girginos-c_x.slice); sk'de "-"
-// olmadığından yol tek düzeydir.
+// olmadığından yol tek düzeydir (havuz üyesinde iki düzey: bkz. aşağısı).
 func KiraciDizin(sk string) string {
 	if !reKiraciSK.MatchString(sk) {
 		return ""
+	}
+	// Bayi kaynak havuzuna üye hosting iç içe dilimde yaşar (girginos-bayi<N>-<sk>.slice).
+	// Üyelik YENİ yazıldı ama birim henüz yeniden başlamadıysa süreçler hâlâ ESKİ dilimde:
+	// iç içe dizin yoksa eski dizine düş (canlı kullanım sıfır görünmesin).
+	if id := bayidilim.Uyelik(sk); id > 0 {
+		ic := filepath.Join(Kok, bayidilim.CgroupGoreli(sk))
+		if st, err := os.Stat(ic); err == nil && st.IsDir() {
+			return ic
+		}
 	}
 	return filepath.Join(Kok, "girginos.slice", "girginos-"+sk+".slice")
 }

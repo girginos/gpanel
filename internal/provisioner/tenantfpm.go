@@ -36,6 +36,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"girginospanel/internal/bayidilim"
 	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/sinirlidosya"
 )
@@ -51,6 +52,23 @@ var (
 	tenantRunKok  = "/run"
 	tenantLogKok  = "/var/log"
 )
+
+// tenantDropinleriYaz: ana birimin damgasını DEĞİŞTİRMEYEN drop-in'leri yazar (drift-restart
+// tetiklemez):
+//   - yeniden başlatma tavanı (bkz tenantStartLimitDropin),
+//   - bayi kaynak havuzu üyeliği (`Slice=`): hosting bir bayi havuzuna üyeyse servis havuzun
+//     İÇİNDEKİ plan diliminde başlar (sunucu yeniden başlayınca da); değilse eski drop-in silinir.
+//
+// Hata günlüğe yazılır, kurulumu durdurmaz (hosting eski düz dilimde kalır). daemon-reload
+// çağırana aittir.
+func tenantDropinleriYaz(sk string) {
+	if _, err := tenantStartLimitYaz(sk); err != nil {
+		log.Printf("EnableTenantFPM: %s StartLimit drop-in yazilamadi: %v", sk, err)
+	}
+	if _, err := bayidilim.DropinUygula(tenantUnitDir, tenantUnitName(sk), sk); err != nil {
+		log.Printf("EnableTenantFPM: %s bayi havuzu drop-in yazilamadi: %v", sk, err)
+	}
+}
 
 // tenantUnitDir: per-tenant systemd unit dizini. Üretimde SABİT; testler geçici
 // dizine çevirir (TenantFPMActive ana makinenin unit'lerine bakmadan sınanır).
@@ -591,6 +609,20 @@ func tenantReadPoolSettings(db *sql.DB, domainID int64) tenantPoolSettings {
 	return s
 }
 
+// tenantOpcacheSatiri — pool.conf'a yazılacak OPcache satırı; OPcache AÇIKKEN satır YOKTUR.
+//
+// 🔴 `php_admin_flag[opcache.enable] = on` bir no-op'tur: PHP, çalışma anında OPcache'i "açmayı" reddeder
+// (yalnız kapatılabilir) ve her yeni işçide "Zend OPcache can't be temporary enabled (it may be only
+// disabled till the end of request)" uyarısı basar. İşçiler pm.max_requests ile sürekli yenilendiği
+// için bu uyarı sınırsız büyür (180: iki tenant günlüğünde 7.743 ve 6.509 satır). Açık durumun
+// karşılığı PHP genel varsayılanıdır (opcache.enable=1) — satır gereksizdir. Kapatma ise çalışır.
+func tenantOpcacheSatiri(acik bool) string {
+	if acik {
+		return ""
+	}
+	return "php_admin_flag[opcache.enable] = off\n"
+}
+
 // renderTenantPool: per-tenant pool.conf içeriği. Güvenlik değerleri php_admin_value
 // ile verilir (kullanıcı ini_set ile EZEMEZ). open_basedir tenant home + /tmp ile
 // sınırlıdır. pm.max_children plandan türetilir.
@@ -662,11 +694,8 @@ func renderTenantPool(db *sql.DB, sk string, domainID int64) string {
 	// OPcache: panelden kapatılınca gerçekten kapansın (WHMCS uyumu). php_admin_flag
 	// → tenant ini_set ile geri açamaz. Eskiden hiç render edilmiyordu; panel "kapalı"
 	// gösterse de PHP global default (açık) geçerliydi ve WHMCS uyarı veriyordu.
-	opcFlag := "off"
-	if ps.OpcacheEnable {
-		opcFlag = "on"
-	}
-	fmt.Fprintf(&b, "php_admin_flag[opcache.enable] = %s\n", opcFlag)
+	// 🔴 YALNIZ KAPALIYKEN yazılır (bkz. tenantOpcacheSatiri).
+	b.WriteString(tenantOpcacheSatiri(ps.OpcacheEnable))
 	// ---- Loglama (per-tenant, saglam): PHP fatal'lari sessizce kaybolmasin ----
 	// log_errors ACIK + display_errors KAPALI (prod). error_log BILEREK verilmez ->
 	// PHP hatalari stderr'e gider, catch_workers_output ile master bunlari per-tenant
@@ -1506,7 +1535,7 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 		return "", fmt.Errorf("php-fpm binary tanımsız (%s)", surum)
 	}
 	if _, err := os.Stat(fpmBin); err != nil {
-		return "", fmt.Errorf("php-fpm binary yok (%s): %s", surum, fpmBin)
+		return "", fmt.Errorf("%w (%s): php-fpm binary yok: %s", ErrPHPKuruluDegil, surum, fpmBin)
 	}
 	if _, err := os.Stat("/home/" + sk); err != nil {
 		return "", fmt.Errorf("tenant home yok: /home/%s", sk)
@@ -1573,11 +1602,7 @@ func EnableTenantFPM(db *sql.DB, domainID int64, sk, surum string) (string, erro
 	if err := os.WriteFile(tenantUnitPath(sk), []byte(renderTenantUnit(sk, fpmBin)), 0644); err != nil {
 		return "", fmt.Errorf("tenant unit yaz: %w", err)
 	}
-	// Yeniden başlatma tavanı (drop-in; ana birimin damgasını DEĞİŞTİRMEZ → mevcut
-	// tenant'larda drift-restart tetiklemez). Bkz tenantStartLimitDropin.
-	if _, err := tenantStartLimitYaz(sk); err != nil {
-		log.Printf("EnableTenantFPM: %s StartLimit drop-in yazilamadi: %v", sk, err)
-	}
+	tenantDropinleriYaz(sk)
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
 		return "", fmt.Errorf("daemon-reload: %s: %w", strings.TrimSpace(string(out)), err)
 	}

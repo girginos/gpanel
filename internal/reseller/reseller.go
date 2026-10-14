@@ -13,7 +13,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	"girginospanel/internal/bayikaynak"
 	"girginospanel/internal/bildirim"
 	destekiptal "girginospanel/internal/destek/iptal"
 	"girginospanel/internal/destek/protokol"
@@ -31,6 +33,27 @@ import (
 
 type Handlers struct {
 	DB *sql.DB
+}
+
+// bayiHavuzUygula: bayi kaynak havuzu değişince dilimleri/üyeliği/disk projesini eşitler.
+// Sunucuda systemctl/xfs_quota çalıştırır ve ev ağacı gezebilir → ARKA PLANDA koşar. Testler
+// gerçek sunucu dosyalarına dokunmayan bir kancayla değiştirir.
+var bayiHavuzUygula = func(db *sql.DB) {
+	go func() {
+		defer func() {
+			if rc := recover(); rc != nil {
+				log.Printf("bayi havuzu uzlaştırma PANIK: %v", rc)
+			}
+		}()
+		ctx, iptal := context.WithTimeout(context.Background(), 4*time.Hour)
+		defer iptal()
+		bayikaynak.UzlastirTam(ctx, db, true)
+	}()
+}
+
+// bayiHavuzTemizle: bayi silindikten sonra havuz kalıntıları (dilim, proje sınırı, kullanım).
+var bayiHavuzTemizle = func(ctx context.Context, db *sql.DB, bayiID int64) {
+	bayikaynak.BayiTemizle(ctx, db, bayiID)
 }
 
 var reKullanici = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
@@ -71,10 +94,14 @@ type Reseller struct {
 	MaxTrafikMB  int64  `json:"max_trafik_mb"`
 	DomainSayisi int    `json:"domain_sayisi"`
 	DiskKullanKB int64  `json:"disk_kullanim_kb"`
-	PaketID      int64  `json:"paket_id"`
-	PaketAd      string `json:"paket_ad"`
-	SonGiris     string `json:"son_giris"`
-	Olusturulma  string `json:"olusturulma"`
+	// Kaynak havuzu (disk havuzu = max_disk_mb). 0 = sınırsız.
+	CPUCekirdek float64 `json:"cpu_cekirdek"`
+	RAMMB       int64   `json:"ram_mb"`
+	IOAgirlik   int     `json:"io_agirlik"`
+	PaketID     int64   `json:"paket_id"`
+	PaketAd     string  `json:"paket_ad"`
+	SonGiris    string  `json:"son_giris"`
+	Olusturulma string  `json:"olusturulma"`
 }
 
 // GET /resellers — tum reseller'lar + limit + kullanim (admin).
@@ -84,6 +111,7 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 		        u.max_domain, u.max_disk_mb, u.max_trafik_mb,
 		        (SELECT COUNT(*) FROM domains d WHERE d.reseller_id=u.id),
 		        COALESCE((SELECT SUM(d.boyut_kb) FROM domains d WHERE d.reseller_id=u.id),0),
+		        COALESCE(u.kaynak_cpu_cekirdek,0), COALESCE(u.kaynak_ram_mb,0), COALESCE(u.kaynak_io_agirlik,0),
 		        u.reseller_plan_id, COALESCE((SELECT ad FROM reseller_plans rp WHERE rp.id=u.reseller_plan_id),''),
 		        COALESCE(DATE_FORMAT(u.last_login_at,'%Y-%m-%d %H:%i'),''),
 		        COALESCE(DATE_FORMAT(u.created_at,'%Y-%m-%d'),'')
@@ -97,7 +125,8 @@ func (h *Handlers) Liste(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x Reseller
 		if err := rows.Scan(&x.ID, &x.Kullanici, &x.AdSoyad, &x.Durum, &x.MaxDomain, &x.MaxDiskMB,
-			&x.MaxTrafikMB, &x.DomainSayisi, &x.DiskKullanKB, &x.PaketID, &x.PaketAd, &x.SonGiris, &x.Olusturulma); err == nil {
+			&x.MaxTrafikMB, &x.DomainSayisi, &x.DiskKullanKB,
+			&x.CPUCekirdek, &x.RAMMB, &x.IOAgirlik, &x.PaketID, &x.PaketAd, &x.SonGiris, &x.Olusturulma); err == nil {
 			out = append(out, x)
 		}
 	}
@@ -131,6 +160,14 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "parola 8-128 karakter olmalı")
 		return
 	}
+	if m := BcryptParolaHatasi(req.Parola); m != "" {
+		httpx.WriteError(w, http.StatusBadRequest, m)
+		return
+	}
+	if len([]rune(strings.TrimSpace(req.AdSoyad))) > 120 { // PUT ile aynı sınır (eskiden 500 + SQL metni)
+		httpx.WriteError(w, http.StatusBadRequest, "ad soyad en fazla 120 karakter olabilir")
+		return
+	}
 	// 🔴 Paket ZORUNLU: paketsiz bayide tum limitler 0 kalir ve "0 = sinirsiz"
 	// semantigi yuzunden bayi SINIRSIZ hosting/disk/trafik satabiliyordu.
 	if req.PaketID <= 0 {
@@ -146,6 +183,11 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.MaxDomain, req.MaxDiskMB, req.MaxTrafikMB = md, dk, tr
+	kCPU, kRAM, kIO := h.paketKaynak(r, req.PaketID)
+	if err := bayikaynak.DegerDogrula(kCPU, kRAM, req.MaxDiskMB, kIO); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "paketin kaynak havuzu geçersiz: "+err.Error())
+		return
+	}
 	if req.MaxDomain < 0 || req.MaxDiskMB < 0 || req.MaxTrafikMB < 0 {
 		httpx.WriteError(w, http.StatusBadRequest, "limitler negatif olamaz")
 		return
@@ -165,18 +207,23 @@ func (h *Handlers) Olustur(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.DB.ExecContext(r.Context(),
 		`INSERT INTO users(username, password_hash, role, full_name, status, max_domain, max_disk_mb, max_trafik_mb,
-		   asim_ilkesi, asim_bildirim, fazla_satis, reseller_plan_id)
-		 VALUES(?,?, 'reseller', ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
+		   asim_ilkesi, asim_bildirim, fazla_satis, reseller_plan_id,
+		   kaynak_cpu_cekirdek, kaynak_ram_mb, kaynak_io_agirlik)
+		 VALUES(?,?, 'reseller', ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.Kullanici, string(hash), strings.TrimSpace(req.AdSoyad), req.MaxDomain, req.MaxDiskMB, req.MaxTrafikMB,
-		ilkeAsim, ilkeBildirim, ilkeFazla, req.PaketID)
+		ilkeAsim, ilkeBildirim, ilkeFazla, req.PaketID, kCPU, kRAM, kIO)
 	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "oluşturulamadı: "+err.Error())
+		log.Printf("reseller: bayi %q oluşturulamadı: %v", req.Kullanici, err)
+		httpx.WriteError(w, http.StatusInternalServerError, "oluşturulamadı")
 		return
 	}
 	id, _ := res.LastInsertId()
 	uid, kul := middleware.Aktor(r)
 	httpx.Denetim(h.DB, r, uid, kul, "bayi.olustur", req.Kullanici,
-		fmt.Sprintf("paket=%d domain=%d disk=%dMB", req.PaketID, req.MaxDomain, req.MaxDiskMB), id, true)
+		fmt.Sprintf("paket=%d domain=%d disk=%dMB cpu=%g ram=%dMB io=%d", req.PaketID, req.MaxDomain, req.MaxDiskMB, kCPU, kRAM, kIO), id, true)
+	if kCPU > 0 || kRAM > 0 || kIO > 0 || req.MaxDiskMB > 0 {
+		bayiHavuzUygula(h.DB) // havuz dilimi + (varsa) disk projesi; yanıtı bekletmez
+	}
 	// 🔴 Bayiye hosting planı AÇILMAZ (kullanıcı bildirimi 2026-10-12: "100 bayi = 100
 	// hosting planı"; eskiden plans.BayiVarsayilanSagla "<bayi> Varsayılan" yazıyordu).
 	// Kota/limitler yukarıda bayi kaydına yazıldı ve hosting açılışında uygulanır
@@ -193,6 +240,10 @@ type guncelleReq struct {
 	MaxDomain   *int    `json:"max_domain"`
 	MaxDiskMB   *int64  `json:"max_disk_mb"`
 	MaxTrafikMB *int64  `json:"max_trafik_mb"`
+	// Kaynak havuzu (0 = sınırsız). Paket değişimiyle gelen değeri geçersiz kılar.
+	CPUCekirdek *float64 `json:"cpu_cekirdek"`
+	RAMMB       *int64   `json:"ram_mb"`
+	IOAgirlik   *int     `json:"io_agirlik"`
 }
 
 // PUT /resellers/{id} — limit/durum/parola güncelle (admin).
@@ -215,10 +266,16 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	var onceDomain int
 	var onceDisk, onceTrafik int64
 	var onceDurum string
+	var onceCPU float64
+	var onceRAM int64
+	var onceIO int
 	_ = h.DB.QueryRowContext(r.Context(),
-		`SELECT reseller_plan_id, max_domain, max_disk_mb, max_trafik_mb, status FROM users WHERE id=?`, id).
-		Scan(&oncePaket, &onceDomain, &onceDisk, &onceTrafik, &onceDurum)
+		`SELECT reseller_plan_id, max_domain, max_disk_mb, max_trafik_mb, status,
+		        COALESCE(kaynak_cpu_cekirdek,0), COALESCE(kaynak_ram_mb,0), COALESCE(kaynak_io_agirlik,0)
+		   FROM users WHERE id=?`, id).
+		Scan(&oncePaket, &onceDomain, &onceDisk, &onceTrafik, &onceDurum, &onceCPU, &onceRAM, &onceIO)
 	degisim := []string{}
+	havuzDegisti := false // CPU/RAM/G-Ç/disk havuzu ya da paketle gelen değerler değişebilir
 
 	sets := []string{}
 	args := []any{}
@@ -244,6 +301,16 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 			args = append(args, ia, ib, ifz)
 			sets = append(sets, "max_domain=?", "max_disk_mb=?", "max_trafik_mb=?")
 			args = append(args, md, dk, tr)
+			// Kaynak havuzu da paketten kopyalanır (CPU/RAM/G-Ç; disk havuzu = max_disk_mb yukarıda).
+			kc, kr, ki := h.paketKaynak(r, *req.PaketID)
+			if err := bayikaynak.DegerDogrula(kc, kr, dk, ki); err != nil {
+				httpx.WriteError(w, http.StatusBadRequest, "paketin kaynak havuzu geçersiz: "+err.Error())
+				return
+			}
+			degisim = append(degisim, fmt.Sprintf("paketle gelen: cpu_cekirdek=%g ram_mb=%d io_agirlik=%d", kc, kr, ki))
+			sets = append(sets, "kaynak_cpu_cekirdek=?", "kaynak_ram_mb=?", "kaynak_io_agirlik=?")
+			args = append(args, kc, kr, ki)
+			havuzDegisti = true
 		}
 	}
 	if req.AdSoyad != nil {
@@ -285,6 +352,37 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		degisim = append(degisim, fmt.Sprintf("max_disk_mb %v→%v", onceDisk, *req.MaxDiskMB))
 		sets = append(sets, "max_disk_mb=?")
 		args = append(args, *req.MaxDiskMB)
+		havuzDegisti = true
+	}
+	if req.CPUCekirdek != nil {
+		if err := bayikaynak.DegerDogrula(*req.CPUCekirdek, 0, 0, 0); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		degisim = append(degisim, fmt.Sprintf("cpu_cekirdek %g→%g", onceCPU, *req.CPUCekirdek))
+		sets = append(sets, "kaynak_cpu_cekirdek=?")
+		args = append(args, *req.CPUCekirdek)
+		havuzDegisti = true
+	}
+	if req.RAMMB != nil {
+		if err := bayikaynak.DegerDogrula(0, *req.RAMMB, 0, 0); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		degisim = append(degisim, fmt.Sprintf("ram_mb %v→%v", onceRAM, *req.RAMMB))
+		sets = append(sets, "kaynak_ram_mb=?")
+		args = append(args, *req.RAMMB)
+		havuzDegisti = true
+	}
+	if req.IOAgirlik != nil {
+		if err := bayikaynak.DegerDogrula(0, 0, 0, *req.IOAgirlik); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		degisim = append(degisim, fmt.Sprintf("io_agirlik %v→%v", onceIO, *req.IOAgirlik))
+		sets = append(sets, "kaynak_io_agirlik=?")
+		args = append(args, *req.IOAgirlik)
+		havuzDegisti = true
 	}
 	if req.MaxTrafikMB != nil {
 		if *req.MaxTrafikMB < 0 || *req.MaxTrafikMB > 1<<40 {
@@ -299,11 +397,15 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 		// 🔴 API anahtarı bayi parolasını DEĞİŞTİREMEZ: anahtar → parola → etkileşimli
 		// bayi oturumu (kimlik devralma) yolu olmasın (kullanıcı kararı 2026-10-03).
 		if middleware.AnahtarFrom(r) != nil {
-			httpx.WriteError(w, http.StatusForbidden, "bayi parolası API anahtarıyla değiştirilemez")
+			httpx.WriteError(w, http.StatusForbidden, "bayi parolası bu uçtan API anahtarıyla değiştirilemez — PUT /resellers/{id}/password ucunu kullanın (anahtarda bayi.parola izni gerekir)")
 			return
 		}
 		if len(*req.Parola) < 8 || len(*req.Parola) > 128 {
 			httpx.WriteError(w, http.StatusBadRequest, "parola 8-128 karakter olmalı")
+			return
+		}
+		if m := BcryptParolaHatasi(*req.Parola); m != "" {
+			httpx.WriteError(w, http.StatusBadRequest, m)
 			return
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Parola), 12)
@@ -327,6 +429,11 @@ func (h *Handlers) Guncelle(w http.ResponseWriter, r *http.Request) {
 	uid, kul := middleware.Aktor(r)
 	var bayiAd string
 	_ = h.DB.QueryRowContext(r.Context(), `SELECT username FROM users WHERE id=?`, id).Scan(&bayiAd)
+	if havuzDegisti {
+		// Havuz dilimini/üyeliği/disk projesini yeniden uzlaştır. Yanıtı bekletmez; çalışan
+		// siteler yeniden başlatılmaz (taşıma birim yeniden başlayınca / yeniden başlatmada olur).
+		bayiHavuzUygula(h.DB)
+	}
 
 	// Parola degisti → acik oturumlar dussun.
 	if req.Parola != nil && *req.Parola != "" {
@@ -492,6 +599,7 @@ func (h *Handlers) bayiSilCalistir(isID, id int64, bayiAd string, hostlar []bayi
 		toplu.IsBitir(h.DB, isID, "hata", detay)
 		return
 	}
+	bayiHavuzTemizle(ctx, h.DB, id) // havuz dilimi + proje sınırı + kullanım serisi
 	bayiAnahtarlariniIptalSistem(ctx, h.DB, id, uid, kul, bayiAd, "bayi_silindi")
 	destekiptal.Bayi(ctx, h.DB, id, true, uid, kul)
 	// Kapsam KOK: bayi artik yok; ID ileride yeniden kullanilirsa yeni bayi

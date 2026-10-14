@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"girginospanel/internal/bayidilim"
+	"girginospanel/internal/bayikaynak"
 	"girginospanel/internal/efektiflimit"
 	"girginospanel/internal/provisioner"
 )
@@ -70,11 +72,18 @@ func PlanLimitleriGetir(ctx context.Context, db *sql.DB, domainID int64) (Limitl
 	}, nil
 }
 
-const sliceDir = "/etc/systemd/system"
+// sliceDir / runKontrolDizini: systemd birim dizini ve `set-property --runtime` düşürücüleri.
+// Üretimde SABİT; testler geçici dizine çevirir.
+var (
+	sliceDir         = "/etc/systemd/system"
+	runKontrolDizini = "/run/systemd/system.control"
+)
 
+// sliceName: hostingin plan diliminin adı. Bayi havuzuna üyeyse havuzun İÇİNE yuvalanmış ad
+// (girginos-bayi<N>-<sk>.slice; systemd hiyerarşisi addan çıkar), değilse eski düz ad
+// (girginos-<sk>.slice). Çözümleme bayidilim paketindedir (üyelik dosyası).
 func sliceName(sk string) string {
-	// systemd slice — girginos-c_reg_kalici_test_local.slice
-	return "girginos-" + sk + ".slice"
+	return bayidilim.AdiYedekli(sk)
 }
 
 func slicePath(sk string) string {
@@ -85,7 +94,37 @@ func slicePath(sk string) string {
 // CPUQuota, MemoryMax, TasksMax, IOWeight + (varsa) MUTLAK disk G/Ç throttle'ları
 // (IO{Read,Write}BandwidthMax / IO{Read,Write}IOPSMax) kural setini kullanır (cgroup v2).
 func SystemdSliceYaz(sk string, l Limitler) error {
-	content := fmt.Sprintf(`# GirginOSPanel per-domain resource slice — %s
+	content := sliceIcerik(sk, l)
+	if err := os.WriteFile(slicePath(sk), []byte(content), 0644); err != nil {
+		return fmt.Errorf("slice yaz: %w", err)
+	}
+	// PAM oturum dilimi (user-<UID>.slice: SSH/su/linger) aynı tavanla — bkz. oturum_dilimi.go.
+	oturumUID, oturumErr := oturumDilimiYaz(sk, l)
+	if oturumErr != nil {
+		log.Printf("oturum dilimi %s: %v", sk, oturumErr)
+	}
+	if out, err := systemctlCalistir("daemon-reload"); err != nil {
+		return fmt.Errorf("daemon-reload: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if oturumErr == nil {
+		oturumDilimiCanli(oturumUID, l)
+	}
+	// 🔴 CANLI GÜNCELLEME (süreç-öldürmez): slice zaten üye içeriyorsa (aktif),
+	// yeni limitleri set-property --runtime ile ANINDA uygula. restart KULLANMA —
+	// restart slice üyelerini (php-fpm worker'ları) öldürür. Dosya kalıcı kaynaktır;
+	// slice inaktifse (ilk oluşturma) FPM servisi başlarken dosyadaki değerleri alır.
+	sliceCanliUygula(sliceName(sk), sk, l)
+	// Havuza yeni alınmış ama FPM'i henüz yeniden başlamamış hosting ESKİ düz dilimde
+	// çalışmayı sürer; plan değişikliği orada da canlı geçerli olsun (yeniden başlatmayı bekleme).
+	if eski := bayidilim.EskiDilim(sk); eski != "" && eski != sliceName(sk) {
+		sliceCanliUygula(eski, sk, l)
+	}
+	return nil
+}
+
+// sliceIcerik: plan dilimi dosya içeriği (yalnız metin; yan etkisiz).
+func sliceIcerik(sk string, l Limitler) string {
+	return fmt.Sprintf(`# GirginOSPanel per-domain resource slice — %s
 [Unit]
 Description=GirginOS panel slice for %s
 Before=slices.target
@@ -108,55 +147,47 @@ IOWeight=%d
 		nonzero(l.MaxProcess, 50),
 		nonzero(l.IOAgirlik, 100),
 		ioSliceLines(l))
+}
 
-	if err := os.WriteFile(slicePath(sk), []byte(content), 0644); err != nil {
-		return fmt.Errorf("slice yaz: %w", err)
+// sliceCanliUygula: ETKİN dilime plan limitlerini süreç öldürmeden (set-property --runtime)
+// uygular. birim = systemd dilim adı; sk yalnız günlük içindir. Pasif dilimde yapacak şey yok:
+// FPM başlarken dosyadaki değerleri alır.
+func sliceCanliUygula(birim, sk string, l Limitler) {
+	if out, _ := systemctlCalistir("is-active", birim); strings.TrimSpace(string(out)) != "active" {
+		return
 	}
-	// PAM oturum dilimi (user-<UID>.slice: SSH/su/linger) aynı tavanla — bkz. oturum_dilimi.go.
-	oturumUID, oturumErr := oturumDilimiYaz(sk, l)
-	if oturumErr != nil {
-		log.Printf("oturum dilimi %s: %v", sk, oturumErr)
+	cpu := nonzero(l.CPUYuzde, 100)
+	mem := nonzero(l.RAMMB, 512)
+	tasks := nonzero(l.MaxProcess, 50)
+	io := nonzero(l.IOAgirlik, 100)
+	args := []string{"set-property", "--runtime", birim,
+		fmt.Sprintf("CPUQuota=%d%%", cpu),
+		fmt.Sprintf("MemoryMax=%dM", mem),
+		fmt.Sprintf("MemoryHigh=%dM", mem*90/100),
+		fmt.Sprintf("TasksMax=%d", tasks),
+		fmt.Sprintf("IOWeight=%d", io),
 	}
-	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
-		return fmt.Errorf("daemon-reload: %s: %w", strings.TrimSpace(string(out)), err)
+	// Mutlak disk G/Ç: >0 ise ayarla, 0 ise BOŞ atama ile temizle (>0→0 geçişi için ŞART).
+	args = append(args, ioSetPropertyArgs(l)...)
+	if out, err := systemctlCalistir(args...); err != nil {
+		log.Printf("slice set-property %s: %s: %v", sk, strings.TrimSpace(string(out)), err)
 	}
-	if oturumErr == nil {
-		oturumDilimiCanli(oturumUID, l)
-	}
-	// 🔴 CANLI GÜNCELLEME (süreç-öldürmez): slice zaten üye içeriyorsa (aktif),
-	// yeni limitleri set-property --runtime ile ANINDA uygula. restart KULLANMA —
-	// restart slice üyelerini (php-fpm worker'ları) öldürür. Dosya kalıcı kaynaktır;
-	// slice inaktifse (ilk oluşturma) FPM servisi başlarken dosyadaki değerleri alır.
-	if out, _ := exec.Command("systemctl", "is-active", sliceName(sk)).CombinedOutput(); strings.TrimSpace(string(out)) == "active" {
-		cpu := nonzero(l.CPUYuzde, 100)
-		mem := nonzero(l.RAMMB, 512)
-		tasks := nonzero(l.MaxProcess, 50)
-		io := nonzero(l.IOAgirlik, 100)
-		args := []string{"set-property", "--runtime", sliceName(sk),
-			fmt.Sprintf("CPUQuota=%d%%", cpu),
-			fmt.Sprintf("MemoryMax=%dM", mem),
-			fmt.Sprintf("MemoryHigh=%dM", mem*90/100),
-			fmt.Sprintf("TasksMax=%d", tasks),
-			fmt.Sprintf("IOWeight=%d", io),
-		}
-		// Mutlak disk G/Ç: >0 ise ayarla, 0 ise BOŞ atama ile temizle (>0→0 geçişi için ŞART).
-		args = append(args, ioSetPropertyArgs(l)...)
-		if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
-			log.Printf("slice set-property %s: %s: %v", sk, strings.TrimSpace(string(out)), err)
-		}
-		// 🔴 systemd set-property BOŞ-atama (>0→0) yalnız systemd görünümünü sıfırlar;
-		// AKTİF cgroup'un io.max'ındaki mevcut cihaz limitini TEMİZLEMEZ (kernel eski
-		// wbps değerini tutar). 0'a düşen alanları kernel io.max'a "key=max" yazarak
-		// AKTİF olarak kaldır.
-		ioClearKernelLimits(sk, l)
-	}
-	return nil
+	// 🔴 systemd set-property BOŞ-atama (>0→0) yalnız systemd görünümünü sıfırlar;
+	// AKTİF cgroup'un io.max'ındaki mevcut cihaz limitini TEMİZLEMEZ (kernel eski
+	// wbps değerini tutar). 0'a düşen alanları kernel io.max'a "key=max" yazarak
+	// AKTİF olarak kaldır.
+	ioClearKernelLimitsBirim(birim, l)
 }
 
 // ioClearKernelLimits: aktif slice'ın cgroup io.max dosyasında, plan alanı 0 (sınırsız)
 // olan G/Ç anahtarlarını "max" yazarak kernel seviyesinde sıfırlar. systemd set-property
 // boş-atama bunu güvenilir yapmadığı için gerekir. >0 alanlara DOKUNMAZ.
 func ioClearKernelLimits(sk string, l Limitler) {
+	ioClearKernelLimitsBirim(sliceName(sk), l)
+}
+
+// ioClearKernelLimitsBirim: ioClearKernelLimits'in birim adıyla çalışan çekirdeği.
+func ioClearKernelLimitsBirim(birim string, l Limitler) {
 	var clears []string
 	if l.IOReadMBps == 0 {
 		clears = append(clears, "rbps=max")
@@ -173,7 +204,7 @@ func ioClearKernelLimits(sk string, l Limitler) {
 	if len(clears) == 0 {
 		return // tüm alanlar >0 → temizlenecek bir şey yok
 	}
-	cgOut, err := exec.Command("systemctl", "show", sliceName(sk), "-p", "ControlGroup", "--value").Output()
+	cgOut, err := systemctlCalistir("show", birim, "-p", "ControlGroup", "--value")
 	cg := strings.TrimSpace(string(cgOut))
 	if err != nil || cg == "" {
 		return
@@ -257,22 +288,63 @@ func ioSetPropertyArgs(l Limitler) []string {
 // guvenilir sekilde temizlemiyor (bkz. SystemdSliceYaz'daki ayni not).
 func SystemdSliceRuntimeSifirla(sk string) {
 	oturumDilimiSil(sk) // plan kalktı → oturum dilimi tavanı da kalkar
-	out, _ := exec.Command("systemctl", "is-active", sliceName(sk)).CombinedOutput()
-	if strings.TrimSpace(string(out)) != "active" {
-		return // slice ayakta degil -> temizlenecek runtime override yok
+	for _, birim := range sliceAdaylari(sk) {
+		out, _ := systemctlCalistir("is-active", birim)
+		if strings.TrimSpace(string(out)) != "active" {
+			continue // slice ayakta degil -> temizlenecek runtime override yok
+		}
+		args := []string{"set-property", "--runtime", birim,
+			"CPUQuota=", "MemoryMax=infinity", "MemoryHigh=infinity", "TasksMax=infinity", "IOWeight="}
+		args = append(args, ioSetPropertyArgs(Limitler{})...)
+		if o, err := systemctlCalistir(args...); err != nil {
+			log.Printf("slice runtime sifirla %s: %s: %v", sk, strings.TrimSpace(string(o)), err)
+		}
+		ioClearKernelLimitsBirim(birim, Limitler{})
 	}
-	args := []string{"set-property", "--runtime", sliceName(sk),
-		"CPUQuota=", "MemoryMax=infinity", "MemoryHigh=infinity", "TasksMax=infinity", "IOWeight="}
-	args = append(args, ioSetPropertyArgs(Limitler{})...)
-	if o, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
-		log.Printf("slice runtime sifirla %s: %s: %v", sk, strings.TrimSpace(string(o)), err)
+}
+
+// sliceAdaylari: hostingin plan dilimi olabilecek TÜM adlar — güncel ad (bayi havuzuna üyeyse
+// yuvalanmış), eski düz ad ve diskte kalmış başka havuzlara ait yuvalanmış adlar. Plan
+// kalkarken / hosting silinirken hepsi temizlenir; yoksa üyelik değişiminden artakalan bir dilim
+// eski planın tavanlarını sürdürürdü.
+func sliceAdaylari(sk string) []string {
+	adlar := []string{sliceName(sk)}
+	ekle := func(a string) {
+		for _, x := range adlar {
+			if x == a {
+				return
+			}
+		}
+		adlar = append(adlar, a)
 	}
-	ioClearKernelLimits(sk, Limitler{})
+	if e := bayidilim.EskiDilim(sk); e != "" {
+		ekle(e)
+		if m, _ := filepath.Glob(filepath.Join(sliceDir, bayidilim.Onek+"bayi*-"+sk+".slice")); len(m) > 0 {
+			for _, p := range m {
+				ad := filepath.Base(p)
+				if _, s, ok := bayidilim.UyeDilimindenAyir(ad); ok && s == sk {
+					ekle(ad)
+				}
+			}
+		}
+	}
+	return adlar
 }
 
 // Söküm kancası: provisioner.TeardownTenantFPM (TÜM silme yolları) slice'ı da
 // kaldırsın — taşıma geri alma / platform SiteSil SystemdSliceSil'i çağırmıyordu.
-func init() { provisioner.TenantSliceSilKancasi = SystemdSliceSil }
+//
+// Hosting tamamen kalktığı için bayi havuzu üyelik kaydı da silinir (plansiz bırakma yolu
+// SystemdSliceSil'i doğrudan çağırır ve üyeliği KORUR: üyelik veritabanından türetilir).
+func init() {
+	provisioner.TenantSliceSilKancasi = func(sk string) error {
+		err := SystemdSliceSil(sk)
+		if bayidilim.GecerliSK(sk) {
+			_, _ = bayidilim.UyelikSil(sk)
+		}
+		return err
+	}
+}
 
 // SystemdSliceSil: kayıt varsa siler.
 func SystemdSliceSil(sk string) error {
@@ -280,19 +352,23 @@ func SystemdSliceSil(sk string) error {
 		return nil // guvenlik: yalnizca tenant slice'lari
 	}
 	oturumDilimiSil(sk)
-	birim := "girginos-" + sk + ".slice"
-	// 🔴 ONCE slice'i DURDUR: yalnizca unit dosyasini silmek yetmiyordu — slice
-	// "loaded active" kalip cgroup'u (ve runtime drop-in'lerini) sunucuda tutuyordu.
-	_, _ = exec.Command("systemctl", "stop", birim).CombinedOutput()
-	// `systemctl set-property --runtime` ile yazilan gecici drop-in'ler:
-	_ = os.RemoveAll("/run/systemd/system.control/" + birim + ".d")
-	if p := slicePath(sk); p != "" {
+	// Güncel ad + eski düz ad + diskte kalmış yuvalanmış adlar (bayi havuzu üyeliği değişmiş olabilir).
+	adlar := sliceAdaylari(sk)
+	for _, birim := range adlar {
+		// 🔴 ONCE slice'i DURDUR: yalnizca unit dosyasini silmek yetmiyordu — slice
+		// "loaded active" kalip cgroup'u (ve runtime drop-in'lerini) sunucuda tutuyordu.
+		_, _ = systemctlCalistir("stop", birim)
+		// `systemctl set-property --runtime` ile yazilan gecici drop-in'ler:
+		_ = os.RemoveAll(filepath.Join(runKontrolDizini, birim+".d"))
+		p := filepath.Join(sliceDir, birim)
 		if _, err := os.Stat(p); err == nil {
 			_ = os.Remove(p)
 		}
 	}
-	_, _ = exec.Command("systemctl", "daemon-reload").CombinedOutput()
-	_, _ = exec.Command("systemctl", "reset-failed", birim).CombinedOutput()
+	_, _ = systemctlCalistir("daemon-reload")
+	for _, birim := range adlar {
+		_, _ = systemctlCalistir("reset-failed", birim)
+	}
 	return nil
 }
 
@@ -548,7 +624,10 @@ func KotaDurum(sk string) (kullanilanMB, limitMB, kullanilanInode, limitInode in
 }
 
 // reGovernorUser: MySQL kullanıcı adı allowlist'i (backtick/tırnak/boşluk yok → SQLi kapalı).
-var reGovernorUser = regexp.MustCompile(`^[A-Za-z0-9_]{1,32}$`)
+// Üst sınır 64: panel önek + "_" + sonek ≤ 64 karaktere izin verir (hesaplar.GecerliDBKimlik);
+// 32'de bırakmak 33-64 karakterlik kiracı kullanıcılarını plan limitinden ve yavaş sorgu
+// KILL'inden sessizce muaf bırakırdı.
+var reGovernorUser = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 
 // reGovernorHost: MySQL host allowlist'i (localhost / IP / % / hostname).
 var reGovernorHost = regexp.MustCompile(`^[A-Za-z0-9_.%\-]{1,64}$`)
@@ -606,7 +685,7 @@ func MySQLLimitUygula(ctx context.Context, db *sql.DB, domainID int64, l Limitle
 			stmt := fmt.Sprintf(
 				"ALTER USER '%s'@'%s' WITH MAX_USER_CONNECTIONS %d MAX_QUERIES_PER_HOUR %d MAX_UPDATES_PER_HOUR %d;",
 				user, host,
-				nonNeg(l.MySQLMaxBaglanti), nonNeg(l.DBMaxQueriesPerHr), nonNeg(l.DBMaxUpdatesPerHr))
+				baglantiKanca(user, nonNeg(l.MySQLMaxBaglanti)), nonNeg(l.DBMaxQueriesPerHr), nonNeg(l.DBMaxUpdatesPerHr))
 			if out, e := exec.CommandContext(ctx, "mysql", "-uroot", "-e", stmt).CombinedOutput(); e != nil {
 				log.Printf("governor ALTER %s@%s başarısız: %s: %v", user, host, strings.TrimSpace(string(out)), e)
 			} else {
@@ -620,6 +699,19 @@ func MySQLLimitUygula(ctx context.Context, db *sql.DB, domainID int64, l Limitle
 		}
 	}
 	return nil
+}
+
+// DBBaglantiKancasi: MySQL CPU kısıcısı (internal/dbgovernor) bağlar. Bir DB kullanıcısı CPU
+// kısıtındayken plan yeniden uygulaması MAX_USER_CONNECTIONS'ı kısıtın ÜSTÜNE çıkarmasın diye
+// yazılacak değeri kısıcıya danıştırır; kısıcı plan değerini not eder ve kısıt kalkınca onu geri
+// yazar. nil (varsayılan) → plan değeri aynen yazılır (davranış değişmez).
+var DBBaglantiKancasi func(kullanici string, plan int) int
+
+func baglantiKanca(kullanici string, plan int) int {
+	if DBBaglantiKancasi == nil {
+		return plan
+	}
+	return nonNeg(DBBaglantiKancasi(kullanici, plan))
 }
 
 // mysqlUserHosts: mysql.user'da verilen kullanıcı adına kayıtlı TÜM host'ları döner
@@ -656,6 +748,58 @@ func nonNeg(v int) int {
 // (30sn aralık 3sn'lik bir limiti kaçırırdı). Yük çok düşük (aralıkta tek processlist okuması).
 const governorPollInterval = 5 * time.Second
 
+// governorKararTTL: "taranacak etkin db_max_query_seconds limiti var mı" kararının geçerlilik süresi.
+// Hiçbir tenant için limit tanımlı DEĞİLKEN (varsayılan) her 5 sn'de bir `mysql` istemcisi fork edip
+// MariaDB'ye bağlanmak (günde ~17.000 süreç + bağlantı) boşunadır; karar bu aralıkla panel DB'sinden
+// tazelenir. Bir limit yeni tanımlanırsa tarama en geç bu kadar gecikmeyle başlar.
+const governorKararTTL = 30 * time.Second
+
+var (
+	// governorLimitVar: kararın kaynağı. Test için enjekte edilebilir.
+	governorLimitVar = governorLimitVarMi
+	// governorTara: tek processlist taraması. Test için enjekte edilebilir.
+	governorTara = governorScanOnce
+	// governorTikAraligi: watchdog tik aralığı. Test için enjekte edilebilir.
+	governorTikAraligi = governorPollInterval
+)
+
+// governorLimitVarMi: herhangi bir tenant DB hesabı için EFEKTİF (plan ⊕ hostinge özel üst yazım)
+// db_max_query_seconds > 0 mı? Hata/belirsizlik → true (fail-open): eski davranış, tarama sürer.
+// (governorLimiti ile AYNI efektif-limit ifadesi; orada kullanıcı bazında, burada hepsinin üst sınırı.)
+func governorLimitVarMi(db *sql.DB) bool {
+	var enBuyuk int
+	if err := db.QueryRow(
+		`SELECT COALESCE(MAX(` + efektiflimit.IfadeVarsayilan("db_max_query_seconds", 0) + `), 0)
+		 FROM db_accounts a JOIN domains d ON d.id=a.domain_id` + efektiflimit.Join).Scan(&enBuyuk); err != nil {
+		return true
+	}
+	return enBuyuk > 0
+}
+
+// governorKapisi: watchdog tikinde processlist taranacak mı? Kararı governorKararTTL boyunca saklar;
+// karar değişince (ve ilk kararda) bir kez loglar — aksi halde "tarama neden sessiz" sorusu çıkar.
+type governorKapisi struct {
+	bakildi bool // en az bir karar verildi
+	karar   bool
+	bitis   time.Time
+}
+
+func (k *governorKapisi) taramaGerekli(db *sql.DB, simdi time.Time) bool {
+	if k.bakildi && simdi.Before(k.bitis) {
+		return k.karar
+	}
+	yeni := governorLimitVar(db)
+	if !k.bakildi || yeni != k.karar {
+		if yeni {
+			log.Printf("MySQL Governor: processlist taraması açık (etkin db_max_query_seconds limiti var ya da okunamadı; %s aralık)", governorTikAraligi)
+		} else {
+			log.Printf("MySQL Governor: etkin db_max_query_seconds limiti yok — processlist taraması askıda (%s'de bir yeniden bakılır)", governorKararTTL)
+		}
+	}
+	k.bakildi, k.karar, k.bitis = true, yeni, simdi.Add(governorKararTTL)
+	return yeni
+}
+
 // SlowQueryWatchdog: MySQL Governor yavaş-sorgu bekçisi. Periyodik olarak processlist'i
 // tarar; bir tenant DB-kullanıcısının çalışan sorgusu planındaki db_max_query_seconds'ı
 // aşarsa KILL QUERY ile öldürür. root/panel/sistem kullanıcılarına DOKUNMAZ (yalnız
@@ -664,15 +808,18 @@ func SlowQueryWatchdog(ctx context.Context, db *sql.DB) {
 	if db == nil {
 		return
 	}
-	t := time.NewTicker(governorPollInterval)
+	t := time.NewTicker(governorTikAraligi)
 	defer t.Stop()
-	log.Printf("MySQL Governor: yavaş-sorgu watchdog başladı (%s tarama aralığı)", governorPollInterval)
+	log.Printf("MySQL Governor: yavaş-sorgu watchdog başladı (%s tarama aralığı)", governorTikAraligi)
+	var kapi governorKapisi
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			governorScanOnce(db)
+			if kapi.taramaGerekli(db, time.Now()) {
+				governorTara(db)
+			}
 		}
 	}
 }
@@ -751,6 +898,11 @@ func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
 	if provisioner.TenantSokumde(sk) {
 		return fmt.Errorf("%w: %s", provisioner.ErrTenantSokuldu, sk)
 	}
+	// Bayi kaynak havuzu üyeliği: dilim adı (SystemdSliceYaz) ve FPM drop-in'i buna bağlı —
+	// yeni hosting ilk başlatmada havuzun İÇİNDE doğsun diye EnableTenantFPM'den ÖNCE.
+	if _, e := bayikaynak.HostingUye(ctx, db, domainID); e != nil {
+		log.Printf("bayi havuz üyeliği %s: %v", sk, e)
+	}
 	l, err := PlanLimitleriGetir(ctx, db, domainID)
 	if err != nil {
 		return err
@@ -810,6 +962,11 @@ func UygulaHepsi(ctx context.Context, db *sql.DB, domainID int64) error {
 	if err := DomainKotaUygula(ctx, db, domainID); err != nil {
 		log.Printf("xfs user-quota %s: %v", sk, err)
 	}
+	// 4b) bayi disk havuzu: ev dizinini bayinin XFS proje kimliğine bağla (havuz yoksa no-op;
+	//     pquota kapalıysa yalnız atama yapılır, sınır yazılmaz).
+	if err := bayikaynak.HostingDisk(ctx, db, domainID); err != nil {
+		log.Printf("bayi disk havuzu %s: %v", sk, err)
+	}
 	// 5) MySQL Governor: plandan gelen native GRANT limitleri. Plan yoksa uygulanacak
 	//    limit de yok → atla (mevcut davranis korunur).
 	if !plansiz {
@@ -846,6 +1003,9 @@ func LimitleriReAssert(ctx context.Context, db *sql.DB, domainID int64) error {
 	// slice/FPM YAZMA — yetim birim doğardı (bkz provisioner.TeardownTenantFPM).
 	if provisioner.TenantSokumde(sk) {
 		return fmt.Errorf("%w: %s", provisioner.ErrTenantSokuldu, sk)
+	}
+	if _, e := bayikaynak.HostingUye(ctx, db, domainID); e != nil {
+		log.Printf("re-assert bayi havuz üyeliği %s: %v", sk, e)
 	}
 	l, err := PlanLimitleriGetir(ctx, db, domainID)
 	if err != nil {

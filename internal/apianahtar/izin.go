@@ -60,12 +60,16 @@ var Gruplar = []Grup{
 	// WHMCS müşteri tek tık girişi: kısa ömürlü, tek kullanımlık kod → müşteri paneli.
 	// Tek düzey ("sso:yaz"); varsayılan kapalı (her izin gibi). Müşteri parolasını
 	// DEĞİŞTİREMEZ (adına-oturum kuralları: AdinaYasak).
-	{Ad: GrupSSO, Etiket: "Müşteri paneline tek tık giriş", Aciklama: "Hosting müşterisini panele tek tıkla girdirme (60 sn geçerli, tek kullanımlık bağlantı); oturumda müşteri parolası değiştirilemez", Roller: []string{RolKok, RolBayi}, YalnizYaz: true},
+	{Ad: GrupSSO, Etiket: "Müşteri paneline tek tık giriş", Aciklama: "Hosting müşterisini panele tek tıkla girdirme (60 sn geçerli, tek kullanımlık bağlantı); oturumda müşteri parolası değiştirilemez. Kökte \"bayi\" (yazma) izniyle birlikte bayiyi de bayi paneline girdirir (oturumda API anahtarı ve 2FA yönetilemez)", Roller: []string{RolKok, RolBayi}, YalnizYaz: true},
 	{Ad: "plan", Etiket: "Hosting planları", Aciklama: "Hosting planlarını listeleme ve yönetme", Roller: []string{RolKok, RolBayi}},
 	{Ad: "dns", Etiket: "DNS", Aciklama: "Alan adı DNS kayıtları", Roller: []string{RolKok, RolBayi}},
 	{Ad: "veritabani", Etiket: "Veritabanları", Aciklama: "Veritabanı listeleme, oluşturma, silme", Roller: []string{RolKok, RolBayi}},
 	{Ad: "ssl", Etiket: "SSL", Aciklama: "SSL sertifikası durumu, alma ve kaldırma", Roller: []string{RolKok, RolBayi}},
 	{Ad: "yedek", Etiket: "Yedekler", Aciklama: "Hosting yedeği alma, listeleme, geri yükleme, zamanlama", Roller: []string{RolKok, RolBayi}},
+	// bayi.parola: bayi panel parolasını sıfırlama (WHMCS bayi ürünü ChangePassword). Genel
+	// "bayi" izni parola DEĞİŞTİRMEZ (2026-10-03); bu ayrı izin kullanıcı kararıyla
+	// 2026-10-13'te eklendi. Tek düzey, varsayılan kapalı, yalnız kök.
+	{Ad: GrupBayiParola, Etiket: "Bayi parolası sıfırla", Aciklama: "Bayinin panel parolasını sıfırlama (WHMCS 'Şifre değiştir'); sıfırlamada bayinin açık oturumları düşer ve API anahtarları iptal olur (yalnız kök)", Roller: []string{RolKok}, YalnizYaz: true},
 	{Ad: "bayi", Etiket: "Bayiler", Aciklama: "Bayi hesapları ve bayi paketleri (yalnız kök)", Roller: []string{RolKok}},
 	{Ad: "denetim", Etiket: "Denetim kaydı", Aciklama: "Denetim kaydını okuma (bayi yalnız kendi kayıtlarını görür)", Roller: []string{RolKok, RolBayi}, YalnizOku: true},
 	{Ad: "bildirim", Etiket: "Bildirimler", Aciklama: "Bildirimleri okuma", Roller: []string{RolKok, RolBayi}, YalnizOku: true},
@@ -79,6 +83,8 @@ const (
 	GrupDBParola  = "db.parola"
 	// GrupSSO: müşteri paneline tek tık giriş (POST /domains/{id}/sso).
 	GrupSSO = "sso"
+	// GrupBayiParola: bayi panel parolası sıfırlama (PUT /resellers/{id}/password).
+	GrupBayiParola = "bayi.parola"
 	// grupEskiParola: D4 ilk sürümündeki birleşik "parola" izni (FTP + DB). Yeni
 	// anahtarda SEÇİLEMEZ; DB'de kalmış satır okunurken IzinleriGoc ile iki yeni
 	// izne açılır (eski anahtarın yetkisi daralmaz/genişlemez: ikisi de parola).
@@ -109,6 +115,10 @@ var Rotalar = map[string]Kural{
 	"PUT " + p + "/domains/{id}/databases/users/{kullanici}/password": {GrupDBParola, Yaz},
 	// sso (oturum kodu basan uç — KimlikBenzeriIzinli'de gerekçeli; ayrı izin ister)
 	"POST " + p + "/domains/{id}/sso": {GrupSSO, Yaz},
+	// bayi paneline tek tık giriş: yalnız kök; işleyici ayrıca "bayi:yaz" ister (internal/bayisso)
+	"POST " + p + "/resellers/{id}/sso": {GrupSSO, Yaz},
+	// bayi parolası sıfırlama: yalnız kök, ayrı izin (KimlikBenzeriIzinli'de gerekçeli)
+	"PUT " + p + "/resellers/{id}/password": {GrupBayiParola, Yaz},
 	// plan
 	"GET " + p + "/plans":              {"plan", Oku},
 	"GET " + p + "/plans/{id}":         {"plan", Oku},
@@ -152,8 +162,10 @@ var Rotalar = map[string]Kural{
 	"PUT " + p + "/domains/{id}/backup-schedule":          {"yedek", Yaz},
 	// bayi (yalnız kök; PUT /resellers/{id} gövdesindeki parola alanı anahtarla
 	// REDDEDİLİR — reseller.Guncelle; kimlik devralma yolu olmasın)
-	"GET " + p + "/resellers":              {"bayi", Oku},
-	"GET " + p + "/reseller-plans":         {"bayi", Oku},
+	"GET " + p + "/resellers":      {"bayi", Oku},
+	"GET " + p + "/reseller-plans": {"bayi", Oku},
+	// Bayi kaynak havuzu durumu (CPU/RAM/disk limiti + anlık): WHMCS bayi ürünü sayfası.
+	"GET " + p + "/bayi-kaynak/{id}":       {"bayi", Oku},
 	"GET " + p + "/reseller-plans/{id}":    {"bayi", Oku},
 	"POST " + p + "/resellers":             {"bayi", Yaz},
 	"PUT " + p + "/resellers/{id}":         {"bayi", Yaz},
@@ -169,9 +181,12 @@ var Rotalar = map[string]Kural{
 // HerZaman: izin grubundan bağımsız her geçerli anahtara açık uçlar.
 //   - /api-anahtari/ben: "bağlantıyı test et" (anahtarın kendi meta verisi)
 //   - /kapi/adres: eski kapı kapanınca otomasyonun yeni adresi öğrenmesi
+//   - /kapi/portlar: otomasyonun ürün tipine göre müşteri/bayi panel adresini kurması
+//     (yalnız müşteri + bayi portu; yönetici portu dönmez)
 var HerZaman = map[string]bool{
 	"GET " + p + "/api-anahtari/ben": true,
 	"GET " + p + "/kapi/adres":       true,
+	"GET " + p + "/kapi/portlar":     true,
 }
 
 // KimlikUclari: jeton/oturum BASAN ya da kimlik/kimlik bilgisi DEĞİŞTİREN uçlar —
@@ -185,6 +200,7 @@ var KimlikUclari = map[string]bool{
 	"POST " + p + "/auth/login":                                                   true,
 	"POST " + p + "/musteri/login":                                                true,
 	"POST " + p + "/musteri/adina-giris":                                          true,
+	"POST " + p + "/auth/sso-giris":                                               true,
 	"POST " + p + "/musteri/adina-cikis":                                          true,
 	"POST " + p + "/domains/{id}/adina-oturum":                                    true,
 	"GET " + p + "/me":                                                            true,
@@ -237,6 +253,8 @@ var KimlikBenzeriIzinli = map[string]string{
 	"PUT " + p + "/domains/{id}/ftp-accounts/{kullanici}/password":    "hosting hesabının FTP hesabı parolası — ayrı 'ftp.parola' izni ister",
 	"PUT " + p + "/domains/{id}/databases/users/{kullanici}/password": "hosting veritabanı kullanıcısı parolası — ayrı 'db.parola' izni ister; FTP'ye dokunmaz",
 	"POST " + p + "/domains/{id}/sso":                                 "WHMCS müşteri tek tık girişi: 60 sn, TEK KULLANIMLIK kod (adına-oturum tüketicisi; müşteri parolası değiştirilemez, askıda 409, denetimli, anahtar başına hız sınırı) — ayrı 'sso' izni ister, varsayılan kapalı",
+	"POST " + p + "/resellers/{id}/sso":                               "WHMCS bayi tek tık girişi: yalnız kök anahtarı, 'sso' + 'bayi:yaz' izni; 60 sn, TEK KULLANIMLIK kod (bayi kapısında POST /auth/sso-giris tüketir); oturum SSO damgalı: API anahtarı ve 2FA yönetilemez, askıda 409, denetimli, anahtar başına hız sınırı",
+	"PUT " + p + "/resellers/{id}/password":                           "WHMCS bayi ChangePassword: yalnız kök anahtarı, AYRI 'bayi.parola' izni (varsayılan kapalı; kullanıcı kararı 2026-10-13); sıfırlamada bayinin oturumları düşer, API anahtarları iptal olur, denetimli. Genel 'bayi' izni parola değiştirmez",
 	"GET " + p + "/kapi/adres":                                        "yalnız yeni panel adresi döner, jeton basmaz",
 	"GET " + p + "/api-anahtari/ben":                                  "anahtarın kendi meta verisi (gizli/özet DÖNMEZ)",
 }

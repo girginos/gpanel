@@ -190,14 +190,16 @@ export function aracEslesir(a: MusteriArac, sozcukler: string[]): boolean {
 
 export const aramaSozcukleri = (q: string): string[] => sade(q.trim()).split(/\s+/).filter(Boolean)
 
-// Eklenti kapısı — ana sayfa ve üst çubuk araması AYNI süzgeci kullanır (GET /eklentiler,
-// müşteriye yalnız açık olanlar). Liste yoksa (henüz gelmedi / alınamadı) eklenti aracı
-// önerilmez. Mail: yalnız aktifken araçlar; çalıştırıcı: kuruluysa (askıyı sayfası söyler).
+// Eklenti kapısı — ana sayfa ve üst çubuk araması AYNI süzgeci kullanır. Kaynak: GET /eklentiler;
+// müşteri için bu liste YALNIZ panelin müşteriye açtığı (cp_eklentiler.musteri_erisim=1, eklentinin
+// kendi /saglik bildirimiyle) eklentileri içerir. Kural mail ve çalıştırıcı için AYNIDIR: eklenti
+// listede VE aktif olmalı. Liste yoksa (henüz gelmedi / alınamadı) eklenti aracı önerilmez.
 export function eklentiKapisi(liste: ReadonlyArray<{ ad: string; aktif: boolean }> | null): (a: MusteriArac) => boolean {
   const l = liste ?? []
-  const mailAktif = l.some((e) => e.ad === 'mail' && e.aktif)
-  const calistiriciKurulu = l.some((e) => e.ad === 'calistirici')
-  return (a) => !a.eklenti || (a.eklenti === 'mail' ? mailAktif : calistiriciKurulu)
+  const aktif = (ad: AracEklentisi): boolean => l.some((e) => e.ad === ad && e.aktif)
+  const mailAktif = aktif('mail')
+  const calistiriciAktif = aktif('calistirici')
+  return (a) => !a.eklenti || (a.eklenti === 'mail' ? mailAktif : calistiriciAktif)
 }
 
 // Aracın açılacağı yol. Alt alan adı seçiliyse ve aracın alt alan sayfası varsa oraya.

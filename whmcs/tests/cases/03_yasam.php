@@ -146,15 +146,17 @@ test('parola degistir: zayif parola panele GITMEDEN reddedilir', function () {
     esit(0, $p->sayac('PUT /domains/{id}/ftp/password'));
 });
 
-test('parola degistir: ftp.parola izni yoksa 403 mesaji izin grubunu soyler; bayi urununde acik hata', function () {
+test('parola degistir: ftp.parola izni yoksa 403 mesaji izin grubunu soyler; bayi urununde bayi.parola izni yoksa da', function () {
     $d = bagliHosting($p);
     $p->izinler = ['hesap:yaz'];
     $s = gpanel_ChangePassword(params(['password' => PW_YENI]));
     icerir($s, "'ftp.parola' izni");
     $b = bagliBayi($p2);
+    $p2->izinler = ['hesap:yaz', 'bayi:yaz', 'sso:yaz'];
     $s = gpanel_ChangePassword(params(['configoption1' => 'bayi', 'password' => PW_YENI]));
-    icerir($s, 'Bayi hesabının parolası');
-    esit(0, $p2->sayac('PUT /resellers/{id}'));
+    icerir($s, "'bayi.parola' izni");
+    esit(0, $p2->sayac('PUT /resellers/{id}'), 'genel bayi guncelleme ucu kullanilmaz');
+    dogru(!isset($p2->bayiler[$b['id']]['_parola']));
 });
 
 test('parola degistir: panel 400 (parola kurali) mesaji aynen', function () {

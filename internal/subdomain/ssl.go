@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"girginospanel/internal/httpx"
+	"girginospanel/internal/middleware"
 	"girginospanel/internal/nginxset"
 	"girginospanel/internal/provisioner"
 
@@ -103,6 +104,12 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 	}
 	docroot := docrootOf(sk, tamAd)
 	crt, key := certYolu(sk, tamAd)
+	// Denetim: yan etki burada başlar; sonuç tek satırda (hosting ssl.kur/ssl.kaldir ile aynı).
+	uid, kul := middleware.Aktor(r)
+	basarili := false
+	defer func() {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "subdomain.ssl.kur", tamAd, "tip="+tip, id, basarili)
+	}()
 	_ = os.MkdirAll(sslDir(sk), 0o750)
 
 	switch tip {
@@ -159,6 +166,7 @@ func (h *Handlers) SSLKur(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.ssl", id, err))
 		return
 	}
+	basarili = true
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "tam_ad": tamAd, "tip": tip})
 }
 
@@ -178,6 +186,11 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusNotFound, "subdomain bulunamadı")
 		return
 	}
+	uid, kul := middleware.Aktor(r)
+	basarili := false
+	defer func() {
+		httpx.DenetimDomain(h.DB, r, uid, kul, "subdomain.ssl.kaldir", tamAd, "", id, basarili)
+	}()
 	crt, key := certYolu(sk, tamAd)
 	_ = os.Remove(crt)
 	_ = os.Remove(key)
@@ -189,6 +202,7 @@ func (h *Handlers) SSLKaldir(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, nginxset.SunucuHatasi(r, "subdomain.ssl-kaldir", id, err))
 		return
 	}
+	basarili = true
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

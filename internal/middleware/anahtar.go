@@ -17,6 +17,7 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strconv"
 	"sync"
@@ -62,6 +63,12 @@ func YalnizOturum(next http.Handler) http.Handler {
 			httpx.WriteError(w, http.StatusForbidden, "bu işlem API anahtarıyla yapılamaz")
 			return
 		}
+		// API anahtarıyla açılmış (tek tık / SSO) bayi oturumu da anahtar türevidir: anahtar
+		// yönetimi ve 2FA burada yok (bkz. internal/bayisso).
+		if c := ClaimsFrom(r); c != nil && c.SSO {
+			httpx.WriteError(w, http.StatusForbidden, "bu işlem tek tıkla (API anahtarıyla) açılan oturumda yapılamaz — parolanızla giriş yapın")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -89,9 +96,11 @@ var (
 		}
 		return apianahtar.OnekleGetir(ctx, scopeDB, onek)
 	}
-	anahtarIstemciIP   = httpx.ClientIPKesin
-	anahtarSimdi       = time.Now
-	anahtarSonKullanim = func(id int64, ip string) { apianahtar.SonKullanimYaz(scopeDB, id, ip) }
+	anahtarIstemciIP = httpx.ClientIPKesin
+	anahtarSimdi     = time.Now
+	// anahtarSonKullanim: goroutine'de çalışır; DB İSTEK sırasında yakalanıp parametre olarak gelir. Global
+	// scopeDB'yi goroutine içinde okumak, Init ile yarışırdı (testlerde -race: bayisso kararsız testi).
+	anahtarSonKullanim = func(db *sql.DB, id int64, ip string) { apianahtar.SonKullanimYaz(db, id, ip) }
 	anahtarRedDenetim  = func(r *http.Request, k *apianahtar.Kayit, neden string) {
 		kapsam := int64(0)
 		if k.SahipRol == apianahtar.RolBayi {
@@ -297,7 +306,7 @@ func anahtarIstek(w http.ResponseWriter, r *http.Request, next http.Handler, kim
 		return
 	}
 	if anahtarSonKullanimSeyrek(k.ID, simdi) {
-		go anahtarSonKullanim(k.ID, ip)
+		go anahtarSonKullanim(scopeDB, k.ID, ip) // scopeDB burada (istek goroutine'inde) okunur
 	}
 	bilgi := &AnahtarBilgi{ID: k.ID, Ad: k.Ad, Onek: k.Onek, Son4: k.Son4, Rol: k.SahipRol,
 		SahipID: k.SahipID, Izinler: k.Izinler, SonKullanma: k.SonKullanma}

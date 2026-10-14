@@ -34,6 +34,15 @@ const TUR_ETIKET: Record<LogHedefi['tur'], string> = { ana: 'ana', ek: 'ek alan 
 
 
 const DLOGS_EN: Record<string, string> = {
+  "Erişim (access)": "Access",
+  "Hata (error)": "Error",
+  "PHP (yazılım hataları)": "PHP (application errors)",
+  "Kaynak": "Source",
+  "Süreç": "Process",
+  "PHP uygulama hataları (Fatal / Warning) ve PHP-FPM uyarıları (işçi havuzu doldu, istek zaman aşımı) bu sekmede değil, “PHP (yazılım hataları)” sekmesindedir.":
+    "PHP application errors (Fatal / Warning) and PHP-FPM warnings (worker pool full, request timeout) are not here — see the “PHP (application errors)” tab.",
+  "Hesabın PHP-FPM günlüğü: hesaptaki tüm alan adlarının PHP hataları ve PHP-FPM uyarıları burada toplanır.":
+    "The account's PHP-FPM log: PHP errors and PHP-FPM warnings of every domain in this account are collected here.",
   "İşlem başarısız": "Operation failed",
   "(log dosyası boş veya henüz oluşmadı)": "(log file is empty or not created yet)",
   "Ara — IP, yol, durum kodu, tarayıcı…": "Search — IP, path, status code, browser…",
@@ -123,6 +132,7 @@ export default function DomainLogsPage() {
   }
 
   const hataTab = aktif === 'error' || aktif.includes('error') || aktif.includes('hata')
+  const phpTab = aktif === 'php'
 
   // İstemci tarafı arama: ham satırda büyük/küçük harf duyarsız substring
   const gorunen = useMemo(() => {
@@ -282,7 +292,7 @@ export default function DomainLogsPage() {
                 : 'border-transparent text-slate-500 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}
           >
-            {d.etiket}
+            {cevir(d.etiket)}
             {d.mevcut && (
               <span className="ml-2 text-[10px] font-mono text-slate-400 dark:text-slate-500">
                 {formatBoyut(d.boyut_b)}
@@ -376,6 +386,14 @@ export default function DomainLogsPage() {
         )}
       </div>
 
+      {(hataTab || phpTab) && (
+        <p className="mb-2 text-xs text-slate-600 dark:text-slate-400" data-testid="log-sekme-notu">
+          {phpTab
+            ? cevir("Hesabın PHP-FPM günlüğü: hesaptaki tüm alan adlarının PHP hataları ve PHP-FPM uyarıları burada toplanır.")
+            : cevir("PHP uygulama hataları (Fatal / Warning) ve PHP-FPM uyarıları (işçi havuzu doldu, istek zaman aşımı) bu sekmede değil, “PHP (yazılım hataları)” sekmesindedir.")}
+        </p>
+      )}
+
       {/* Log gövdesi */}
       <div
         ref={scrollRef}
@@ -391,6 +409,8 @@ export default function DomainLogsPage() {
               <div key={i} className={renkSec(s)}>{s}</div>
             ))}
           </div>
+        ) : phpTab ? (
+          <PhpTablosu satirlar={gorunen} />
         ) : hataTab ? (
           <ErrorTablosu satirlar={gorunen} />
         ) : (
@@ -592,6 +612,111 @@ function ErrorTablosu({ satirlar }: { satirlar: string[] }) {
   )
 }
 
+/* ---------------- PHP (kiracı PHP-FPM günlüğü) tablosu ---------------- */
+
+// [12-Oct-2026 12:24:19] WARNING: [pool c_x] child 1924495 said into stderr: "PHP message: PHP Fatal error: ..."
+const FPM_RE = /^\[(\d{2})-(\w{3})-(\d{4}) (\d{2}:\d{2}:\d{2})\] (\w+): (.*)$/
+const STDERR_RE = /^\[pool [^\]]+\] child (\d+) said into stderr: "(.*?)"?$/
+const AY: Record<string, string> = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' }
+
+type PhpGiris = { zaman: string; seviye: string; kaynak: string; mesaj: string; cocuk: string; devam: string[]; ham: string[] }
+
+// phpSeviye: PHP'nin kendi hata türü öncelikli; yoksa PHP-FPM düzeyi.
+function phpSeviye(msg: string, fpm: string): string {
+  const m = /^PHP (Fatal error|Parse error|Recoverable fatal error|Warning|Notice|Deprecated|Strict Standards)\b/i.exec(msg)
+  if (m) {
+    const t = m[1].toLowerCase()
+    if (t.includes('fatal') || t.includes('parse')) return 'fatal'
+    return t === 'warning' ? 'warn' : 'notice'
+  }
+  const f = fpm.toLowerCase()
+  if (f === 'warning') return 'warn'
+  if (f === 'error' || f === 'alert') return 'error'
+  return f === 'notice' ? 'notice' : f
+}
+
+// devamMi: PHP-FPM uzun stderr çıktısını satırlara böler (yığın izi, "thrown in").
+function devamMi(msg: string): boolean {
+  return /^(#\d+ |Stack trace:|\s*thrown in |PHP Stack trace:|PHP\s+\d+\. )/.test(msg)
+}
+
+function phpGrupla(satirlar: string[]): PhpGiris[] {
+  const out: PhpGiris[] = []
+  for (const s of satirlar) {
+    const m = FPM_RE.exec(s)
+    if (!m) {
+      if (out.length) { out[out.length - 1].devam.push(s); out[out.length - 1].ham.push(s) }
+      else out.push({ zaman: '', seviye: '', kaynak: '', mesaj: s, cocuk: '', devam: [], ham: [s] })
+      continue
+    }
+    const zaman = `${AY[m[2]] || m[2]}/${m[1]} ${m[4]}`
+    const st = STDERR_RE.exec(m[6])
+    const mesaj = st ? st[2].replace(/^PHP message:\s*/i, '') : m[6].replace(/^\[pool [^\]]+\]\s*/, '')
+    const cocuk = st ? st[1] : ''
+    const onceki = out[out.length - 1]
+    if (st && onceki && onceki.cocuk === cocuk && onceki.zaman === zaman && devamMi(mesaj)) {
+      onceki.devam.push(mesaj)
+      onceki.ham.push(s)
+      continue
+    }
+    const kaynak = !st ? 'FPM' : /^PHP /i.test(mesaj) || /^PHP message:/i.test(st[2]) ? 'PHP' : 'Süreç'
+    // İşletimsel sorunlar (işçi havuzu doldu, istek zaman aşımı, işçi öldürüldü/çöktü) vurgulanır.
+    const kritik = !st && /execution timed out|reached max_children|exited on signal (9|11)\b/i.test(mesaj)
+    out.push({ zaman, seviye: kritik ? 'error' : phpSeviye(mesaj, m[5]), kaynak, mesaj, cocuk, devam: [], ham: [s] })
+  }
+  return out
+}
+
+function PhpTablosu({ satirlar }: { satirlar: string[] }) {
+  const girisler = useMemo(() => phpGrupla(satirlar), [satirlar])
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs border-collapse min-w-[640px]" data-testid="php-log-tablosu">
+      <thead className="sticky top-0 z-10 bg-slate-100/95 dark:bg-dark-800/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-500 border-b border-slate-200 dark:border-dark-600">
+        <tr>
+          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Zaman")}</th>
+          <th className="text-left font-medium px-3 py-2">{cevir("Seviye")}</th>
+          <th className="text-left font-medium px-3 py-2 whitespace-nowrap">{cevir("Kaynak")}</th>
+          <th className="text-left font-medium px-3 py-2 w-full">{cevir("Mesaj")}</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-200 dark:divide-dark-600/70">
+        {girisler.map((g, i) => {
+          if (!g.zaman) {
+            return (
+              <tr key={i}>
+                <td colSpan={4} className="px-3 py-1.5 font-mono text-slate-600 dark:text-slate-500 break-all whitespace-pre-wrap">{g.ham.join('\n')}</td>
+              </tr>
+            )
+          }
+          const konum = konumBul([g.mesaj, ...g.devam])
+          return (
+            <tr key={i} className="hover:bg-slate-100 dark:hover:bg-dark-700/40">
+              <td className="px-3 py-1.5 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">{g.zaman}</td>
+              <td className="px-3 py-1.5">
+                <span className={`inline-block px-1.5 py-0.5 rounded font-mono font-semibold text-[10px] ${seviyeRenk(g.seviye)}`}>{g.seviye}</span>
+              </td>
+              <td className="px-3 py-1.5 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">{cevir(g.kaynak)}</td>
+              <td className="px-3 py-1.5 font-mono text-slate-800 dark:text-slate-200 max-w-0">
+                <div className="flex items-center gap-2 min-w-0" title={[g.mesaj, ...g.devam].join('\n')}>
+                  <span className="truncate">{ozetMesaj(g.mesaj)}</span>
+                  {g.devam.length > 0 && (
+                    <span className="shrink-0 text-[10px] text-slate-500 dark:text-slate-400">+{g.devam.length}</span>
+                  )}
+                  {konum && (
+                    <span className="shrink-0 font-mono text-[11px] text-amber-800 dark:text-amber-400/90 bg-amber-100 dark:bg-amber-500/10 rounded px-1.5 py-0.5">{konum}</span>
+                  )}
+                </div>
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+    </div>
+  )
+}
+
 /* ---------------- Yardımcılar ---------------- */
 
 function methodRenk(m: string): string {
@@ -617,7 +742,7 @@ function durumRenk(s: number): string {
 
 function seviyeRenk(s: string): string {
   const l = s.toLowerCase()
-  if (l === 'emerg' || l === 'alert' || l === 'crit' || l === 'error') return 'bg-red-100 text-red-800 dark:bg-red-900/70 dark:text-red-200'
+  if (l === 'emerg' || l === 'alert' || l === 'crit' || l === 'error' || l === 'fatal') return 'bg-red-100 text-red-800 dark:bg-red-900/70 dark:text-red-200'
   if (l === 'warn') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/70 dark:text-amber-200'
   if (l === 'notice') return 'bg-sky-100 text-sky-800 dark:bg-sky-900/70 dark:text-sky-200'
   return 'bg-slate-200 text-slate-700 dark:bg-dark-600 dark:text-slate-300'
@@ -662,6 +787,8 @@ function renkSec(s: string): string {
   if (/\s5\d\d\s/.test(s)) return 'text-red-700 dark:text-red-400'
   if (/\s4\d\d\s/.test(s)) return 'text-amber-700 dark:text-amber-400'
   if (/\[error\]|\[crit\]|\[emerg\]|\[alert\]/i.test(s)) return 'text-red-700 dark:text-red-400'
+  if (/PHP (Fatal|Parse) error|\] (ERROR|ALERT): /.test(s)) return 'text-red-700 dark:text-red-400'
+  if (/PHP Warning|\] WARNING: /.test(s)) return 'text-amber-700 dark:text-amber-400'
   if (/\[warn\]/i.test(s)) return 'text-amber-700 dark:text-amber-400'
   if (/\[notice\]/i.test(s)) return 'text-sky-700 dark:text-sky-400'
   return 'text-slate-700 dark:text-slate-300'

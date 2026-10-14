@@ -10,10 +10,13 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { useToast } from '@/components/Toast'
 import { Button, butonSinifi } from '@/components/ui'
 import { Ikon, I } from '@/components/Ikon'
+import KaynakHavuzAlanlari from '@/components/KaynakHavuzAlanlari'
 
 type Paket = {
   id?: number; ad: string; aciklama: string
   max_domain: number; max_disk_mb: number; max_trafik_mb: number
+  // Bayi kaynak havuzu (CPU/RAM/G-Ç; disk havuzu = max_disk_mb). 0 = sınırsız. Bayiye KOPYALANIR.
+  cpu_cekirdek: number | string; ram_mb: number | string; io_agirlik: number | string
   // Posta TAVANLARI — domain basina ust sinir (havuz DEGIL). 0 = sinirsiz.
   mail_max_email: number; mail_saatlik_limit: number; mail_kutu_kota_mb: number
   fiyat_kurus: number
@@ -27,6 +30,7 @@ type Paket = {
 const BOS: Paket = {
   ad: '', aciklama: '',
   max_domain: 10, max_disk_mb: 10240, max_trafik_mb: 102400, fiyat_kurus: 0,
+  cpu_cekirdek: 0, ram_mb: 0, io_agirlik: 0,
   mail_max_email: 0, mail_saatlik_limit: 0, mail_kutu_kota_mb: 0,
   asim_ilkesi: 'disk_trafik', asim_bildirim: true, fazla_satis: false, varsayilan: false,
 }
@@ -84,6 +88,7 @@ const BPDUZ_EN: Record<string, string> = {
   "Tüm kaynaklarda fazla kullanıma izin verilir": "Overuse is allowed for all resources",
   "Varsayılan plan — yeni bayi oluştururken önceden seçili gelir.": "Default plan — pre-selected when creating a new reseller.",
   "Önerilmez: bayi paketinde tanımlı hiçbir limit sert biçimde uygulanmaz.": "Not recommended: none of the limits defined in the reseller package are hard-enforced.",
+  "CPU, RAM ve G/Ç ağırlığı bayinin tüm hostinglerinin paylaştığı fiziksel havuzdur; disk havuzu yukarıdaki Disk limitidir. Disk için XFS proje kotası etkin değilse havuz yalnız ölçülür ve uyarı verir, sert sınır uygulanmaz.": "CPU, RAM and I/O weight are a physical pool shared by all of the reseller's hostings; the disk pool is the Disk limit above. If the XFS project quota is not enabled for disk, the pool is only measured and warns; no hard limit is enforced.",
 }
 const cevir = (tr: string): string => (i18n.language === "en" ? (BPDUZ_EN[tr] || ORTAK_EN[tr] || tr) : tr)
 
@@ -129,8 +134,10 @@ export default function BayiPlaniDuzenlePage() {
     e.preventDefault()
     setKaydediyor(true); setHata(null)
     try {
-      if (yeni) await api.post('/reseller-plans', p)
-      else await api.put(`/reseller-plans/${id}`, p)
+      // Sayı alanları yazılırken metin olabilir; sunucu sayı bekler.
+      const govde = { ...p, cpu_cekirdek: Number(p.cpu_cekirdek) || 0, ram_mb: Number(p.ram_mb) || 0, io_agirlik: Number(p.io_agirlik) || 0 }
+      if (yeni) await api.post('/reseller-plans', govde)
+      else await api.put(`/reseller-plans/${id}`, govde)
       nav('/bayi-planlari')
     } catch (err) {
       const m = apiHata(err, cevir('Kaydedilemedi'))
@@ -190,6 +197,8 @@ export default function BayiPlaniDuzenlePage() {
               <input type="number" min={0} className={inp} value={p.max_trafik_mb}
                      onChange={e => S('max_trafik_mb', Number(e.target.value))} />
             </Alan>
+            <KaynakHavuzAlanlari deger={p} onDegis={k => setP({ ...p, ...k })}
+              inp={inp} lbl="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1" />
             {/* 🔴 Bu üç alan TAVAN'dır, havuz DEĞİL: yukarıdaki domain/disk/trafik
                 bayinin toplam kaynağıdır ve tükenir; aşağıdakiler ise bayinin
                 TEK BİR domaine atayabileceği en yüksek değerdir, tükenmez.
@@ -211,6 +220,9 @@ export default function BayiPlaniDuzenlePage() {
               </>
             )}
           </div>
+          <p className="mt-3 text-[11px] text-slate-400 dark:text-slate-500 max-w-2xl">
+            {cevir("CPU, RAM ve G/Ç ağırlığı bayinin tüm hostinglerinin paylaştığı fiziksel havuzdur; disk havuzu yukarıdaki Disk limitidir. Disk için XFS proje kotası etkin değilse havuz yalnız ölçülür ve uyarı verir, sert sınır uygulanmaz.")}
+          </p>
         </Bolum>
 
         <Bolum baslik={cevir("Fazla kullanım ilkesi")} alt={cevir("Bayinin hesapları limitleri aştığında ne olacağını belirler.")}>

@@ -127,12 +127,13 @@ final class Ceviri
         'Ürün tipi' => 'Product type',
         'Hosting hesabı' => 'Hosting account',
         'Bayi (reseller) hesabı' => 'Reseller account',
-        'Bayi ürünü için API anahtarı KÖK kullanıcıya ait olmalı ve "bayi" iznine sahip olmalı.'
-            => 'For reseller products the API key must belong to the root user and have the "bayi" (reseller) permission.',
+        'WHMCS ürün türü "Reseller Account" ise bu alan ne olursa olsun bayi hesabı açılır. Bayi ürünü için API anahtarı KÖK kullanıcıya ait olmalı ve "bayi" iznine sahip olmalı.'
+            => 'If the WHMCS product type is "Reseller Account", a reseller account is created regardless of this field. For reseller products the API key must belong to the ROOT user and have the "bayi" (reseller) permission.',
         'Panel planı (hosting)' => 'Panel plan (hosting)',
         'Plan ID ya da tam adı. Boşsa panelin varsayılan planı.' => 'Plan ID or exact name. Empty uses the panel\'s default plan.',
         'PHP sürümü' => 'PHP version',
-        'Örn. 8.3. Boşsa plandan/panelden miras.' => 'E.g. 8.3. Empty inherits from the plan/panel.',
+        'Seçilmezse plandan/panelden miras.' => 'If not selected, inherits from the plan/panel.',
+        'Plandan / panelden' => 'From plan / panel',
         'Bayi paketi (bayi ürünü)' => 'Reseller package (reseller product)',
         'Bayi paketi ID ya da tam adı (yalnız Ürün tipi = Bayi).' => 'Reseller package ID or exact name (only when Product type = Reseller).',
         'Varsayılan veritabanı aç' => 'Create default database',
@@ -141,8 +142,8 @@ final class Ceviri
         'DİKKAT: kendi imzalı sertifikada araya girme (MITM) saldırısına açar; API anahtarı ele geçirilebilir. Yalnız güvenilir ağda ve geçici olarak kullanın. Sunucu ayarında Access Hash = tls-dogrulama-kapali de aynı işi yapar.'
             => 'WARNING: with a self-signed certificate this allows man-in-the-middle (MITM) attacks; the API key can be stolen. Use only on a trusted network and only temporarily. Access Hash = tls-dogrulama-kapali in the server settings does the same.',
         'Panel adresi (isteğe bağlı)' => 'Panel URL (optional)',
-        'https://panel.ornek.com:PORT/ — müşteri/bayi kapısı. SSO yokken düz bağlantı olarak kullanılır; bayi ürününde zorunludur.'
-            => 'https://panel.example.com:PORT/ — client/reseller gate. Used as a plain link when single sign-on is unavailable; required for reseller products.',
+        'Boş bırakılabilir: adres panelden alınır — hosting ürününde müşteri kapısı, bayi ürününde bayi kapısı (gPanel 0.3.0-20261013+). Başka bir ad/port için https://panel.ornek.com:PORT/ girin.'
+            => 'Can be left empty: the address is taken from the panel — the client gate for a hosting product, the reseller gate for a reseller product (gPanel 0.3.0-20261013+). Enter https://panel.example.com:PORT/ to use a different name/port.',
         'Mevcut hesabı bağla' => 'Link existing account',
         'Panelde zaten var olan alan adı/bayi bulunursa hizmete BAĞLA. Kapalıyken (önerilen) başka müşterinin hesabını devralma engellenir.'
             => 'If the domain/reseller already exists on the panel, LINK it to the service. When off (recommended), taking over another client\'s account is prevented.',
@@ -208,13 +209,17 @@ final class Ceviri
             => "Reseller '{0}' already exists on the panel; it was not linked automatically ('Link existing account' is off).",
         "Bayi '{0}' başka bir WHMCS hizmetine bağlı." => "Reseller '{0}' is linked to another WHMCS service.",
         'Panel bayiyi oluşturdu ama kimlik döndürmedi.' => 'The panel created the reseller but returned no ID.',
-        'Bayi hesabının parolası panel API anahtarıyla değiştirilemez (panel kısıtı). Bayi parolayı panelden değiştirmeli.'
-            => 'A reseller account password cannot be changed with the panel API key (panel restriction). The reseller must change it in the panel.',
-        'Bağlantı kuruldu ama API anahtarında izin eksik: {0} (isteğe bağlı: ftp.parola:yaz, sso, bayi).'
-            => 'Connected, but the API key is missing permissions: {0} (optional: ftp.parola:yaz, sso, bayi).',
+        "Bayi açıldı ama '{0}' alan adı panelde başka bir hesaba ait; bayinin hostingi açılamadı."
+            => "The reseller was created, but the domain '{0}' belongs to another account on the panel; the reseller's hosting account could not be created.",
+        'Bu bayi hizmetinin hosting hesabı yok.' => 'This reseller service has no hosting account.',
+        'Bayi parolası değişti ama hosting parolası değiştirilemedi: {0}'
+            => 'The reseller password was changed, but the hosting password could not be changed: {0}',
+        'Bu gPanel sürümü bayi şifre sıfırlamayı desteklemiyor; paneli güncelleyin. Bayi şifresini panelde Profil sayfasından değiştirebilir.'
+            => 'This gPanel version does not support resetting reseller passwords; update the panel. The reseller can change the password on the Profile page in the panel.',
+        'Bağlantı kuruldu ama API anahtarında izin eksik: {0} (isteğe bağlı: ftp.parola:yaz, sso, bayi, bayi.parola).'
+            => 'Connected, but the API key is missing permissions: {0} (optional: ftp.parola:yaz, sso, bayi, bayi.parola).',
         "Bağlantı kuruldu ama bu port gPanel'in ESKİ (geçiş dönemi) kapısı; yeni yönetici kapısı portu: {0}. Eski kapı kapanınca bağlantı kesilir — sunucu ayarındaki portu {0} yapın."
             => "Connected, but this port is gPanel's OLD (transition period) gate; the new admin gate port is {0}. The connection will break when the old gate closes — set the port in the server settings to {0}.",
-        'Bayi hesabı için tek tıkla giriş ucu yok.' => 'Single sign-on is not available for reseller accounts.',
         'Panel geçerli bir giriş adresi döndürmedi.' => 'The panel did not return a valid login URL.',
         "Ürün ayarındaki 'Panel adresi' geçersiz (https://alan:PORT/ biçiminde olmalı)." => "The 'Panel URL' product setting is invalid (must be https://domain:PORT/).",
         "Panelin döndürdüğü giriş adresi beklenen ana bilgisayara ait değil (güvenlik nedeniyle reddedildi). Ürün ayarlarında 'Panel adresi' alanına müşteri kapısını (https://alan:PORT/) girin."

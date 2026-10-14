@@ -65,14 +65,51 @@ case "$SAGLIK_SN" in ''|*[!0-9]*) SAGLIK_SN=120 ;; esac
 SAGLIK_KARARLI=5
 SAGLIK_GECEN=""                               # sağlık penceresinde geçen süre (rapor için)
 
+# Usage text (English). The Turkish header comment above is developer documentation.
+kullanim() {
+  cat <<'KULLANIM'
+girginospanel-update — safely updates GirginOSPanel in place from our own release
+infrastructure (sha256 verified). GitHub is not on the default path.
+
+Usage:
+  girginospanel-update [--dry-run] [--force] [--branch <name>]
+
+Options:
+  --dry-run        only show what would be done; change nothing
+  --force          re-apply even if the package is identical to the installed one
+  --branch <name>  branch used by the GitHub emergency fallback (default: main)
+  -h, --help       show this help
+
+Environment:
+  GOSP_AYNALAR           space-separated mirror base URLs (default: https://surum.girginos.io/panel)
+  GOSP_GITHUB_YEDEK      1 = fall back to GitHub when every mirror fails
+  GOSP_GERI_DONUS_ZORLA  1 = allow installing a package older than the database schema
+  GOSP_SIR_YENILE        0 = skip the one-time panel secret rotation
+
+Preserved (never touched): /etc/girginospanel/env (JWT/DB/Redis secrets), the MariaDB `panel`
+database and all customer data, the /home/c_* sites. New migrations are applied automatically
+and idempotently when the service restarts.
+
+Database safety:
+  - A full dump of the panel DB is taken BEFORE migrations (/var/backups/girginospanel/db).
+  - Fail-closed: if the dump cannot be taken, the update does not start at all.
+  - If the new version does not start healthy, the update rolls back to the old binary and
+    the pre-update database.
+  - A daily 03:30 backup timer (girginospanel-db-backup.timer) is installed and enabled.
+
+Exit codes: 0 = success (or already up to date), 1 = failure / verification failed / rolled back,
+2 = invalid argument.
+KULLANIM
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
     --force) FORCE=1 ;;
     --branch) BRANCH="$2"; shift ;;
     --branch=*) BRANCH="${1#*=}" ;;
-    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "bilinmeyen arg: $1" >&2; exit 2 ;;
+    -h|--help) kullanim; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
@@ -117,9 +154,9 @@ paket_gocleri() {
 # zaten fail-closed'dur ve defteri olmayan DB 0120'yi hiç görmemiştir.
 geri_donus_kapisi() {
   local uygulanan paket g eksik=""
-  command -v mysql >/dev/null 2>&1 || { warn "geri dönüş kapısı: mysql yok — sürüm tabanı denetlenemedi"; return 0; }
+  command -v mysql >/dev/null 2>&1 || { warn "downgrade guard: mysql not found — version floor could not be checked"; return 0; }
   uygulanan=$(mysql -N -e "SELECT dosya FROM \`$GOSP_DB_ADI\`.schema_migrations" 2>/dev/null) \
-    || { warn "geri dönüş kapısı: göç defteri okunamadı — sürüm tabanı denetlenemedi"; return 0; }
+    || { warn "downgrade guard: migration ledger could not be read — version floor could not be checked"; return 0; }
   paket=$(paket_gocleri "$1") || paket=""
   for g in $GERI_DONUSSUZ_GOCLER; do
     grep -qxF -- "$g" <<<"$uygulanan" || continue
@@ -128,10 +165,10 @@ geri_donus_kapisi() {
   done
   [ -z "$eksik" ] && return 0
   if [ "${GOSP_GERI_DONUS_ZORLA:-0}" = 1 ]; then
-    warn "🔴 GERİ DÖNÜŞ ZORLANDI (GOSP_GERI_DONUS_ZORLA=1): paket DB'de uygulanmış geri dönüşsüz göçleri içermiyor:$eksik — eski ikili hostinge özel limitleri GÖRMEZ; bu hostingler katalog planının limitlerine düşer"
+    warn "🔴 DOWNGRADE FORCED (GOSP_GERI_DONUS_ZORLA=1): the package does not contain the irreversible migrations already applied to the DB:$eksik — the older binary will NOT see per-hosting custom limits; those hostings fall back to their catalog plan limits"
     return 0
   fi
-  die "GERİ DÖNÜŞ REDDEDİLDİ: bu paket DB'de uygulanmış geri dönüşsüz göçleri içermiyor:$eksik — paket bu DB'den ESKİ. Eski ikili hostinge özel limitleri (hosting_limit_ust) görmez ve açılışta cgroup/FPM/kota/governor limitlerini katalog planına düşürür. Hiçbir şeye dokunulmadı. Güncel/yeni bir paket kurun; sonucu bilerek kabul ediyorsanız: GOSP_GERI_DONUS_ZORLA=1"
+  die "DOWNGRADE REFUSED: this package does not contain the irreversible migrations already applied to the DB:$eksik — the package is OLDER than this DB. The older binary cannot see per-hosting custom limits (hosting_limit_ust) and at startup would reset cgroup/FPM/quota/governor limits to the catalog plan. Nothing was touched. Install a current/newer package; to accept the consequences knowingly: GOSP_GERI_DONUS_ZORLA=1"
 }
 
 # yeni_tablolari_kenara_al <güncelleme öncesi dump.sql.gz> — geri dönüşte, dump GERİ
@@ -147,19 +184,19 @@ yeni_tablolari_kenara_al() {
   local onceki simdi ek t sayi=0 ts yedek dizin
   onceki=$(zcat "$1" 2>/dev/null | sed -n 's/^CREATE TABLE \(IF NOT EXISTS \)\{0,1\}`\([^`]*\)`.*/\2/p' | LC_ALL=C sort -u) || onceki=""
   if [ -z "$onceki" ]; then
-    warn "geri yükleme artığı denetlenemedi (dump'ta tablo listesi okunamadı) — yeni göç tabloları yerinde bırakıldı"
+    warn "rollback leftovers could not be checked (table list could not be read from the dump) — new migration tables left in place"
     return 1
   fi
   simdi=$(mysql -N -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$GOSP_DB_ADI' AND table_type='BASE TABLE'" 2>/dev/null | LC_ALL=C sort -u) \
-    || { warn "geri yükleme artığı denetlenemedi (tablo listesi okunamadı)"; return 1; }
+    || { warn "rollback leftovers could not be checked (table list could not be read)"; return 1; }
   ek=$(LC_ALL=C comm -13 <(printf '%s\n' "$onceki") <(printf '%s\n' "$simdi")) || ek=""
   [ -z "$ek" ] && return 0
   for t in $ek; do
-    case "$t" in *[!A-Za-z0-9_]*) warn "beklenmeyen tablo adı ($t) — geri yükleme artığı yerinde bırakıldı"; return 1 ;; esac
+    case "$t" in *[!A-Za-z0-9_]*) warn "unexpected table name ($t) — rollback leftovers left in place"; return 1 ;; esac
     sayi=$((sayi + 1))
   done
   if [ "$sayi" -gt 20 ]; then
-    warn "dump'ta olmayan $sayi tablo var (şüpheli çok) — hiçbiri kaldırılmadı; elle inceleyin"
+    warn "$sayi tables are not in the dump (suspiciously many) — none were removed; inspect manually"
     return 1
   fi
   ts=$(date +%Y%m%d%H%M%S)
@@ -169,14 +206,14 @@ yeni_tablolari_kenara_al() {
   # shellcheck disable=SC2086 # $ek tablo adları (yukarıda doğrulandı), ayrı argüman olmalı
   if ! mysqldump --single-transaction "$GOSP_DB_ADI" $ek 2>/dev/null | gzip > "$yedek"; then
     rm -f "$yedek" 2>/dev/null || true
-    warn "geri yükleme artığı yedeklenemedi — tablolar yerinde bırakıldı:" $ek
+    warn "rollback leftovers could not be backed up — tables left in place:" $ek
     return 1
   fi
   for t in $ek; do
     if mysql -e "SET FOREIGN_KEY_CHECKS=0; DROP TABLE \`$GOSP_DB_ADI\`.\`$t\`" 2>/dev/null; then
-      ok "geri alınan sürümün tablosu kaldırıldı: $t (yedek: $yedek)"
+      ok "table of the rolled-back version removed: $t (backup: $yedek)"
     else
-      warn "geri alınan sürümün tablosu kaldırılamadı: $t — elle: DROP TABLE $GOSP_DB_ADI.$t (yedek: $yedek)"
+      warn "table of the rolled-back version could not be removed: $t — manually: DROP TABLE $GOSP_DB_ADI.$t (backup: $yedek)"
     fi
   done
 }
@@ -198,7 +235,7 @@ goc_dizini_yedekle() {
   if [ -d "$MIGR" ] && cp -a "$MIGR" "$MIGR_BAK" 2>/dev/null; then
     return 0
   fi
-  warn "göç dizini yedeklenemedi — rollback göç dosyalarını geri alamayabilir (eski ikili yeni göçü yeniden uygulayabilir)"
+  warn "migration directory could not be backed up — rollback may not restore the migration files (the older binary may re-apply the new migration)"
   MIGR_BAK=""
   return 1
 }
@@ -215,10 +252,10 @@ goc_dizini_geri_al() {
     rm -f "$f" && n=$((n + 1))
   done
   if ! cp -af "$MIGR_BAK"/. "$MIGR"/ 2>/dev/null; then
-    warn "göç dizini geri konamadı — elle: cp -af $MIGR_BAK/. $MIGR/"
+    warn "migration directory could not be restored — manually: cp -af $MIGR_BAK/. $MIGR/"
     return 1
   fi
-  ok "göç dizini güncelleme öncesine döndürüldü ($n yeni göç dosyası kaldırıldı)"
+  ok "migration directory restored to its pre-update state ($n new migration file(s) removed)"
 }
 
 # goc_dizini_temizle — başarıda yedeği kaldırır (bayat .bak kalmasın).
@@ -244,18 +281,18 @@ frontend_geri_al() {
   local kenar="${FDIST}.red.$$"
   rm -rf "$kenar" 2>/dev/null || true
   if [ -e "$FDIST" ] && ! mv "$FDIST" "$kenar"; then
-    warn "frontend-dist geri alınamadı — elle: mv $FDIST $FDIST.red; mv $FDIST.old $FDIST"
+    warn "frontend-dist could not be rolled back — manually: mv $FDIST $FDIST.red; mv $FDIST.old $FDIST"
     return 1
   fi
   if ! mv "${FDIST}.old" "$FDIST"; then
     [ -e "$kenar" ] && mv "$kenar" "$FDIST" 2>/dev/null || true
-    warn "frontend-dist geri alınamadı (yeni arayüz yerinde bırakıldı) — elle: mv $FDIST.old $FDIST"
+    warn "frontend-dist could not be rolled back (new UI left in place) — manually: mv $FDIST.old $FDIST"
     return 1
   fi
   rm -rf "$kenar" 2>/dev/null || true
   command -v restorecon >/dev/null && restorecon -R "$FDIST" >/dev/null 2>&1 || true
   FDIST_TAKAS=0
-  ok "frontend-dist güncelleme öncesine döndürüldü"
+  ok "frontend-dist restored to its pre-update state"
 }
 # <<< frontend-geri
 
@@ -291,14 +328,14 @@ kapi_adresleri() {
   a=$("$BIN" kapi port admin 2>/dev/null) || return 0
   b=$("$BIN" kapi port bayi 2>/dev/null); m=$("$BIN" kapi port musteri 2>/dev/null)
   ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-  step "Panel kapıları"
-  echo "   Yönetici (admin): https://${ip:-SUNUCU_IP}:$a   ← bu adresi GİZLİ tutun"
-  echo "   Bayi:             https://${ip:-SUNUCU_IP}:$b"
-  echo "   Müşteri:          https://${ip:-SUNUCU_IP}:$m"
-  if "$BIN" kapi durum 2>/dev/null | grep -E '^  eski'; then
-    warn "eski adres, admin YENİ admin adresinden bir kez giriş yapana dek kapanmaz"
+  step "Panel gates"
+  echo "   Administrator: https://${ip:-SERVER_IP}:$a   ← keep this address PRIVATE"
+  echo "   Reseller:      https://${ip:-SERVER_IP}:$b"
+  echo "   Customer:      https://${ip:-SERVER_IP}:$m"
+  if "$BIN" kapi durum 2>/dev/null | grep -E '^  (eski|old) '; then
+    warn "the old address stays open until you sign in once from the NEW admin address"
   fi
-  warn "bulut sağlayıcınızın güvenlik duvarı varsa TCP $a, $b, $m portlarını orada da açın"
+  warn "if your cloud provider has a firewall, open TCP ports $a, $b, $m there too"
 }
 
 # kapi_selinux_etiketle: kapı portlarını restart'tan ÖNCE SELinux'ta http_port_t yapar
@@ -322,7 +359,7 @@ kapi_selinux_etiketle() {
     cikti=$("$BIN" kapi selinux 2>&1) || rc=$?
   fi
   case "$rc" in
-    0) ok "kapı portları SELinux için hazır (http_port_t ya da SELinux kapalı) — açılış semanage beklemez" ;;
+    0) ok "gate ports are ready for SELinux (http_port_t, or SELinux is off) — startup does not wait for semanage" ;;
     3) : ;;   # kapı modu yapılandırılmamış (kapi.json yok/okunamadı) — sessiz
     *)
       # 🔴 OPS-4: YALNIZ üst düzey alanlar. İç içe nesneler (ilk_giris: rol → unix zaman
@@ -342,9 +379,9 @@ kapi_selinux_etiketle() {
       portlar=$(printf '%s\n' $portlar | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ') || portlar=""
       portlar=${portlar% }
       case "$rc" in
-        1)   warn "kapı portları SELinux'ta etiketlenemedi — panel kapı düzenini uygulamaz, eski tek-port davranışı sürer; elle: semanage port -a -t http_port_t -p tcp <p>  (kapı portları: ${portlar:-kapi.json okunamadı})" ;;
-        124) warn "kapı portları SELinux etiketlemesi 300 sn'de bitmedi (kapi selinux zaman aşımı) — etiketleme panel açılışına kalır; elle: semanage port -a -t http_port_t -p tcp <p>  (kapı portları: ${portlar:-kapi.json okunamadı})" ;;
-        *)   warn "kapi selinux çalıştırılamadı (çıkış $rc — ikili komutu tanımıyor?) — etiketleme panel açılışına kalır (açılış yavaşlayabilir); elle: semanage port -a -t http_port_t -p tcp <p>  (kapı portları: ${portlar:-kapi.json okunamadı})" ;;
+        1)   warn "gate ports could not be labeled in SELinux — the panel will not apply the gate layout and keeps the old single-port behavior; manually: semanage port -a -t http_port_t -p tcp <p>  (gate ports: ${portlar:-kapi.json could not be read})" ;;
+        124) warn "gate port SELinux labeling did not finish within 300 s (kapi selinux timed out) — labeling is left to panel startup; manually: semanage port -a -t http_port_t -p tcp <p>  (gate ports: ${portlar:-kapi.json could not be read})" ;;
+        *)   warn "kapi selinux could not be run (exit $rc — does the binary not know the command?) — labeling is left to panel startup (startup may be slow); manually: semanage port -a -t http_port_t -p tcp <p>  (gate ports: ${portlar:-kapi.json could not be read})" ;;
       esac
       if [ -n "$cikti" ]; then
         printf '%s\n' "$cikti" | tail -n 8 | sed 's/^/      /' || true
@@ -371,7 +408,7 @@ saglik_bekle() {
   nr0=$(systemctl show -p NRestarts --value girginospanel 2>/dev/null) || nr0=""
   case "$nr0" in ''|*[!0-9]*) nr0="" ;; esac
   nr_son=$nr0
-  echo "  /healthz bekleniyor (en fazla ${SAGLIK_SN} sn — açılış uzlaştırması ListenAndServe'den önce koşar)…"
+  echo "  waiting for /healthz (up to ${SAGLIK_SN} s — the startup reconcile runs before ListenAndServe)…"
   while [ "$SECONDS" -lt "$son" ]; do
     sleep 2
     if [ -n "$nr0" ]; then
@@ -380,7 +417,7 @@ saglik_bekle() {
       if [ -n "$nr" ] && [ "$nr" != "$nr_son" ]; then
         # ilk yeniden başlamada uyar (döngüde her turda satır basma; toplam sonda raporlanır)
         if [ "$yb" = 0 ]; then
-          warn "panel süreci bekleme sırasında YENİDEN BAŞLADI (NRestarts $nr0 → $nr) — çöküyor olabilir: journalctl -u girginospanel -n 40"
+          warn "panel process RESTARTED while waiting (NRestarts $nr0 → $nr) — it may be crashing: journalctl -u girginospanel -n 40"
         fi
         nr_son=$nr; yb=1; kararli=0
       fi
@@ -392,7 +429,7 @@ saglik_bekle() {
       kararli=$((kararli + 1))
       if [ "$kararli" -ge "$SAGLIK_KARARLI" ]; then
         SAGLIK_GECEN=$((SECONDS - bas))
-        warn "panel bekleme sırasında çöküp yeniden başladı (NRestarts $nr0 → $nr_son), sonra ${SAGLIK_KARARLI} yoklama boyunca kararlı kaldı — sağlıklı sayıldı; neden: journalctl -u girginospanel -n 80"
+        warn "panel crashed and restarted while waiting (NRestarts $nr0 → $nr_son), then stayed stable for ${SAGLIK_KARARLI} consecutive probes — counted as healthy; cause: journalctl -u girginospanel -n 80"
         return 0
       fi
     else
@@ -401,9 +438,9 @@ saglik_bekle() {
   done
   SAGLIK_GECEN=$((SECONDS - bas))
   if [ "$yb" = 1 ]; then
-    warn "panel ${SAGLIK_GECEN} sn içinde kararlı açılmadı ve bekleme boyunca çöküp yeniden başladı (NRestarts $nr0 → $nr_son) — çöküş döngüsü"
+    warn "panel did not start stably within ${SAGLIK_GECEN} s and crashed and restarted during the wait (NRestarts $nr0 → $nr_son) — crash loop"
   else
-    warn "panel ${SAGLIK_GECEN} sn içinde ACTIVE + /healthz vermedi ($PANEL_HEALTH)"
+    warn "panel was not ACTIVE + answering /healthz within ${SAGLIK_GECEN} s ($PANEL_HEALTH)"
   fi
   return 1
 }
@@ -428,19 +465,19 @@ ftp_servis_canlandir() {
     sleep 1   # hemen çöken süreci "başladı" sayma (ftp-setup ile aynı bekleme)
   fi
   if systemctl is-active --quiet pure-ftpd; then
-    warn "pure-ftpd etkin (enabled) ama ÇALIŞMIYORDU — başlatıldı; o süre boyunca TÜM FTP girişleri başarısızdı (neden: journalctl -u pure-ftpd -n 40)"
+    warn "pure-ftpd is enabled but was NOT RUNNING — started it; ALL FTP logins failed during that time (cause: journalctl -u pure-ftpd -n 40)"
   else
-    warn "pure-ftpd etkin (enabled) ama ÇALIŞMIYOR ve başlatılamadı — TÜM FTP girişleri başarısız; elle: systemctl start pure-ftpd · journalctl -u pure-ftpd -n 40"
+    warn "pure-ftpd is enabled but NOT RUNNING and could not be started — ALL FTP logins fail; manually: systemctl start pure-ftpd · journalctl -u pure-ftpd -n 40"
   fi
   return 0
 }
 
-[ "$(id -u)" = 0 ] || die "root gerekli (sudo girginospanel-update)"
-[ -x "$BIN" ] || die "GirginOSPanel kurulu değil ($BIN yok) — önce install.sh çalıştırın"
-command -v curl >/dev/null || die "curl gerekli"
-command -v tar  >/dev/null || die "tar gerekli"
+[ "$(id -u)" = 0 ] || die "root required (sudo girginospanel-update)"
+[ -x "$BIN" ] || die "GirginOSPanel is not installed ($BIN missing) — run install.sh first"
+command -v curl >/dev/null || die "curl required"
+command -v tar  >/dev/null || die "tar required"
 
-step "GirginOSPanel güncelleme"
+step "GirginOSPanel update"
 
 # 1) indir
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
@@ -453,10 +490,10 @@ if [ -n "${GOSP_HAZIR_PAKET:-}" ] && [ -d "${GOSP_HAZIR_PAKET:-}" ]; then
   TMP="$GOSP_HAZIR_PAKET"
   trap 'rm -rf "$TMP"' EXIT
   DEVRALINDI=1
-  echo "  paket devralındı (yeniden indirilmedi)"
+  echo "  package taken over (not downloaded again)"
 fi
 
-[ "$DEVRALINDI" = 1 ] || echo "  indiriliyor…"
+[ "$DEVRALINDI" = 1 ] || echo "  downloading…"
 # ══════════════════════════════════════════════════════════════════
 # KAYNAK: YALNIZ KENDI ALTYAPIMIZ
 #
@@ -478,21 +515,21 @@ AYNALAR=${GOSP_AYNALAR:-${GOSP_TABAN:-https://surum.girginos.io/panel}}
 indir_aynadan() {   # $1 = taban URL
   local taban="$1" latest paket bek ger
   latest=$(curl -fsSL --max-time 60 "$taban/latest.txt" 2>/dev/null) || {
-    echo "  $taban → sürüm bilgisi alınamadı"; return 1; }
+    echo "  $taban → could not fetch version info"; return 1; }
   paket=$(printf '%s' "$latest" | awk -F': ' '/^paket:/{print $2}')
   bek=$(printf '%s'  "$latest" | awk -F': ' '/^sha256:/{print $2}')
   if [ -z "$paket" ] || [ -z "$bek" ]; then
-    echo "  $taban → latest.txt eksik (paket/sha256 yok)"; return 1; fi
+    echo "  $taban → latest.txt incomplete (package/sha256 missing)"; return 1; fi
   curl -fsSL --max-time 900 -o "$TMP/paket.tgz" "$taban/$paket" 2>/dev/null || {
-    echo "  $taban → paket indirilemedi"; return 1; }
+    echo "  $taban → package download failed"; return 1; }
   ger=$(sha256sum "$TMP/paket.tgz" | cut -d' ' -f1)
   if [ "$ger" != "$bek" ]; then
-    echo "  $taban → sha256 TUTMADI (beklenen ${bek:0:16}…, gelen ${ger:0:16}…)"
+    echo "  $taban → sha256 MISMATCH (expected ${bek:0:16}…, got ${ger:0:16}…)"
     return 1
   fi
   tar xzf "$TMP/paket.tgz" -C "$TMP" 2>/dev/null || {
-    echo "  $taban → arşiv açılamadı"; return 1; }
-  echo "  kaynak: $taban ($paket, sha256 doğrulandı)"
+    echo "  $taban → could not extract archive"; return 1; }
+  echo "  source: $taban ($paket, sha256 verified)"
   return 0
 }
 
@@ -503,10 +540,10 @@ indir_github() {
         "https://codeload.github.com/$REPO/tar.gz/refs/heads/$BRANCH" 2>/dev/null)
   case "$kod" in
     200) tar xzf "$TMP/github.tgz" -C "$TMP" 2>/dev/null || return 1
-         echo "  kaynak: github.com/$REPO@$BRANCH (acil yedek)"; return 0 ;;
-    429) echo "  GitHub hız sınırı (429)"; return 1 ;;
-    404) echo "  GitHub 404 — repo/dal yok"; return 1 ;;
-    "")  echo "  GitHub'a ulaşılamadı (ağ/DNS)"; return 1 ;;
+         echo "  source: github.com/$REPO@$BRANCH (emergency fallback)"; return 0 ;;
+    429) echo "  GitHub rate limit (429)"; return 1 ;;
+    404) echo "  GitHub 404 — repo/branch not found"; return 1 ;;
+    "")  echo "  could not reach GitHub (network/DNS)"; return 1 ;;
     *)   echo "  GitHub HTTP $kod"; return 1 ;;
   esac
 }
@@ -517,14 +554,14 @@ if [ "$DEVRALINDI" = 0 ]; then
     if indir_aynadan "$_ayna"; then INDI=1; break; fi
   done
   if [ "$INDI" = 0 ] && [ "${GOSP_GITHUB_YEDEK:-0}" = "1" ]; then
-    echo "  aynalar kullanılamadı, GitHub acil yedeği deneniyor…"
+    echo "  mirrors unavailable, trying the GitHub emergency fallback…"
     indir_github && INDI=1
   fi
   if [ "$INDI" = 0 ]; then
-    die "güncelleme indirilemedi — denenen aynalar: $AYNALAR
-     Ağ/DNS kontrol edip tekrar deneyin. Acil durumda GitHub yedeği:
+    die "update download failed — mirrors tried: $AYNALAR
+     Check network/DNS and try again. In an emergency, the GitHub fallback:
        GOSP_GITHUB_YEDEK=1 girginospanel-update
-     Başka bir ayna kullanmak için:
+     To use a different mirror:
        GOSP_AYNALAR='https://ayna2.example/panel' girginospanel-update"
   fi
 fi
@@ -533,7 +570,7 @@ fi
 # kendi paketimiz "gpanel-installer/" olarak acilir. Sabit isim yerine
 # assets/girginospanel-server'i ARAYARAK bul; iki duzen de calisir.
 NEWBIN=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-server -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
-[ -n "$NEWBIN" ] || die "pakette assets/girginospanel-server yok (yapı beklenenden farklı)"
+[ -n "$NEWBIN" ] || die "assets/girginospanel-server missing in the package (unexpected layout)"
 A=$(dirname "$NEWBIN")
 SRC=$(dirname "$A")
 
@@ -554,19 +591,19 @@ geri_donus_kapisi "$A"
 # Kendini guncellersek yerel degisiklik sessizce geri alinir (iki kez
 # yasandi: AYNALAR yamasi boyle kayboldu).
 if [ -f /root/gpanel-temiz/assets/ops/girginospanel-update ]; then
-  echo "  derleme makinesi — updater kendini guncellemiyor (yerel surum korunur)"
+  echo "  build machine — the updater does not self-update (local version kept)"
   GOSP_SELF_GUNCEL=1
 fi
 SELF_KURULU=/usr/local/bin/girginospanel-update
 SELF_YENI="$A/ops/girginospanel-update"
 if [ -z "${GOSP_SELF_GUNCEL:-}" ] && [ ! -f "$SELF_YENI" ]; then
-  warn "pakette ops/girginospanel-update yok — updater kendini guncelleyemiyor"
+  warn "ops/girginospanel-update missing in the package — the updater cannot self-update"
 fi
 if [ -z "${GOSP_SELF_GUNCEL:-}" ] && [ -f "$SELF_YENI" ] && [ -f "$SELF_KURULU" ] \
    && ! cmp -s "$SELF_YENI" "$SELF_KURULU"; then
   install -m 0755 "$SELF_YENI" "$SELF_KURULU" \
-    || die "updater kendini güncelleyemedi ($SELF_KURULU yazılamadı)"
-  ok "updater yeni sürüme geçti — güncelleme yeni mantıkla sürüyor"
+    || die "updater could not update itself ($SELF_KURULU is not writable)"
+  ok "updater switched to the new version — the update continues with the new logic"
   trap - EXIT                       # paketi silme: yeni surum devralacak
   GOSP_SELF_GUNCEL=1 GOSP_HAZIR_PAKET="$TMP" exec "$SELF_KURULU" "$@"
 fi
@@ -575,9 +612,9 @@ fi
 # ÖNEMLİ: sadece binary'yi değil TÜM release'i (binary + frontend-dist + migrations)
 # hash'le. Aksi halde frontend-only / migration-only bir güncellemede binary sha
 # aynı kaldığı için güncelleme yanlışlıkla ATLANIRDI.
-head -c4 "$NEWBIN" | grep -q $'\x7fELF' || die "indirilen binary geçerli ELF değil — iptal"
+head -c4 "$NEWBIN" | grep -q $'\x7fELF' || die "downloaded binary is not a valid ELF — aborting"
 CURVER=$(surum); [ -n "$CURVER" ] || CURVER="?"
-echo "  mevcut sürüm: $CURVER"
+echo "  current version: $CURVER"
 # NOT: her sha256sum'u cut ile SADECE hash'e indir — aksi halde çıktıdaki (rastgele
 # tmp) dosya yolu RELHASH'i her çalıştırmada değiştirir ve no-op asla çalışmazdı.
 RELHASH=$( { sha256sum "$NEWBIN" | cut -d' ' -f1
@@ -593,22 +630,22 @@ RELHASH=$( { sha256sum "$NEWBIN" | cut -d' ' -f1
 MARKER="$PREFIX/.release_hash"
 CURREL=$(cat "$MARKER" 2>/dev/null || echo yok)
 if [ "$RELHASH" = "$CURREL" ] && [ "$FORCE" = 0 ]; then
-  ok "zaten en güncel (release hash eşleşti) — yapılacak bir şey yok (--force ile zorla)"
+  ok "already up to date (release hash matched) — nothing to do (use --force to force)"
   exit 0
 fi
 
 if [ "$DRY" = 1 ]; then
-  step "DRY-RUN — değişecekler (uygulanmadı)"
-  echo "  • $BIN  (binary değişmişse swap + yedek $BIN.bak)"
-  echo "  • $FDIST/  (frontend-dist yeniden yazılır)"
-  echo "  • $MIGR/  (yeni .sql eklenir, mevcutlar korunur)"
-  echo "  • /usr/local/bin ops-tool'lar + $SCRIPTS"
+  step "DRY-RUN — what would change (nothing applied)"
+  echo "  • $BIN  (if the binary changed: swap + backup $BIN.bak)"
+  echo "  • $FDIST/  (frontend-dist is rewritten)"
+  echo "  • $MIGR/  (new .sql files are added, existing ones are kept)"
+  echo "  • /usr/local/bin ops tools + $SCRIPTS"
   echo "  • $DBBK + /etc/systemd/system/girginospanel-db-backup.{service,timer} (timer enable --now)"
-  echo "  • migration'lardan ÖNCE panel DB dump'ı → $DBDIR  (DRY-RUN'da dump ALINMAZ)"
-  echo "  • kapi.json varsa restart'tan ÖNCE: girginospanel-server kapi selinux (kapı portları http_port_t)"
-  echo "  • panel birimi LoadCredential'a geçer (girginospanel-sir birim; sırlar süreç ortamına girmez)"
-  echo "  • systemctl restart girginospanel  (env/DB/siteler KORUNUR; /healthz en fazla ${SAGLIK_SN} sn beklenir)"
-  [ -f /var/lib/girginospanel/sir-yenile-2026-10 ] || echo "  • TEK SEFERLİK sır yenileme (JWT/DB/Valkey; oturumlar düşer): girginospanel-server sir yenile --hepsi"
+  echo "  • panel DB dump BEFORE migrations → $DBDIR  (NO dump is taken in DRY-RUN)"
+  echo "  • if kapi.json exists, BEFORE restart: girginospanel-server kapi selinux (gate ports → http_port_t)"
+  echo "  • the panel unit switches to LoadCredential (girginospanel-sir birim; secrets stay out of the process environment)"
+  echo "  • systemctl restart girginospanel  (env/DB/sites PRESERVED; waits up to ${SAGLIK_SN} s for /healthz)"
+  [ -f /var/lib/girginospanel/sir-yenile-2026-10 ] || echo "  • ONE-TIME secret rotation (JWT/DB/Valkey; sessions are dropped): girginospanel-server sir yenile --hepsi"
   exit 0
 fi
 
@@ -620,7 +657,7 @@ fi
 # satır satır okur; kendini ortasından değiştirmek tehlikeli), o iş adım 9'da kalıyor.
 if [ -f "$A/ops/girginospanel-db-backup" ]; then
   install -m 0755 "$A/ops/girginospanel-db-backup" "$DBBK"
-  ok "DB yedek aracı kuruldu ($DBBK)"
+  ok "DB backup tool installed ($DBBK)"
 fi
 # systemd unit'leri: dosyayı kopyalamak YETMEZ — daemon-reload + enable --now olmadan
 # timer asla ateşlenmez (kurulumda unutulursa günlük yedek sessizce hiç çalışmaz).
@@ -632,9 +669,9 @@ if [ "$UNITS" = 1 ]; then
   systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl enable --now girginospanel-db-backup.timer >/dev/null 2>&1 || true
   if systemctl is-active --quiet girginospanel-db-backup.timer; then
-    ok "günlük DB yedek timer'ı ACTIVE ($(systemctl show -p TimersCalendar --value girginospanel-db-backup.timer 2>/dev/null | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1))"
+    ok "daily DB backup timer ACTIVE ($(systemctl show -p TimersCalendar --value girginospanel-db-backup.timer 2>/dev/null | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1))"
   else
-    warn "DB yedek timer'ı başlatılamadı — günlük yedek çalışmayabilir"
+    warn "DB backup timer could not be started — the daily backup may not run"
   fi
 fi
 
@@ -644,7 +681,7 @@ fi
 if [ ! -f /etc/systemd/system/girginos-av.slice ]; then
   cat > /etc/systemd/system/girginos-av.slice <<'AVSLICE'
 [Unit]
-Description=GirginOSPanel antivirüs tarama dilimi
+Description=GirginOSPanel antivirus scan slice
 Before=slices.target
 [Slice]
 CPUAccounting=yes
@@ -665,28 +702,28 @@ if [ "$AVUNITS" = 1 ]; then
   # 🔴 Timer enable, ama izleyiciyi DEĞİŞTİRME: gercek_zamanli ayarına panel
   # karar verir (avayar.IzleyiciSenkron). Updater kullanıcının açtığını kapatmasın.
   systemctl enable girginospanel-avtara.timer >/dev/null 2>&1 || true
-  systemctl is-active --quiet girginospanel-avtara.timer     && ok "antivirüs zamanlı tarama timer'ı ACTIVE"     || systemctl enable --now girginospanel-avtara.timer >/dev/null 2>&1
+  systemctl is-active --quiet girginospanel-avtara.timer     && ok "antivirus scheduled-scan timer ACTIVE"     || systemctl enable --now girginospanel-avtara.timer >/dev/null 2>&1
 fi
 
 # 4) GÜNCELLEME ÖNCESİ DB DUMP — FAIL-CLOSED.
 # Migration'lar geri alınamaz; yedeksiz migration kabul edilemez. Dump alınamıyorsa
 # güncellemeye HİÇ BAŞLAMA (binary'ye, frontend'e, migration'lara dokunmadan çık).
-step "Güncelleme öncesi DB yedeği"
-[ -x "$DBBK" ] || die "DB yedek aracı yok/çalıştırılamıyor ($DBBK) — yedeksiz migration REDDEDİLDİ, güncelleme başlatılmadı"
-PREDUMP=$("$DBBK") || die "güncelleme öncesi DB yedeği BAŞARISIZ — güncelleme başlatılmadı (DB'ye/binary'ye dokunulmadı)"
+step "Pre-update DB backup"
+[ -x "$DBBK" ] || die "DB backup tool missing/not executable ($DBBK) — migration without a backup REFUSED, update not started"
+PREDUMP=$("$DBBK") || die "pre-update DB backup FAILED — update not started (DB/binary untouched)"
 [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ] \
-  || die "güncelleme öncesi DB yedeği doğrulanamadı (dönen yol boş veya dosya yok) — güncelleme başlatılmadı"
+  || die "pre-update DB backup could not be verified (returned path empty or file missing) — update not started"
 ok "pre-update dump: $PREDUMP ($(du -h "$PREDUMP" 2>/dev/null | cut -f1))"
 
 # 5) yedek (binary + seed)
 cp -f "$BIN" "$BIN.bak"
 [ -x "$SEED" ] && cp -f "$SEED" "$SEED.bak" 2>/dev/null || true
-ok "mevcut binary yedeklendi ($BIN.bak)"
+ok "current binary backed up ($BIN.bak)"
 
 # 6) binary swap (install = atomik replace; çalışan process eski inode'u restart'a kadar tutar — cp -f KULLANMA)
 install -m 0755 "$NEWBIN" "$BIN"
 [ -f "$A/girginospanel-seed-admin" ] && install -m 0755 "$A/girginospanel-seed-admin" "$SEED"
-ok "binary güncellendi"
+ok "binary updated"
 
 # 🔴 Eklenti baslaticisi — sifreli eklentilerin ExecStart'i BUDUR.
 # Panelle AYNI pakette gelir ve atomik kurulur (calisan surec eski inode'u
@@ -695,21 +732,21 @@ ok "binary güncellendi"
 NEWBAS=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-eklenti-baslatici -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
 if [ -n "$NEWBAS" ]; then
   install -m 0755 "$NEWBAS" /opt/girginospanel/bin/girginospanel-eklenti-baslatici \
-    && ok "eklenti baslaticisi guncellendi" || warn "eklenti baslaticisi guncellenemedi"
+    && ok "plugin launcher updated" || warn "could not update the plugin launcher"
 fi
 
 # Antivirus ajani — server ile ayni turden binary. Pakette varsa atomik kur.
 NEWAV=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-avajan -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
 if [ -n "$NEWAV" ]; then
-  install -m 0755 "$NEWAV" /usr/local/bin/girginospanel-avajan || warn "avajan guncellenemedi"
-  ok "antivirus ajani guncellendi"
+  install -m 0755 "$NEWAV" /usr/local/bin/girginospanel-avajan || warn "avajan could not be updated"
+  ok "antivirus agent updated"
 fi
 
 # Telegram destek ajani — panelden AYRI hizmet. Burada yalniz ikili atomik yazilir (calisan surec
 # eski inode'u tutar); hizmet panel yeni ikiliyle SAGLIKLI acildiktan sonra (adim 11a) baslatilir.
 NEWDA=$(find "$TMP" -maxdepth 3 -type f -name girginospanel-destek-ajan -path '*/assets/*' ! -path '*/assets/ops/*' 2>/dev/null | head -1)
 if [ -n "$NEWDA" ]; then
-  install -m 0755 "$NEWDA" /usr/local/bin/girginospanel-destek-ajan || warn "destek ajani guncellenemedi"
+  install -m 0755 "$NEWDA" /usr/local/bin/girginospanel-destek-ajan || warn "support agent could not be updated"
   DESTEK_AJAN_YENI=1
 fi
 
@@ -732,13 +769,13 @@ if [ -d "$A/eklentiler" ]; then
     for _u in mail calistirici; do
       for _b in /opt/girginospanel/src/eklentiler/$_u /opt/girginospanel/eklentiler/$_u; do
         if [ -f "$_b/girginospanel-eklenti-$_u" ]; then
-          rm -f "$_b/girginospanel-eklenti-$_u" && ok "kacak/artik duz ucretli ikili temizlendi: $_u ($_b)"
+          rm -f "$_b/girginospanel-eklenti-$_u" && ok "stray/leftover plain paid binary removed: $_u ($_b)"
         fi
       done
     done
-    ok "eklenti yukleri guncellendi (src/eklentiler)"
+    ok "plugin payloads updated (src/eklentiler)"
   else
-    warn "eklenti yukleri kopyalanamadi (whitelabel Kur ile eklenebilir)"
+    warn "plugin payloads could not be copied (can be added via whitelabel Install)"
   fi
 fi
 
@@ -761,18 +798,18 @@ if [ -f "$A/frontend-dist.tar.gz" ]; then
   }
   rm -rf "$FDNEW"; mkdir -p "$FDNEW"
   if ! tar xzf "$A/frontend-dist.tar.gz" -C "$FDNEW"; then
-    fdist_abort "frontend-dist extraction başarısız — mevcut frontend + eski binary KORUNDU"
+    fdist_abort "frontend-dist extraction failed — current frontend + old binary KEPT"
   fi
   # bütünlük kapısı: index.html DOLU + en az bir JS bundle olmalı (0-byte/kesik tarball reddedilir)
   if [ ! -s "$FDNEW/index.html" ] || ! ls "$FDNEW"/assets/index-*.js >/dev/null 2>&1; then
-    fdist_abort "frontend-dist bozuk (index.html/JS boş veya eksik) — mevcut frontend + eski binary KORUNDU"
+    fdist_abort "frontend-dist is corrupt (index.html/JS empty or missing) — current frontend + old binary KEPT"
   fi
   rm -rf "${FDIST}.old"
   [ -d "$FDIST" ] && mv "$FDIST" "${FDIST}.old"
   mv "$FDNEW" "$FDIST"
   FDIST_TAKAS=1   # rollback ${FDIST}.old'u geri koyabilsin (bkz. frontend-geri bloğu)
   sync   # reboot-güvenli: delayed-alloc veri kaybını önlemek için diske flush et
-  ok "frontend-dist güncellendi (atomik doğrulanmış swap)"
+  ok "frontend-dist updated (atomic verified swap)"
 fi
 
 # 8) migration'lar (idempotent — startup'ta uygulanır). Adım 4'te dump'ı ALDIK.
@@ -781,10 +818,10 @@ if [ -f "$A/migrations.tar.gz" ]; then
   # duserse HICBIR kirmizi satir basilmaz (die cagrilmaz), saglik/rollback
   # blogu HIC calismaz ve yeni binary + yeni frontend diskte, eksik migration
   # ile kalir. Ilk reboot'ta panel bozuk semayla acilir.
-  mkdir -p "$MIGR" || die "migration dizini olusturulamadi"
+  mkdir -p "$MIGR" || die "migration directory could not be created"
   goc_dizini_yedekle || true   # rollback için (bkz. goc-dizini-geri bloğu)
-  tar xzf "$A/migrations.tar.gz" -C "$MIGR" || die "migration arsivi acilamadi — binary/frontend geri alinmali: $BIN.bak"
-  ok "migration'lar senkron ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql)"
+  tar xzf "$A/migrations.tar.gz" -C "$MIGR" || die "migration archive could not be extracted — binary/frontend must be rolled back: $BIN.bak"
+  ok "migrations in sync ($(ls "$MIGR"/*.sql 2>/dev/null | wc -l) sql)"
 fi
 
 # 9) ops-tool'lar (updater kendini de günceller; db-backup adım 3'te zaten kuruldu — tekrar idempotent)
@@ -797,7 +834,7 @@ if [ -d "$A/ops" ]; then
     [ -f "$t" ] || continue
     [ -f "${t%.sh}" ] && IKIZ="$IKIZ $(basename "${t%.sh}")"
   done
-  [ -z "$IKIZ" ] || die "pakette .sh ikizi var, hangisinin kurulacagi belirsiz:$IKIZ"
+  [ -z "$IKIZ" ] || die "package contains .sh twins, ambiguous which one to install:$IKIZ"
 
   # 🔴 Hatalari YUTMA. Eskiden `install ... 2>/dev/null || true` idi:
   # disk dolu / salt-okunur / izin hatasinda arac kurulmuyor ama
@@ -820,16 +857,16 @@ if [ -d "$A/ops" ]; then
     # USTUNE yaziliyordu -> guncellenen sunucu KVKK maskesiz destek ajani + bayat AV ajaniyla kaliyordu.
     # Ikililer yalniz assets/ kokunden kurulur (yukaridaki find adimlari).
     if [ "$(head -c4 "$t" | od -An -c | tr -d ' ')" = '177ELF' ]; then
-      warn "ops/$bn bir IKILI — atlandi (ikililer assets/ kokunden kurulur; ops/ kopyasi bayat olur)"
+      warn "ops/$bn is a BINARY — skipped (binaries install from the assets/ root; an ops/ copy goes stale)"
       continue
     fi
     install -m 0755 "$t" "/usr/local/bin/${bn%.sh}" || OPS_HATA="$OPS_HATA ${bn%.sh}"
   done
-  [ -z "$OPS_HATA" ] || die "ops araclari kurulamadi:$OPS_HATA"
+  [ -z "$OPS_HATA" ] || die "ops tools could not be installed:$OPS_HATA"
   # <<< ops-kur-dongusu
 
-  mkdir -p "$SCRIPTS" || die "$SCRIPTS olusturulamadi"
-  cp "$A"/ops/* "$SCRIPTS/" || die "ops dosyalari $SCRIPTS'e kopyalanamadi"
+  mkdir -p "$SCRIPTS" || die "$SCRIPTS could not be created"
+  cp "$A"/ops/* "$SCRIPTS/" || die "ops files could not be copied to $SCRIPTS"
   # 🔴 Panel helper-i TAM olarak /usr/local/sbin/girginospanel-port-swap.sh
   # yolunda arar (internal/portyonetim/degistir.go: BackendHelperYolu).
   # Yukaridaki dongu ".sh" uzantisini soyup /usr/local/bin'e attigi icin
@@ -837,10 +874,10 @@ if [ -d "$A/ops" ]; then
   if [ -f "$A/ops/girginospanel-port-swap.sh" ]; then
     install -D -m 0700 "$A/ops/girginospanel-port-swap.sh" \
       /usr/local/sbin/girginospanel-port-swap.sh \
-      || die "port-swap helper kurulamadi (/usr/local/sbin) — panel port degistiremez"
+      || die "port-swap helper could not be installed (/usr/local/sbin) — the panel cannot change ports"
     rm -f /usr/local/bin/girginospanel-port-swap 2>/dev/null || true
   fi
-  ok "ops-tool'lar güncellendi"
+  ok "ops tools updated"
 fi
 
 # 9a) wp-cli heal — 🔴 updater eskiden wp-cli'a HIC dokunmuyordu, dolayisiyla
@@ -848,14 +885,14 @@ fi
 # (musteride tam olarak bu oldu: WordPress sayfasi "Could not open input
 # file: /usr/local/bin/wp" veriyordu). Idempotent: calisan wp-cli'a dokunmaz.
 if command -v girginospanel-wpcli-kur >/dev/null 2>&1; then
-  girginospanel-wpcli-kur || warn "wp-cli onarilamadi — WordPress ozellikleri calismaz"
+  girginospanel-wpcli-kur || warn "wp-cli could not be repaired — WordPress features will not work"
 fi
 
 # 9a2) WordPress on kosullari heal — SELinux kiraci dizin etiketleri +
 # imagick. 🔴 Ikisi de eski kurulumlarda EKSIK; updater dokunmazsa sunucu
 # kendini onaramaz (wp-cli ile birebir ayni arıza sinifi).
 if command -v girginospanel-wp-onkosul >/dev/null 2>&1; then
-  girginospanel-wp-onkosul || warn "WordPress on kosullari eksik kaldi"
+  girginospanel-wp-onkosul || warn "WordPress prerequisites left incomplete"
 fi
 
 # ══════════════════════════════════════════════════════════════════════
@@ -879,12 +916,12 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 if command -v girginospanel-repair >/dev/null 2>&1; then
   if girginospanel-repair --only nginx_cache,selinux_temel,docroot_selinux,mail_sieve,backup_cron,sir_izin >/dev/null 2>&1; then
-    ok "hedefli onarim (nginx onbellek + SELinux temel + docroot SELinux + mail sieve + gizli dosya izinleri)"
+    ok "targeted repair (nginx cache + SELinux base + docroot SELinux + mail sieve + secret-file permissions)"
   else
-    warn "hedefli onarim hata dondu — elle: girginospanel-repair --only nginx_cache,selinux_temel,docroot_selinux,mail_sieve,backup_cron,sir_izin"
+    warn "targeted repair returned an error — manually: girginospanel-repair --only nginx_cache,selinux_temel,docroot_selinux,mail_sieve,backup_cron,sir_izin"
   fi
 else
-  warn "girginospanel-repair yok — onbellek/SELinux onarimi atlandi"
+  warn "girginospanel-repair missing — cache/SELinux repair skipped"
 fi
 
 # 9b) WAF (ModSecurity + OWASP CRS) heal — IDEMPOTENT (her sey hazirsa saniyeler icinde ATLAR).
@@ -896,9 +933,9 @@ fi
 # modül ya da ABI damgası VARSA anlamlı (nginx sürümü değiştiyse connector'ı yeniden derler).
 if command -v girginospanel-waf-setup >/dev/null 2>&1; then
   if [ -f /usr/lib64/nginx/modules/ngx_http_modsecurity_module.so ] || [ -f /etc/nginx/modsec/.built_for_nginx ]; then
-    girginospanel-waf-setup >/dev/null 2>&1 && ok "WAF altyapısı senkron (ModSecurity+CRS)" || warn "waf-setup atlandı (WAF modülsüz graceful)"
+    girginospanel-waf-setup >/dev/null 2>&1 && ok "WAF infrastructure in sync (ModSecurity+CRS)" || warn "waf-setup skipped (WAF degrades gracefully without the module)"
   else
-    ok "WAF kurulu değil — atlandı (isteğe bağlı: girginospanel-waf-setup)"
+    ok "WAF not installed — skipped (optional: girginospanel-waf-setup)"
   fi
 fi
 
@@ -934,10 +971,10 @@ if [ "$QROOTFS" = "xfs" ] && ! echo "$QROOTOPTS" | grep -qwE 'usrquota|uquota|qu
     for cfg in /boot/efi/EFI/*/grub.cfg; do [ -f "$cfg" ] && grub2-mkconfig -o "$cfg" >/dev/null 2>&1 || true; done
   fi
   mkdir -p /etc/girginospanel
-  echo "rootflags=uquota GRUB'a yazildi $(date -Is 2>/dev/null) — reboot bekleniyor" > "$QSENTINEL" 2>/dev/null || true
-  warn "🔴 Disk kotası GRUB'a yazıldı — AKTİF olması için tek seferlik REBOOT gerekli (canlı sunucuda operatör zamanlar). OTO-REBOOT YAPILMADI."
+  echo "rootflags=uquota written to GRUB $(date -Is 2>/dev/null) — reboot pending" > "$QSENTINEL" 2>/dev/null || true
+  warn "🔴 Disk quota written to GRUB — a one-time REBOOT is required to activate it (the operator schedules it on a live server). NO AUTO-REBOOT was performed."
 elif [ "$QROOTFS" = "xfs" ]; then
-  [ -f "$QSENTINEL" ] && rm -f "$QSENTINEL" 2>/dev/null && ok "disk kotası aktif — reboot sentinel temizlendi" || ok "disk kotası aktif (kök XFS user quota)"
+  [ -f "$QSENTINEL" ] && rm -f "$QSENTINEL" 2>/dev/null && ok "disk quota active — reboot sentinel cleared" || ok "disk quota active (root XFS user quota)"
 fi
 
 # 10c) Rol kapıları (ADR-GP-001) — mevcut kurulumu KİLİTLENMESİZ geçir: admin / bayi /
@@ -952,10 +989,10 @@ fi
 if [ ! -f "$KAPI_JSON" ]; then
   if "$BIN" kapi gecis >/dev/null 2>&1; then
     if [ -f "$KAPI_JSON" ]; then
-      ok "rol kapıları geçişi hazırlandı (panel açılışında uygulanır)"
+      ok "role-gate transition prepared (applied at panel startup)"
     fi
   else
-    warn "rol kapıları geçişi yapılamadı — panel tek portla devam eder (sonra: girginospanel-server kapi gecis)"
+    warn "role-gate transition could not be prepared — the panel continues on a single port (later: girginospanel-server kapi gecis)"
   fi
   # Önceden yoktu; şimdi varsa BU koşu yarattı (gecis hata dönse bile yazmış olabilir).
   if [ -f "$KAPI_JSON" ]; then KAPI_YENI=1; fi
@@ -979,14 +1016,14 @@ if [ -n "$SIR_ARAC" ]; then
   case "$_sir_rc" in
     0) SIR_BIRIM_YENI=1 ;;
     3) : ;;
-    *) warn "panel birimi LoadCredential'a geçirilemedi — eski birimle devam (sırlar açılışta ortamdan silinir)" ;;
+    *) warn "panel unit could not be switched to LoadCredential — continuing with the old unit (secrets are removed from the environment at startup)" ;;
   esac
 else
-  warn "girginospanel-sir yok — panel birimi geçirilmedi"
+  warn "girginospanel-sir missing — panel unit not switched"
 fi
 
 # 11) yeniden başlat + sağlık kontrolü (başarısızsa binary + DB rollback)
-step "Yeniden başlatılıyor"
+step "Restarting"
 systemctl restart girginospanel
 HEALTHY=0
 if saglik_bekle; then HEALTHY=1; fi
@@ -995,16 +1032,16 @@ if [ "$HEALTHY" = 1 ]; then
   systemctl reload nginx >/dev/null 2>&1 || true
   echo "$RELHASH" > "$MARKER" 2>/dev/null || true   # bu release'i uygulandı olarak işaretle
   NEWVER=$(surum); [ -n "$NEWVER" ] || NEWVER="?"
-  ok "panel ACTIVE + /healthz OK (${SAGLIK_GECEN:-?} sn)"
+  ok "panel ACTIVE + /healthz OK (${SAGLIK_GECEN:-?} s)"
   goc_dizini_temizle   # rollback gerekmedi: göç dizini yedeği bayat kalmasın
   # SELinux modu bildirimi: kurallar/etiketler HER modda yazılır (selinux_temel); burada yalnız mod
   # raporlanır, ASLA değiştirilmez.
   case "$(getenforce 2>/dev/null || echo Disabled)" in
-    Enforcing)  ok "SELinux: Enforcing (etiketler ve kurallar yerinde)" ;;
-    Permissive) warn "SELinux: Permissive — kurallar hazır ama hiçbir şey engellenmiyor; üretim için Enforcing önerilir: setenforce 1 (kalıcı: /etc/selinux/config SELINUX=enforcing)" ;;
-    *)          warn "SELinux: Disabled — kurallar yazıldı ama etkisiz; açmak için /etc/selinux/config SELINUX=enforcing + touch /.autorelabel && reboot (tam yeniden etiketleme)" ;;
+    Enforcing)  ok "SELinux: Enforcing (labels and rules in place)" ;;
+    Permissive) warn "SELinux: Permissive — rules are ready but nothing is blocked; Enforcing is recommended for production: setenforce 1 (persistent: SELINUX=enforcing in /etc/selinux/config)" ;;
+    *)          warn "SELinux: Disabled — rules were written but are inactive; to enable: SELINUX=enforcing in /etc/selinux/config + touch /.autorelabel && reboot (full relabel)" ;;
   esac
-  ok "kaynak limitleri planlardan uygulanıyor + mevcut siteler per-tenant PHP-FPM izolasyonuna GÜVENLE (self-check + auto-rollback) geçiriliyor (arka planda)"
+  ok "resource limits are being applied from plans + existing sites are being moved SAFELY to per-tenant PHP-FPM isolation (self-check + auto-rollback) (in the background)"
 
   # 11a) TELEGRAM DESTEK AJANI — panelden AYRI hizmet. SIRA BİLİNÇLİ: yalnız panel yeni ikiliyle
   # SAĞLIKLI açıldıktan SONRA başlatılır/yeniden başlatılır. Eski panelin (gömülü ajanlı) süreci
@@ -1018,9 +1055,9 @@ if [ "$HEALTHY" = 1 ]; then
     systemctl restart girginospanel-destek-ajan >/dev/null 2>&1 || true
     sleep 2
     if systemctl is-active --quiet girginospanel-destek-ajan; then
-      ok "Telegram destek ajanı ACTIVE (panelden ayrı hizmet)"
+      ok "Telegram support agent ACTIVE (separate from the panel)"
     else
-      warn "Telegram destek ajanı BAŞLAMADI (panel etkilenmez) — journalctl -u girginospanel-destek-ajan -n 40"
+      warn "Telegram support agent did not start (panel unaffected) — journalctl -u girginospanel-destek-ajan -n 40"
     fi
   fi
 
@@ -1032,13 +1069,13 @@ if [ "$HEALTHY" = 1 ]; then
   # panel eski sırlarla çalışmaya devam eder. Atlamak: GOSP_SIR_YENILE=0.
   SIR_ISARET=/var/lib/girginospanel/sir-yenile-2026-10
   if [ ! -f "$SIR_ISARET" ] && [ "${GOSP_SIR_YENILE:-1}" != 0 ]; then
-    step "Panel sırları yenileniyor (tek seferlik; tüm oturumlar düşer)"
+    step "Rotating panel secrets (one-time; all sessions are dropped)"
     _sy_rc=0
     "$BIN" sir yenile --hepsi --saglik-sn "$SAGLIK_SN" || _sy_rc=$?
     case "$_sy_rc" in
-      0) { mkdir -p /var/lib/girginospanel && date -Is > "$SIR_ISARET"; } 2>/dev/null || warn "işaret yazılamadı: $SIR_ISARET"; ok "panel sırları yenilendi (işaret: $SIR_ISARET)" ;;
-      3) warn "🔴 KRİTİK: sır yenileme geri dönüşü EKSİK — journalctl -u girginospanel -n 60; ardından: girginospanel-server sir kurtar" ;;
-      *) warn "sır yenileme UYGULANMADI (eski sırlarla devam; sonraki güncellemede yeniden denenir) — elle: girginospanel-server sir yenile --hepsi" ;;
+      0) { mkdir -p /var/lib/girginospanel && date -Is > "$SIR_ISARET"; } 2>/dev/null || warn "marker could not be written: $SIR_ISARET"; ok "panel secrets rotated (marker: $SIR_ISARET)" ;;
+      3) warn "🔴 CRITICAL: secret rotation rollback is INCOMPLETE — journalctl -u girginospanel -n 60; then: girginospanel-server sir kurtar" ;;
+      *) warn "secret rotation NOT applied (continuing with the old secrets; retried on the next update) — manually: girginospanel-server sir yenile --hepsi" ;;
     esac
   fi
 
@@ -1072,22 +1109,22 @@ if [ "$HEALTHY" = 1 ]; then
         printf 'MYSQLCrypt      %s\n' "$_want" >> "$PFCONF" || _yazildi=0
       fi
       if [ "$_yazildi" = 0 ]; then
-        warn "MYSQLCrypt $_want YAZILAMADI ($PFCONF) — FTP kimlik modu uyumsuz kalabilir; elle düzeltip: systemctl restart pure-ftpd"
+        warn "could NOT write MYSQLCrypt $_want ($PFCONF) — FTP credential mode may stay mismatched; fix manually, then: systemctl restart pure-ftpd"
       elif systemctl is-active --quiet pure-ftpd; then
         systemctl restart pure-ftpd >/dev/null 2>&1 \
-          && ok "FTP kimlik modu düzeltildi: MYSQLCrypt ${_cur:-yok} → $_want (pure-ftpd restart)" \
-          || warn "MYSQLCrypt $_want yazıldı ama pure-ftpd restart BAŞARISIZ — elle: systemctl restart pure-ftpd"
+          && ok "FTP credential mode fixed: MYSQLCrypt ${_cur:-none} → $_want (pure-ftpd restarted)" \
+          || warn "MYSQLCrypt $_want written but pure-ftpd restart FAILED — manually: systemctl restart pure-ftpd"
       else
-        ok "FTP kimlik modu düzeltildi: MYSQLCrypt ${_cur:-yok} → $_want (pure-ftpd pasif)"
+        ok "FTP credential mode fixed: MYSQLCrypt ${_cur:-none} → $_want (pure-ftpd inactive)"
       fi
     else
-      ok "FTP kimlik modu uyumlu (MYSQLCrypt=$_cur)"
+      ok "FTP credential mode consistent (MYSQLCrypt=$_cur)"
     fi
   elif command -v mysql >/dev/null 2>&1 && command -v girginospanel-ftp-setup >/dev/null 2>&1; then
     # pureftpd-mysql.conf yok → tam kurulum (idempotent; .pfsql_pass varsa parola KORUNUR)
     girginospanel-ftp-setup >/dev/null 2>&1 \
-      && ok "pure-ftpd config yoktu → girginospanel-ftp-setup ile kuruldu" \
-      || warn "pure-ftpd config yok + girginospanel-ftp-setup HATA — elle: girginospanel-ftp-setup"
+      && ok "pure-ftpd config was missing → installed with girginospanel-ftp-setup" \
+      || warn "pure-ftpd config missing + girginospanel-ftp-setup ERROR — manually: girginospanel-ftp-setup"
   fi
   # Kimlik modu hizalandıktan SONRA: etkin ama durmuş pure-ftpd'yi başlat (FTP-1).
   ftp_servis_canlandir
@@ -1105,16 +1142,16 @@ if command -v girginospanel-dogrula >/dev/null 2>&1; then
   girginospanel-dogrula --kisa || DOGRULAMA_KODU=$?
 else
   # Arac yoksa "dogrulandi" sayilamaz.
-  warn "girginospanel-dogrula yok — guncelleme DOGRULANAMADI"
+  warn "girginospanel-dogrula missing — update NOT VERIFIED"
   DOGRULAMA_KODU=1
 fi
 if [ "$DOGRULAMA_KODU" -ne 0 ]; then
-  die "guncelleme uygulandi ama DOGRULAMA BASARISIZ — yukaridaki ✗ satirlarini duzeltip: girginospanel-dogrula"
+  die "update applied but VERIFICATION FAILED — fix the ✗ lines above, then: girginospanel-dogrula"
 fi
   kapi_adresleri
-  echo -e "${c_g}══ Güncelleme tamam ($CURVER → $NEWVER) — env/DB/siteler korundu ══${c_0}"
+  echo -e "${c_g}══ Update complete ($CURVER → $NEWVER) — env/DB/sites preserved ══${c_0}"
 else
-  warn "yeni sürüm sağlıklı başlamadı — ESKİ binary'ye + güncelleme öncesi DB'ye dönülüyor"
+  warn "the new version did not start healthy — rolling back to the OLD binary + the pre-update DB"
   install -m 0755 "$BIN.bak" "$BIN"
   [ -f "$SEED.bak" ] && install -m 0755 "$SEED.bak" "$SEED" 2>/dev/null || true
   command -v restorecon >/dev/null && restorecon "$BIN" >/dev/null 2>&1 || true
@@ -1138,7 +1175,7 @@ else
   # 10e'nin geçirdiği birimi geri koy: ESKİ ikili kimlikli birimle açılamaz (sırları
   # yalnız ortamdan okur). env dosyası hiç değişmedi → eski birim + eski ikili tam eski hal.
   if [ "$SIR_BIRIM_YENI" = 1 ] && [ -n "$SIR_ARAC" ]; then
-    bash "$SIR_ARAC" birim-geri || warn "panel birimi geri konamadı — elle: girginospanel-sir birim-geri"
+    bash "$SIR_ARAC" birim-geri || warn "panel unit could not be restored — manually: girginospanel-sir birim-geri"
   fi
 
   # 10c'nin BU koşuda yarattığı kapi.json'u geri al (panel DURMUŞKEN: yeni ikilinin
@@ -1149,28 +1186,28 @@ else
   if [ "$KAPI_YENI" = 1 ] && [ -f "$KAPI_JSON" ]; then
     KAPI_GERI="$KAPI_JSON.geri-alindi.$(date +%Y%m%d%H%M%S)"
     if mv -f "$KAPI_JSON" "$KAPI_GERI"; then
-      ok "bu güncellemenin yarattığı kapi.json geri alındı (yedek: $KAPI_GERI) — tek-port davranışı"
+      ok "kapi.json created by this update was rolled back (backup: $KAPI_GERI) — single-port behavior"
     else
-      warn "kapi.json geri alınamadı — erisim/dogrula kapı modunda sanır; elle: mv $KAPI_JSON $KAPI_GERI"
+      warn "kapi.json could not be rolled back — erisim/dogrula will assume gate mode; manually: mv $KAPI_JSON $KAPI_GERI"
     fi
   fi
 
   if [ -n "$PREDUMP" ] && [ -f "$PREDUMP" ]; then
     if zcat "$PREDUMP" | mysql; then
-      ok "DB güncelleme öncesi yedeğe geri yüklendi ($PREDUMP)"
+      ok "DB restored from the pre-update backup ($PREDUMP)"
       # Dump'ta olmayan (bu güncellemenin göçlerinin yarattığı) tablolar → yedekle + kaldır.
       yeni_tablolari_kenara_al "$PREDUMP" || true
     else
-      warn "DB geri yükleme BAŞARISIZ — dump duruyor, elle: zcat '$PREDUMP' | mysql"
+      warn "DB restore FAILED — the dump is still there, manually: zcat '$PREDUMP' | mysql"
     fi
   else
-    warn "güncelleme öncesi dump bulunamadı — yalnızca binary geri alındı"
+    warn "pre-update dump not found — only the binary was rolled back"
   fi
 
   systemctl restart girginospanel; sleep 3
   if systemctl is-active --quiet girginospanel; then
-    die "rollback yapıldı — panel ESKİ sürüm + ESKİ DB ile ayakta. Yeni sürüm hatası: journalctl -u girginospanel -n 40"
+    die "rollback done — the panel is up on the OLD version + OLD DB. New-version error: journalctl -u girginospanel -n 40"
   else
-    die "KRİTİK: rollback sonrası da panel kalkmadı — journalctl -u girginospanel -n 40 (DB yedeği: $PREDUMP)"
+    die "CRITICAL: the panel did not come up after the rollback either — journalctl -u girginospanel -n 40 (DB backup: $PREDUMP)"
   fi
 fi

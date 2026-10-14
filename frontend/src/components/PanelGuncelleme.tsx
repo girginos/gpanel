@@ -62,12 +62,13 @@ function bitisSonucu(logMetin: string, calis: boolean, durum: string): 'tamam' |
   // 🔴 Verdict UNIT durumundan (kesin exit sinyali) alinir — log regex DEGIL.
   // Eski regex, aciklama metnindeki "auto-rollback" / "✗" kelimesini yakalayip
   // unit exit=0 (BASARILI) olsa bile YANLIS "basarisiz" veriyordu. Ozellikle panel
-  // zaten guncelken "Güncelleme tamam" sentinel'i yazilmaz, sadece heal/aciklama
+  // zaten guncelken "Güncelleme tamam"/"Update complete" sentinel'i yazilmaz, sadece heal/aciklama
   // metni kalir. Simdi: durum='failed' => gercek hata; aksi halde bitti => tamam.
   if (calis) return null
   if (durum === 'failed') return 'hata'
   if (
     logMetin.includes('Güncelleme tamam') ||
+    logMetin.includes('Update complete') || // girginospanel-update artık İngilizce yazıyor (eski betik: Türkçe)
     logMetin.includes('Güncelleme başlatıldı') ||
     durum === 'inactive' ||
     durum === 'dead'

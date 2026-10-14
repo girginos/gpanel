@@ -2,9 +2,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"girginospanel/internal/kapi"
 )
@@ -218,8 +223,18 @@ func TestKapiCLIRolPortYenidenBaslatma(t *testing.T) {
 				istenen = append(istenen, rol, p)
 				return 21001, 24004, c.hata
 			}
-			if kod := kapiCLI([]string{"rol-port", kapi.Admin, "24004"}); kod != c.kod {
+			kod := 0
+			cikti := stdoutYakala(t, func() { kod = kapiCLI([]string{"rol-port", kapi.Admin, "24004"}) })
+			if kod != c.kod {
 				t.Fatalf("kod=%d, beklenen %d", kod, c.kod)
+			}
+			// Belgeli çıktı (cli-envanter.json): "<rol> gate: ESKİ → YENİ" + açık kalan eski yönetici portu.
+			if c.ad == "degisti" {
+				for _, istenen := range []string{"admin gate: 21001 → 24004", "previous admin port :21001 stays OPEN"} {
+					if !strings.Contains(cikti, istenen) {
+						t.Errorf("çıktıda %q yok: %q", istenen, cikti)
+					}
+				}
 			}
 			if len(istenen) != 2 || istenen[0] != kapi.Admin || istenen[1] != 24004 {
 				t.Fatalf("rol/port aynen iletilmeli: %v", istenen)
@@ -258,5 +273,65 @@ func TestKapiCLIEskiKapi(t *testing.T) {
 	}
 	if kod := kapiCLI([]string{"eski-kapat", "--zorla"}); kod != 0 || *baslat != 2 {
 		t.Fatalf("--zorla kapatmalı ve yeniden başlatmalı: kod=%d baslat=%d", kod, *baslat)
+	}
+}
+
+// stdoutYakala: f çalışırken os.Stdout'a yazılanları döndürür (CLI çıktısı sözleşme testleri için).
+func stdoutYakala(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	eski := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = eski }()
+	f()
+	w.Close()
+	b, _ := io.ReadAll(r)
+	r.Close()
+	return string(b)
+}
+
+// Betik sözleşmesi: girginospanel-install.sh ve girginospanel-update, `kapi durum` çıktısındaki
+// eski-kapı satırını `grep -E '^  (eski|old) '` ile bulur (kurulum/güncelleme özetindeki "eski
+// adres açık" uyarısı). kapiYazdir bu satırı üretmeyi bırakırsa uyarı SESSİZCE kaybolur.
+func TestKapiYazdir_EskiKapiSatiriBetiklerleUyumlu(t *testing.T) {
+	a := &kapi.Ayar{Admin: 21001, Bayi: 21002, Musteri: 21003, EskiPortlar: []int{8443},
+		EskiBitis: time.Now().Add(7 * 24 * time.Hour).Unix()}
+	cikti := stdoutYakala(t, func() { kapiYazdir(a) })
+	if !regexp.MustCompile(`(?m)^  (eski|old) `).MatchString(cikti) {
+		t.Fatalf("kapi durum çıktısında '  old ' satırı yok (betikler bunu grep'ler):\n%s", cikti)
+	}
+	if !strings.Contains(cikti, "8443") {
+		t.Errorf("eski kapı satırı portu içermeli:\n%s", cikti)
+	}
+	for _, yol := range []string{"../../girginospanel-install.sh", "../../assets/ops/girginospanel-update"} {
+		b, err := os.ReadFile(yol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), `grep -E '^  (eski|old) '`) {
+			t.Errorf("%s: eski-kapı grep kalıbı '^  (eski|old) ' değil — kapi durum çıktısıyla uyumsuz", yol)
+		}
+	}
+}
+
+// kapiHata: bilinen kütüphane hataları CLI'da İngilizce basılır; sarılmış olsalar da çevrilir,
+// bilinmeyenler olduğu gibi geçer.
+func TestKapiHata_SentinelCevirisi(t *testing.T) {
+	for _, c := range []struct {
+		err error
+		bek string
+	}{
+		{kapi.ErrYok, "gate mode is not configured"},
+		{fmt.Errorf("sarılmış: %w", kapi.ErrAyniPort), "no change"},
+		{kapi.ErrEskiYok, "no open old gate"},
+		{&kapi.AdminDogrulanmadiHatasi{AdminPort: 21001}, ":21001"},
+		{errors.New("bilinmeyen kütüphane hatası"), "bilinmeyen kütüphane hatası"},
+	} {
+		if g := kapiHata(c.err); !strings.Contains(g, c.bek) {
+			t.Errorf("kapiHata(%v)=%q, %q içermeli", c.err, g, c.bek)
+		}
 	}
 }

@@ -11,6 +11,9 @@ func resetAvailCache() {
 	availMu.Lock()
 	availCache = map[string]bool{}
 	availMu.Unlock()
+	// Hermetik: sweepOnce'ın "ikili diskte → dnf'e sorma" kısayolu test makinesinin gerçek
+	// /opt/remi dizinine bağlı olmasın (181'de Remi PHP kurulu olabilir).
+	phpKuruluMu = func(SurumMeta) bool { return false }
 }
 
 // TestPaketMevcutCacheOnly: istek path'inin (paketMevcut / TumSurumler) ASLA dnf çağırmadığını,

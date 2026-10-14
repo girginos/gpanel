@@ -203,7 +203,7 @@ func Coz(dst io.Writer, src io.Reader, anahtarMetni io.Reader) error {
 		if errors.As(err, &yanlis) {
 			return ErrAnahtarUymuyor
 		}
-		return fmt.Errorf("şifre çözülemedi: %w", err)
+		return fmt.Errorf("could not decrypt: %w", err)
 	}
 	_, err = io.Copy(dst, r)
 	return err
@@ -211,7 +211,7 @@ func Coz(dst io.Writer, src io.Reader, anahtarMetni io.Reader) error {
 
 var (
 	// ErrAnahtarOkunamadi — anahtar dosyasında geçerli bir age özel anahtarı yok.
-	ErrAnahtarOkunamadi = errors.New("anahtar dosyasında geçerli bir age özel anahtarı yok")
+	ErrAnahtarOkunamadi = errors.New("the key file has no valid age private key")
 	// ErrAnahtarUymuyor — verilen anahtar bu dosyayı çözmüyor.
-	ErrAnahtarUymuyor = errors.New("bu anahtar dosyayı çözmüyor (yanlış anahtar)")
+	ErrAnahtarUymuyor = errors.New("this key does not decrypt the file (wrong key)")
 )

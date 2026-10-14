@@ -40,6 +40,10 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"musteri.adina_kod": {TR: "Müşteri paneline giriş", EN: "Customer panel access", teknik: true,
 		gereksizNot: []string{"müşteri paneline giriş kodu üretildi"}},
 	"musteri.sso_kod": {TR: "API anahtarıyla müşteri girişi", EN: "Customer sign-in via API key"},
+	// Bayi paneline tek tık giriş (internal/bayisso): kod üretimi (kök anahtarı) + giriş.
+	"bayi.sso_kod":        {TR: "API anahtarıyla bayi paneline giriş", EN: "Reseller panel sign-in via API key"},
+	"auth.sso":            {TR: "Tek tıkla giriş (API anahtarı)", EN: "One-click sign-in (API key)"},
+	"auth.sso.marka_host": {TR: "Tek tık giriş reddi: yanlış panel adresi", EN: "One-click sign-in rejected: wrong panel address"},
 	"musteri.adina_oturum": {TR: "Müşteri paneline girildi", EN: "Entered customer panel",
 		gereksizNot: []string{"müşteri adına oturum açıldı"}},
 	"musteri.adina_cikis": {TR: "Müşteri panelinden çıkıldı", EN: "Left customer panel",
@@ -89,6 +93,26 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"hosting.ozel_plan":                {TR: "Özel plan uygulandı", EN: "Custom plan applied"},
 	"hosting.toplu_durum":              {TR: "Toplu durum değişikliği", EN: "Bulk status change"},
 	"hosting.sahip_devir":              {TR: "Hosting sahibi değişti", EN: "Hosting owner changed"},
+	"hosting.php_surum":                {TR: "PHP sürümü değiştirildi", EN: "PHP version changed"},
+	"subdomain.php_surum":              {TR: "Alt alan PHP sürümü değiştirildi", EN: "Subdomain PHP version changed"},
+	"subdomain.ssl.kur":                {TR: "Alt alan SSL kurulumu", EN: "Subdomain SSL installation"},
+	"subdomain.ssl.kaldir":             {TR: "Alt alan SSL kaldırıldı", EN: "Subdomain SSL removed"},
+	"ssl.kur":                          {TR: "SSL kurulumu başlatıldı", EN: "SSL installation started"},
+	"ssl.kur_sonuc":                    {TR: "SSL kurulumu sonuçlandı", EN: "SSL installation finished"},
+	"ssl.kaldir":                       {TR: "SSL kaldırıldı", EN: "SSL removed"},
+	"ssl.dns_yenile":                   {TR: "SSL için DNS denetimi yenilendi", EN: "DNS check for SSL refreshed"},
+
+	// DNS (internal/dns): kayıt yazma uçları. Zone yazımı başarısız olup değişiklik geri
+	// alındığında kayıt ok=false düşer.
+	"dns.kayit.ekle":      {TR: "DNS kaydı eklendi", EN: "DNS record added"},
+	"dns.kayit.guncelle":  {TR: "DNS kaydı güncellendi", EN: "DNS record updated"},
+	"dns.kayit.sil":       {TR: "DNS kaydı silindi", EN: "DNS record deleted"},
+	"dns.toplu.sil":       {TR: "DNS kayıtları toplu silindi", EN: "DNS records bulk deleted"},
+	"dns.toplu.durum":     {TR: "DNS kayıtlarının durumu toplu değiştirildi", EN: "DNS records status changed in bulk"},
+	"dns.sablon.uygula":   {TR: "DNS şablonu uygulandı", EN: "DNS template applied"},
+	"dns.soa.guncelle":    {TR: "DNS SOA ayarları güncellendi", EN: "DNS SOA settings updated"},
+	"dns.dnssec.degistir": {TR: "DNSSEC ayarı değiştirildi", EN: "DNSSEC setting changed"},
+	"dns.ice_aktar":       {TR: "DNS bölge dosyası içe aktarıldı", EN: "DNS zone file imported"},
 
 	// Veritabanı
 	"db.olustur":             {TR: "Veritabanı oluşturuldu", EN: "Database created"},
@@ -96,6 +120,7 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"db.parola":              {TR: "Veritabanı parolası değiştirildi", EN: "Database password changed"},
 	"db.kullanici-olustur":   {TR: "Veritabanı kullanıcısı oluşturuldu", EN: "Database user created"},
 	"db.optimize":            {TR: "Veritabanı iyileştirildi", EN: "Database optimized"},
+	"php_surum.duzeltildi":   {TR: "Geçersiz PHP sürümü kaydı düzeltildi", EN: "Invalid PHP version record corrected"},
 	"db.parola-kayit-esitle": {TR: "Veritabanı parolası panel kaydına eşitlendi", EN: "Database password record synced"},
 	"db.parola_api":          {TR: "Veritabanı parolası API ile değiştirildi", EN: "Database password changed via API"},
 
@@ -117,6 +142,9 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"bayi.askiya_al":  {TR: "Bayi askıya alındı", EN: "Reseller suspended"},
 	"bayi.askidan_al": {TR: "Bayi askıdan alındı", EN: "Reseller unsuspended"},
 	"bayi.parola":     {TR: "Bayi parolası değiştirildi", EN: "Reseller password changed"},
+	// Bayi kaynak havuzu (CPU/RAM/disk/G-Ç): yönetici eylemleri.
+	"bayi.kaynak_uygula":           {TR: "Bayi kaynak havuzu yeniden uygulandı", EN: "Reseller resource pool re-applied"},
+	"bayi.disk_kotasi_etkinlestir": {TR: "Disk havuzu sert sınırı etkinleştirildi", EN: "Disk pool hard limit enabled"},
 
 	// Plan
 	"plan.olustur":            {TR: "Plan oluşturuldu", EN: "Plan created"},
@@ -125,10 +153,18 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"plan.varsayilan":         {TR: "Varsayılan plan değiştirildi", EN: "Default plan changed"},
 	"plan.varsayilan_olustur": {TR: "Varsayılan bayi planı oluşturuldu", EN: "Default reseller plan created"},
 
+	// Bayi paketi (reseller_plans: bayiye tanınan domain/disk/trafik kotası)
+	"bayi_paketi.olustur":  {TR: "Bayi paketi oluşturuldu", EN: "Reseller package created"},
+	"bayi_paketi.guncelle": {TR: "Bayi paketi güncellendi", EN: "Reseller package updated"},
+	"bayi_paketi.sil":      {TR: "Bayi paketi silindi", EN: "Reseller package deleted"},
+
 	// Yedek
 	"yedek.geriyukle":           {TR: "Yedek geri yüklendi", EN: "Backup restored"},
 	"yedek.sil.lftp-yok":        {TR: "Yedek silindi, uzak kopya kaldı", EN: "Backup deleted, remote copy kept", gereksizNot: []string{"uzak kopya kaldı"}},
 	"yedek.sil.uzak-yoksayildi": {TR: "Yedek silindi, uzak kopya bırakıldı", EN: "Backup deleted, remote copy kept"},
+	"yedek.baslat":              {TR: "Yedek alma başlatıldı", EN: "Backup started"},
+	"yedek.sil":                 {TR: "Yedek silindi", EN: "Backup deleted"},
+	"yedek.zamanlama":           {TR: "Yedek zamanlaması değişti", EN: "Backup schedule changed"},
 	// Silinmiş hesap yedekleri (hosting/bayi silinince yedekler saklanır; yönetici yönetir)
 	"silinen-yedek.bagla":          {TR: "Silinmiş hesap yedekleri hostinge bağlandı", EN: "Deleted-account backups attached to hosting"},
 	"silinen-yedek.indir":          {TR: "Silinmiş hesap yedeği indirildi", EN: "Deleted-account backup downloaded"},
@@ -155,6 +191,14 @@ var eylemKatalogu = map[string]EylemEtiket{
 	"yedek.uzak.toplu":             {TR: "Mevcut yedekler uzağa sıraya alındı", EN: "Existing backups queued for remote copy"},
 	"yedek.uzak.yerel_sil":         {TR: "Sunucudaki kopyayı silme ayarı değişti", EN: "Delete server copy setting changed"},
 	"yedek.uzak.yerel_temizle":     {TR: "Mevcut yedeklerin sunucudaki kopyası temizlendi", EN: "Server copies of existing backups cleaned up"},
+
+	// MariaDB CPU kısıcısı (arka plan; internal/dbgovernor)
+	"db.cpu_kisit":         {TR: "Veritabanı CPU kısıtı uygulandı", EN: "Database CPU throttle applied"},
+	"db.cpu_kisit_yukselt": {TR: "Veritabanı CPU kısıtı sertleştirildi", EN: "Database CPU throttle escalated"},
+	"db.cpu_kisit_kaldir":  {TR: "Veritabanı CPU kısıtı kaldırıldı", EN: "Database CPU throttle lifted"},
+	"db.cpu_baglanti_kes":  {TR: "Veritabanı bağlantıları kesildi", EN: "Database connections killed"},
+	"db.cpu_asim_gozlem":   {TR: "Veritabanı CPU eşiği aşıldı (gözlem)", EN: "Database CPU threshold exceeded (observe)"},
+	"db.cpu_kisici_mod":    {TR: "Veritabanı CPU kısıcısı modu değişti", EN: "Database CPU throttler mode changed"},
 
 	// Taşıma
 	"tasima_baslat":     {TR: "Taşıma başlatıldı", EN: "Migration started"},

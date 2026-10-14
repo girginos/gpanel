@@ -108,21 +108,24 @@
       </div>
 
       <div class="gpca-eylem">
-        {if $tur neq 'bayi'}
+        {* Tek tık giriş (WHMCS SSO): hosting → müşteri paneli; bayi → bayi paneli + bayinin kendi hostingi.
+           Düz panel bağlantısı yok: tek tık giriş kullanılamazsa (eski panel / izin yok) WHMCS müşteriyi
+           zaten düz panel adresine yönlendirir. *}
+        {if $tur neq 'bayi' || $hesap}
           {if $hesap && $hesap.durum eq 'askida'}
-            <span class="gpca-btn pasif" aria-disabled="true">{$L.panele_giris|escape}</span>
+            <span class="gpca-btn pasif" aria-disabled="true">{if $tur eq 'bayi'}{$L.bayi_giris|escape}{else}{$L.panele_giris|escape}{/if}</span>
           {else}
             <a class="gpca-btn birincil" href="clientarea.php?action=productdetails&amp;id={$serviceid|escape}&amp;dosinglesignon=1" target="_blank" rel="noopener" title="{$L.yeni_sekme|escape}">
-              {$L.panele_giris|escape}
+              {if $tur eq 'bayi'}{$L.bayi_giris|escape}{else}{$L.panele_giris|escape}{/if}
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
             </a>
+            {if $tur eq 'bayi' && $bayi_hosting}
+              <a class="gpca-btn birincil" href="clientarea.php?action=productdetails&amp;id={$serviceid|escape}&amp;dosinglesignon=1&amp;gp_hedef=hosting" target="_blank" rel="noopener" title="{$L.yeni_sekme|escape}">
+                {$L.hosting_giris|escape}
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+              </a>
+            {/if}
           {/if}
-        {/if}
-        {if $panel_url}
-          <a class="gpca-btn {if $tur eq 'bayi'}birincil{else}ikincil{/if}" href="{$panel_url|escape}" target="_blank" rel="noopener noreferrer" title="{$L.yeni_sekme|escape}">
-            {if $tur eq 'bayi'}{$L.bayi_paneli|escape}{else}{$L.panele_git|escape}{/if}
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-          </a>
         {/if}
       </div>
     </div>
@@ -158,6 +161,11 @@
           <div class="gpca-satir"><dt>{$L.kullanici|escape}</dt><dd><span class="gpca-kod">{$hesap.ad|escape}</span></dd></div>
           <div class="gpca-satir"><dt>{$L.plan|escape}</dt><dd>{$hesap.plan|escape}</dd></div>
           <div class="gpca-satir"><dt>{$L.alan_sayisi|escape}</dt><dd>{$hesap.alan_sayisi|escape}{if $hesap.max_domain} / {$hesap.max_domain|escape}{else} / {$L.sinirsiz|escape}{/if}</dd></div>
+          {if $bayi_hosting}
+            <div class="gpca-satir"><dt>{$L.alan_adi|escape}</dt><dd>{$bayi_hosting.alan|escape}</dd></div>
+            <div class="gpca-satir"><dt>{$L.ftp_host|escape}</dt><dd><span class="gpca-kod">{$bayi_hosting.ftp_host|escape}</span></dd></div>
+            <div class="gpca-satir"><dt>{$L.ftp_user|escape}</dt><dd><span class="gpca-kod">{$bayi_hosting.ftp_user|escape}</span></dd></div>
+          {/if}
         {else}
           <div class="gpca-satir"><dt>{$L.alan_adi|escape}</dt><dd>{$hesap.ad|escape}</dd></div>
           <div class="gpca-satir"><dt>{$L.ip|escape}</dt><dd><span class="gpca-kod">{$hesap.ipv4|escape}</span></dd></div>
@@ -171,8 +179,8 @@
     </div>
   {/if}
 
-  {* ── Parola ── *}
-  {if $tur neq 'bayi'}
+  {* ── Parola (tek form): hosting → panel + FTP; bayi → bayi paneli + bayinin hostingi (bağlı hesapta) ── *}
+  {if $tur neq 'bayi' || $hesap}
     <div class="gpca-kart">
       <details>
         <summary>
@@ -193,14 +201,11 @@
             <input type="password" id="gpanel-yeni-parola2" name="yeni_parola2" minlength="12" maxlength="128" required autocomplete="new-password">
           </div>
           <div class="gpca-form-alt">
-            <p>{$L.parola_kural|escape} {$L.parola_kapsam|escape}</p>
+            <p>{$L.parola_kural|escape} {if $tur eq 'bayi'}{$L.bayi_parola_kapsam|escape}{else}{$L.parola_kapsam|escape}{/if}</p>
             <button type="submit" class="gpca-btn birincil">{$L.parola_gonder|escape}</button>
           </div>
         </form>
       </details>
     </div>
-  {else}
-    <p class="gpca-ipucu">{$L.bayi_parola_not|escape}</p>
   {/if}
-
 </div>

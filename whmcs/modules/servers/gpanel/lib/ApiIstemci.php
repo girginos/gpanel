@@ -195,7 +195,41 @@ final class ApiIstemci
         return $this->istek('POST', '/domains/' . $id . '/sso', [], [], 'sso');
     }
 
-    /** @return array<int,array<string,mixed>> */
+    /**
+     * Bayi paneline tek tık giriş: 60 sn geçerli, tek kullanımlık giriş adresi
+     * (POST /resellers/{id}/sso; yalnız kök anahtarı, izin sso + bayi:yaz). Eski panelde uç
+     * yoktur (404).
+     *
+     * @return array<string,mixed>
+     */
+    public function bayiSso(int $id): array
+    {
+        return $this->istek('POST', '/resellers/' . $id . '/sso', [], [], 'sso');
+    }
+
+    /**
+     * Bayi panel parolasını sıfırla (PUT /resellers/{id}/password; yalnız kök anahtarı, AYRI
+     * bayi.parola izni). Panel bayinin açık oturumlarını düşürür, API anahtarlarını iptal eder.
+     * Eski panelde uç yoktur (404, panel mesajı boş).
+     *
+     * @return array<string,mixed>
+     */
+    public function bayiParolaSifirla(int $id, string $parola): array
+    {
+        return $this->istek('PUT', '/resellers/' . $id . '/password', ['parola' => $parola], [], 'bayi.parola');
+    }
+
+    /**
+     * Bayi kaynak havuzu durumu: havuz limitleri (cpu_cekirdek, ram_mb, disk_mb) + anlık
+     * kullanım (GET /bayi-kaynak/{id}; gPanel 0.3.0-20261013+, izin bayi:oku).
+     *
+     * @return array<string,mixed>
+     */
+    public function bayiKaynak(int $id): array
+    {
+        return $this->istek('GET', '/bayi-kaynak/' . $id, null, [], 'bayi');
+    }
+
     public function bayiler(): array
     {
         return $this->liste($this->istek('GET', '/resellers', null, [], 'bayi'));

@@ -275,7 +275,7 @@ export default function ApiAnahtarlariPage() {
           {cevir('Parola uçlarında gövde boş bırakılırsa ("password" gönderilmezse) sunucu güçlü bir parola üretir ve yanıtta yalnız bir kez döndürür. FTP ve veritabanı parolaları birbirinden bağımsızdır; biri değişince öteki değişmez.')}
         </p>
         <UyariKutusu ton="bilgi" kucuk className="mt-4">
-          {cevir('Anahtar giriş, parola/2FA değişikliği, phpMyAdmin oturumu ve anahtar yönetimi gibi oturum açan ya da kimlik değiştiren uçlara hiçbir izinle erişemez. Tek istisna: "Müşteri paneline tek tık giriş" izni (60 sn geçerli, tek kullanımlık bağlantı; müşteri parolası değiştirilemez).')}
+          {cevir('Anahtar giriş, parola/2FA değişikliği, phpMyAdmin oturumu ve anahtar yönetimi gibi oturum açan ya da kimlik değiştiren uçlara hiçbir izinle erişemez. İstisnalar ayrı izin ister: "Müşteri paneline tek tık giriş" (60 sn geçerli, tek kullanımlık bağlantı; kökte bayi paneline de) ve kökte "Bayi parolası sıfırla".')}
           {' '}{cevir('Bayi parolası sıfırlandığında ya da bayi silindiğinde o bayinin tüm anahtarları iptal edilir. Bayi askıya alındığında anahtarları iptal edilmez, askıda kalır; bayi askıdan alınınca yeniden çalışır.')}
         </UyariKutusu>
       </section>

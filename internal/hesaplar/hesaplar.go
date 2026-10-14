@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // RandomParola: URL-safe alphanumeric parola (default 20 karakter)
@@ -383,7 +384,15 @@ func sqlKac(s string) string {
 
 // ParolaGecerli: parola tek-satir mi? chpasswd/mysql satir-enjeksiyonunu engeller.
 func ParolaGecerli(pw string) bool {
-	return !strings.ContainsAny(pw, "\r\n\x00")
+	// Satır sonu ve NUL dahil HER denetim (kontrol) karakteri: TAB, U+0001…U+001F, U+007F,
+	// U+0080…U+009F. Eskiden yalnız \r \n \x00 reddediliyor, TAB/U+0001/U+007F kabul ediliyordu;
+	// belge ve ileti "denetim karakteri" diyordu (VM doğrulaması 2026-10-13).
+	for _, r := range pw {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 var (

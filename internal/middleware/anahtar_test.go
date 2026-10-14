@@ -7,6 +7,7 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +43,7 @@ func akKur(t *testing.T) (*akSahne, http.Handler) {
 		return s.kayitlar[onek], nil
 	}
 	anahtarIstemciIP = func(*http.Request) string { return s.ip }
-	anahtarSonKullanim = func(int64, string) {}
+	anahtarSonKullanim = func(*sql.DB, int64, string) {}
 	anahtarRedDenetim = func(_ *http.Request, _ *apianahtar.Kayit, neden string) { s.redler = append(s.redler, neden) }
 	kapiCoz = func(*http.Request) string { return "" }
 	akSifirla()
@@ -505,5 +506,38 @@ func TestAnahtarKullaniciAdiKilit(t *testing.T) {
 		if w := akIstekHam(h, "GET", "/api/v1/domains", "gosp bayi7:"+bayi); w.Code != 429 {
 			t.Errorf("eski=%v: 20 hatalı denemeden sonra IP kilitlenmeli: %d", eski, w.Code)
 		}
+	}
+}
+
+// Son kullanım yazımı goroutine'de çalışır; DB İSTEK anında yakalanmalı. Goroutine global scopeDB'yi
+// sonradan okusaydı Init ile yarışırdı (bayisso testi -race altında yük varken düşüyordu): burada istek
+// biter bitmez Init değişir, goroutine ancak SONRA çalışır ve yine isteğin gördüğü DB'yi almalıdır.
+func TestAnahtarSonKullanimDBIstekAnindaYakalanir(t *testing.T) {
+	s, h := akKur(t)
+	sonKullanimSeyrek.mu.Lock()
+	sonKullanimSeyrek.son = map[int64]time.Time{}
+	sonKullanimSeyrek.mu.Unlock()
+	istekDB := &sql.DB{}
+	Init(istekDB)
+	t.Cleanup(func() { Init(nil) })
+	birak := make(chan struct{})
+	gelen := make(chan *sql.DB, 1)
+	anahtarSonKullanim = func(db *sql.DB, _ int64, _ string) {
+		<-birak
+		gelen <- db
+	}
+	kok := s.akEkle(t, apianahtar.RolKok, 1, []string{"hesap:oku"}, kokIP, nil)
+	if w := akIstek(h, "GET", "/api/v1/domains", kok); w.Code != 200 {
+		t.Fatalf("kök: %d %s", w.Code, w.Body)
+	}
+	Init(nil) // istek bitti; goroutine henüz bekliyor
+	close(birak)
+	select {
+	case db := <-gelen:
+		if db != istekDB {
+			t.Fatalf("son kullanım isteğin DB'sini almalı: %p, beklenen %p", db, istekDB)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("son kullanım yazımı çağrılmadı")
 	}
 }

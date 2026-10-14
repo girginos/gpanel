@@ -505,6 +505,9 @@ var anahtarSozlugu = map[string]anahtarBilgi{
 	"max_disk_mb":          {iki{"Disk kotası", "Disk quota"}, false},
 	"trafik":               {iki{"Trafik kotası", "Traffic quota"}, false},
 	"max_trafik_mb":        {iki{"Trafik kotası", "Traffic quota"}, false},
+	"cpu_cekirdek":         {iki{"İşlemci çekirdeği", "Processor cores"}, false},
+	"ram_mb":               {iki{"Bellek (RAM)", "Memory (RAM)"}, false},
+	"io_agirlik":           {iki{"Disk G/Ç ağırlığı", "Disk I/O weight"}, false},
 	"asim":                 {iki{"Aşım ilkesi", "Overage policy"}, false},
 	"fazla_satis":          {iki{"Fazla satış", "Overselling"}, false},
 	"durum":                {iki{"Durum", "Status"}, false},
@@ -514,6 +517,9 @@ var anahtarSozlugu = map[string]anahtarBilgi{
 	"sebep":                {iki{"Sebep", "Reason"}, false},
 	"hata":                 {iki{"Hata", "Error"}, false},
 	"aralik_sayisi":        {iki{"Aralık sayısı", "Range count"}, false},
+	"siklik":               {iki{"Sıklık", "Frequency"}, false},
+	"saklama":              {iki{"Saklanan yedek sayısı", "Backups kept"}, false},
+	"mail_ssl":             {iki{"Posta sertifikası", "Mail certificate"}, false},
 	"dosya":                {iki{"Dosya", "File"}, true},
 	"yol":                  {iki{"Yol", "Path"}, true},
 	"is":                   {iki{"İş", "Job"}, true},
@@ -543,8 +549,16 @@ func degerBicimi(k, v string) iki {
 	switch k {
 	case "plan", "paket":
 		return planAd(v)
-	case "disk", "max_disk_mb", "trafik", "max_trafik_mb":
+	case "disk", "max_disk_mb", "trafik", "max_trafik_mb", "ram_mb":
 		return boyut(v)
+	case "cpu_cekirdek":
+		if v == "0" {
+			return iki{"sınırsız", "unlimited"}
+		}
+	case "io_agirlik":
+		if v == "0" {
+			return iki{"varsayılan", "default"}
+		}
 	case "domain", "max_domain":
 		if v == "0" {
 			return iki{"sınırsız", "unlimited"}

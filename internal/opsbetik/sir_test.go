@@ -177,7 +177,7 @@ func TestSirIzin_DenetleVeOnar(t *testing.T) {
 	yazMod(t, dbkey, 0o600)
 	// denetle: KRİTİK, dosyalara DOKUNMAZ
 	out, kod := sirKos(t, kok, nil, `sir_izin; exit $?`)
-	if kod != 1 || strings.Count(out, "KRİTİK") < 2 {
+	if kod != 1 || strings.Count(out, "CRITICAL") < 2 {
 		t.Fatalf("kod=%d\n%s", kod, out)
 	}
 	if modu(t, env) != 0o644 {
@@ -267,7 +267,7 @@ func TestGuncelleme_SirAdimSirasi(t *testing.T) {
 	saglikli := strings.Index(s, `if [ "$HEALTHY" = 1 ]; then`)
 	yenile := strings.Index(s, `"$BIN" sir yenile --hepsi`)
 	geri := strings.Index(s, `bash "$SIR_ARAC" birim-geri`)
-	rollback := strings.Index(s, `warn "yeni sürüm sağlıklı başlamadı`)
+	rollback := strings.Index(s, `warn "the new version did not start healthy`)
 	if gecis < 0 || restart < 0 || gecis > restart {
 		t.Errorf("birim geçişi restart'tan önce değil (%d, %d)", gecis, restart)
 	}
@@ -293,7 +293,7 @@ func TestSirIzin_YalnizSahipYanlis(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, kod := sirKos(t, kok, nil, `sir_izin; exit $?`)
-	if kod != 1 || !strings.Contains(out, "sahip") {
+	if kod != 1 || !strings.Contains(out, "owner") {
 		t.Fatalf("yanlış sahip yakalanmadı: %d %s", kod, out)
 	}
 	if _, kod := sirKos(t, kok, nil, `sir_izin --onar; exit $?`); kod != 0 {
@@ -301,5 +301,36 @@ func TestSirIzin_YalnizSahipYanlis(t *testing.T) {
 	}
 	if d := oku(t, p); d.uid != 0 || d.mod.Perm() != 0o600 {
 		t.Errorf("uid=%d mod=%o", d.uid, d.mod.Perm())
+	}
+}
+
+// Betikler arası sözleşme: girginospanel-repair, `girginospanel-sir izin --onar` çıktısındaki
+// "✔ repaired" satırlarını sayarak onarım toplamına ekler. Çıktı dili değişince iki taraf
+// birlikte değişmezse sayaç SESSİZCE 0'da kalır (onarım yapılır ama raporlanmaz).
+func TestSirIzin_OnarCiktisiRepairSayimiylaUyumlu(t *testing.T) {
+	repair, err := os.ReadFile(filepath.Join("..", "..", "assets", "ops", "girginospanel-repair"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(repair), `grep -c '✔ repaired'`) {
+		t.Fatal("repair, sir çıktısını `grep -c '✔ repaired'` ile saymıyor")
+	}
+	sir, err := os.ReadFile(sirBetik(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(sir), `echo "  ✔ repaired: `) {
+		t.Fatal("sir izin --onar, repair'in saydığı '✔ repaired' satırını üretmiyor")
+	}
+}
+
+func TestSirIzin_OnarSatiriUretir(t *testing.T) {
+	rootGerek(t)
+	kok := izinKok(t)
+	env := filepath.Join(kok, "etc/girginospanel/env")
+	yazMod(t, env, 0o644)
+	out, kod := sirKos(t, kok, nil, `sir_izin --onar; exit $?`)
+	if kod != 0 || strings.Count(out, "✔ repaired:") < 1 {
+		t.Fatalf("onar çıktısında '✔ repaired:' satırı yok (kod=%d):\n%s", kod, out)
 	}
 }

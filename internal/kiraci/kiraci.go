@@ -32,6 +32,8 @@ import (
 	"regexp"
 	"syscall"
 	"time"
+
+	"girginospanel/internal/bayidilim"
 )
 
 // EvKoku — kiracı ev dizinlerinin kökü (provisioner: useradd -d /home/<sk>).
@@ -76,7 +78,8 @@ type Kiraci struct {
 }
 
 // DilimOnek — kiracı kaynak dilimi adının öneki (kaynaklimit.sliceName ve
-// cgroup.KiraciDizin ile aynı biçim: girginos-<sk>.slice).
+// cgroup.KiraciDizin ile aynı biçim: girginos-<sk>.slice; bayi havuzu üyesi için
+// girginos-bayi<N>-<sk>.slice — bayidilim.Adi).
 const DilimOnek = "girginos-"
 
 // DilimAdi — sk'nin kaynak dilimi birimi; sk panel biçiminde değilse ErrSK.
@@ -85,7 +88,9 @@ func DilimAdi(sk string) (string, error) {
 	if !GecerliSK(sk) {
 		return "", ErrSK
 	}
-	return DilimOnek + sk + ".slice", nil
+	// Bayi kaynak havuzuna üye hosting havuzun İÇİNDEKİ dilime düşer (girginos-bayi<N>-<sk>.slice);
+	// üyelik yoksa eski ad. Bkz. internal/bayidilim.
+	return bayidilim.Adi(sk), nil
 }
 
 // kullaniciBul — Kul çözümü (testler sahte kiracı kullanıcısıyla değiştirir).

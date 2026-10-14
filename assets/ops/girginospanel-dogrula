@@ -49,11 +49,34 @@ esac
 # LC_ALL=C gives byte semantics; that is the correct way to parse ASCII identifiers.
 export LC_ALL=C
 
+# Usage text (English).
+kullanim() {
+  cat <<'KULLANIM'
+girginospanel-dogrula — proves the install/update ACTUALLY works.
+
+Usage:
+  girginospanel-dogrula [--kisa | --json]
+
+Options:
+  (none)      full report: every check on one line
+  --kisa      summary + failures only (used by the installer/updater)
+  --json      machine-readable report (keys: gecen, kritik, uyari, dusenler[seviye, kontrol, detay])
+  -h, --help  show this help
+
+It measures the production path (HTTP codes, real command execution, file access as the
+production user), not the install step. A check that cannot be measured counts as a failure
+or a warning, never as a pass.
+
+Exit codes: 0 = no critical failure (warnings allowed), 1 = at least one critical check failed,
+2 = unknown option.
+KULLANIM
+}
+
 KISA=0; JSON=0
 while [ $# -gt 0 ]; do case "$1" in
   --kisa) KISA=1 ;;
   --json) JSON=1 ;;
-  -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+  -h|--help) kullanim; exit 0 ;;
   # 🔴 An unknown flag is NOT silently swallowed: if a gate types `--jsom` instead of
   # `--json` it would get the text report and see 0. repair does this correctly.
   *) echo "girginospanel-dogrula: unknown option: $1" >&2; exit 2 ;;
@@ -389,9 +412,9 @@ if [ -f "$_kapi_json" ]; then
   if kapi_zorlama_olc; then
     gec "gate enforcement" "ON — $_kz_olcum"
   elif [ "$_kz_durum" = "kapali" ]; then
-    uyar "gate enforcement" "role separation OFF (enforcement KAPALI) — admin login is accepted on the reseller/customer/legacy gates: $_kz_olcum"
+    uyar "gate enforcement" "role separation OFF (enforcement off) — admin login is accepted on the reseller/customer/legacy gates: $_kz_olcum"
   else
-    uyar "gate enforcement" "role separation COULD NOT MEASURE (ölçülemedi) — not counted as passed; admin login may be open on the reseller/customer/legacy gates: $_kz_olcum"
+    uyar "gate enforcement" "role separation COULD NOT MEASURE — not counted as passed; admin login may be open on the reseller/customer/legacy gates: $_kz_olcum"
   fi
 
   # 🔴 Gate ports vs SELinux (RK-OPS-01). In Enforcing, nginx (httpd_t) can only bind
@@ -465,7 +488,7 @@ if [ -f "$_kapi_json" ]; then
             dus "gate SELinux labels" "Enforcing and NOT http_port_t:$_etiketsiz — bound by a listen line in _panel.conf, nginx cannot bind them, the next nginx restart FAILS (all sites down). Fix: girginospanel-server kapi selinux (or semanage port -a -t http_port_t -p tcp <port>)"
           fi
           if [ -n "$_yazilmamis" ]; then
-            uyar "gate SELinux labels" "kapı düzeni uygulanmadı — SELinux etiketi eksik; girginospanel-server kapi selinux. Enforcing and NOT http_port_t:$_yazilmamis — no listen line binds them (the panel did not apply the gate layout: single-port behaviour, nginx restart unaffected)"
+            uyar "gate SELinux labels" "gate layout not applied — SELinux label missing; girginospanel-server kapi selinux. Enforcing and NOT http_port_t:$_yazilmamis — no listen line binds them (the panel did not apply the gate layout: single-port behaviour, nginx restart unaffected)"
           fi
           if [ -z "$_etiketsiz" ] && [ -z "$_yazilmamis" ]; then
             gec "gate SELinux labels" "$_say/$_say gate ports http_port_t (Enforcing)"
@@ -616,7 +639,7 @@ else
   if [ $_sir_rc -eq 0 ]; then
     gec "secret file permissions" "$(printf '%s\n' "$_sir_izin" | tail -1 | sed 's/^ *✓ *//')"
   else
-    dus "secret file permissions" "$(printf '%s\n' "$_sir_izin" | grep 'KRİTİK' | sed 's/^ *//' | head -12 | tr '\n' ';') fix: girginospanel-repair --only sir_izin"
+    dus "secret file permissions" "$(printf '%s\n' "$_sir_izin" | grep 'CRITICAL' | sed 's/^ *//' | head -12 | tr '\n' ';') fix: girginospanel-repair --only sir_izin"
   fi
   if [ -e /etc/girginospanel/.sir-yenile-bekleyen ]; then
     dus "secret rotation" "half-finished rotation marker present — run: girginospanel-server sir kurtar"
@@ -897,7 +920,11 @@ if [ "${AV:-0}" -eq 0 ]; then
 else
   _en_yeni=$(ls -t /var/lib/clamav/*.c[vl]d 2>/dev/null | head -1)
   _yas_gun=$(( ( $(date +%s) - $(stat -c%Y "$_en_yeni" 2>/dev/null || echo 0) ) / 86400 ))
-  if [ "$_yas_gun" -le 7 ]; then
+  # freshclam imzaları clamupdate olarak yazar; dizin başka kullanıcıdaysa güncelleme her seferinde düşer
+  _av_sahip=$(stat -c %U /var/lib/clamav 2>/dev/null)
+  if id clamupdate >/dev/null 2>&1 && [ -n "$_av_sahip" ] && [ "$_av_sahip" != "clamupdate" ]; then
+    uyar "ClamAV signatures" "/var/lib/clamav is owned by '$_av_sahip' — freshclam (clamupdate) cannot write, signatures stop updating (newest $_yas_gun days old); fix: systemctl restart girginospanel (repairs it) or chown -R clamupdate:clamupdate /var/lib/clamav && systemctl restart clamav-freshclam"
+  elif [ "$_yas_gun" -le 7 ]; then
     gec "ClamAV signatures" "$AV signatures · newest $_yas_gun days ago"
   else
     uyar "ClamAV signatures" "$AV signatures but NEWEST is $_yas_gun DAYS OLD — freshclam may not be running"
@@ -1161,6 +1188,10 @@ else
   # Because schema_migrations holds (dosya, sha256, uygulandi), we can also catch drift:
   # if a file was changed but not re-applied, the hash won't match.
   _uyg_eksik=""; _uyg_ok=0; _uyg_top=0; _hash_fark=""
+  # Bilinen ESKİ içerik hash'leri: dosya yayından sonra değişti ve farkı ayrı bir düzeltme göçü kapatıyor,
+  # yeniden uygulama gerekmez (her güncellemede yanlış uyarı vermesin). Satır biçimi: <dosya>=<eski sha256>.
+  #   0078_av_ayarlar.sql 2026-08-18 → 2026-09-16 hali → 0221_av_haric_varsayilan.sql
+  _gecmis_hash="0078_av_ayarlar.sql=96c07d83015559d4fbd404224991fee928a0f1c8fcfe2aa57af8b734d54b2486"
   _uygulanan=$($_PANEL_MYSQL -e "SELECT CONCAT(dosya,'=',sha256) FROM schema_migrations;" 2>/dev/null)
   if [ -z "$_uygulanan" ]; then
     dus "migration records" "schema_migrations UNREADABLE — schema COULD NOT BE VERIFIED"
@@ -1172,7 +1203,13 @@ else
       _sha=$(sha256sum "$_f" 2>/dev/null | awk '{print $1}')
       case "$_uygulanan" in
         *"$_ad=$_sha"*) _uyg_ok=$((_uyg_ok+1)) ;;
-        *"$_ad="*)      _hash_fark="$_hash_fark\n      HASH MISMATCH  $_ad (file changed, not re-applied)" ;;
+        *"$_ad="*)
+          _uyg_sha=$(printf '%s\n' "$_uygulanan" | awk -F= -v a="$_ad" '$1==a{print $2; exit}')
+          if printf '%s\n' "$_gecmis_hash" | grep -qxF "$_ad=$_uyg_sha"; then
+            _uyg_ok=$((_uyg_ok+1))   # bilinen eski içerik; farkı düzeltme göçü kapatıyor
+          else
+            _hash_fark="$_hash_fark\n      HASH MISMATCH  $_ad (file changed, not re-applied)"
+          fi ;;
         *)              _uyg_eksik="$_uyg_eksik\n      NOT-APPLIED $_ad" ;;
       esac
     done
